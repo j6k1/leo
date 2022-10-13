@@ -1,11 +1,15 @@
 use std::{error, fmt, io};
+use std::collections::VecDeque;
 use std::num::{ParseFloatError, ParseIntError};
-use std::sync::mpsc::RecvError;
+use std::sync::mpsc::{RecvError, SendError};
+use std::sync::{MutexGuard, PoisonError};
 use csaparser::error::CsaParserError;
 use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
-use usiagent::error::{EventDispatchError, KifuWriteError, SfenStringConvertError};
+use usiagent::error::{EventDispatchError, SfenStringConvertError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind};
+use usiagent::rule::LegalMove;
+use crate::nn::{Message};
 
 #[derive(Debug)]
 pub enum ApplicationError {
@@ -28,7 +32,12 @@ pub enum ApplicationError {
     DeviceError(DeviceError),
     PersistenceError(PersistenceError),
     CudaError(CudaError),
-    RecvError(RecvError)
+    RecvError(RecvError),
+    NNSendError(SendError<Message>),
+    ResultSendError(SendError<(LegalMove,i32)>),
+    AllResultSendError(SendError<Vec<(f32,f32)>>),
+    EndTransactionSendError(SendError<()>),
+    PoisonError(String)
 }
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -53,6 +62,11 @@ impl fmt::Display for ApplicationError {
             ApplicationError::PersistenceError(ref e) => write!(f,"{}",e),
             ApplicationError::CudaError(ref e) => write!(f, "An error occurred in the process of cuda. ({})",e),
             ApplicationError::RecvError(ref e) => write!(f, "{}",e),
+            ApplicationError::NNSendError(ref e) => write!(f,"{}",e),
+            ApplicationError::ResultSendError(ref e) => write!(f,"{}",e),
+            ApplicationError::AllResultSendError(ref e) => write!(f,"{}",e),
+            ApplicationError::EndTransactionSendError(ref e) => write!(f,"{}",e),
+            ApplicationError::PoisonError(ref s) => write!(f,"{}",s),
         }
     }
 }
@@ -78,7 +92,12 @@ impl error::Error for ApplicationError {
             ApplicationError::DeviceError(_) => "An error occurred during device initialization.",
             ApplicationError::PersistenceError(_) => "An error occurred when saving model information.",
             ApplicationError::CudaError(_) => "An error occurred in the process of cuda.",
-            ApplicationError::RecvError(_) => "An error occurred while receiving the message."
+            ApplicationError::RecvError(_) => "An error occurred while receiving the message.",
+            ApplicationError::NNSendError(_) => "An error occurred in the communication process with the neural network thread.",
+            ApplicationError::ResultSendError(_) => "An error occurred in the process of sending the results of the neural network calculation.",
+            ApplicationError::AllResultSendError(_) => "An error occurred in the process of sending the all results of the neural network calculation.",
+            ApplicationError::EndTransactionSendError(_) => "An error occurred when sending the transaction termination notification.",
+            ApplicationError::PoisonError(_) => "panic occurred during thread execution.",
         }
     }
 
@@ -104,6 +123,11 @@ impl error::Error for ApplicationError {
             ApplicationError::PersistenceError(ref e) => Some(e),
             ApplicationError::CudaError(_) => None,
             ApplicationError::RecvError(ref e) => Some(e),
+            ApplicationError::NNSendError(ref e) => Some(e),
+            ApplicationError::ResultSendError(ref e) =>  Some(e),
+            ApplicationError::AllResultSendError(ref e) => Some(e),
+            ApplicationError::EndTransactionSendError(ref e) => Some(e),
+            ApplicationError::PoisonError(_) => None,
         }
     }
 }
@@ -182,5 +206,30 @@ impl From<CudaError> for ApplicationError {
 impl From<RecvError> for ApplicationError {
     fn from(err: RecvError) -> ApplicationError {
         ApplicationError::RecvError(err)
+    }
+}
+impl From<SendError<Message>> for ApplicationError {
+    fn from(err: SendError<Message>) -> ApplicationError {
+        ApplicationError::NNSendError(err)
+    }
+}
+impl From<SendError<(LegalMove,i32)>> for ApplicationError {
+    fn from(err: SendError<(LegalMove,i32)>) -> ApplicationError {
+        ApplicationError::ResultSendError(err)
+    }
+}
+impl From<SendError<Vec<(f32,f32)>>> for ApplicationError {
+    fn from(err: SendError<Vec<(f32,f32)>>) -> ApplicationError {
+        ApplicationError::AllResultSendError(err)
+    }
+}
+impl From<SendError<()>> for ApplicationError {
+    fn from(err: SendError<()>) -> ApplicationError {
+        ApplicationError::EndTransactionSendError(err)
+    }
+}
+impl From<PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>> for ApplicationError {
+    fn from(err: PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>) -> ApplicationError {
+        ApplicationError::PoisonError(format!("{}",err))
     }
 }

@@ -5,8 +5,9 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc, Mutex};
 use std::{fs, thread};
-use std::fmt::Display;
+use std::collections::VecDeque;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use rand::{prelude, Rng, SeedableRng};
 use rand::prelude::{Distribution};
 use rand_distr::Normal;
@@ -16,7 +17,6 @@ use nncombinator::activation::{ReLu, Tanh};
 use nncombinator::arr::{Arr, VecArr};
 use nncombinator::cuda::mem::{Alloctype, MemoryPool};
 use nncombinator::device::{Device, DeviceGpu};
-use nncombinator::error::EvaluateError;
 use nncombinator::layer::{ActivationLayer, AddLayer, AddLayerTrain, BatchForward, BatchForwardBase, BatchTrain, ForwardAll, InputLayer, LinearLayer, LinearOutputLayer, TryAddLayer};
 use nncombinator::lossfunction::CrossEntropy;
 use nncombinator::ope::UnitValue;
@@ -28,12 +28,11 @@ use packedsfen::{hcpe, yaneuraou};
 use packedsfen::hcpe::haffman_code::GameResult;
 use packedsfen::yaneuraou::reader::PackedSfenReader;
 use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
-use usiagent::error::EventDispatchError;
 use usiagent::event::{EventQueue, GameEndState, UserEvent, UserEventKind};
 use usiagent::rule::LegalMove;
 use usiagent::{OnErrorHandler, SandBox};
 use usiagent::logger::FileLogger;
-use usiagent::shogi::{Banmen, KomaKind, KomaSrcPosition, Mochigoma, MOCHIGOMA_KINDS, MochigomaCollections, MochigomaKind, Move, Teban};
+use usiagent::shogi::{Banmen, KomaKind, Mochigoma, MOCHIGOMA_KINDS, MochigomaCollections, MochigomaKind, Teban};
 use crate::error::ApplicationError;
 
 const BANMEN_SIZE:usize = 81;
@@ -107,7 +106,8 @@ const OPPONENT_INDEX_MAP:[usize; 7] = [
 const SCALE:f32 = 1.;
 pub struct BatchItem {
     m:LegalMove,
-    input:Arr<f32,2517>
+    input:Arr<f32,2517>,
+    sender:Sender<(LegalMove,i32)>
 }
 pub enum Message {
     Eval(Vec<Arr<f32,2517>>),
@@ -129,8 +129,11 @@ impl<T,U,D,P,PT,I,O> BatchNN<U,D,P,PT,I,O> for T
              PT: PersistenceType {}
 pub struct Evalutor {
     sender:Sender<Message>,
+    transaction_sender:Arc<Mutex<VecDeque<Sender<()>>>>,
     receiver:Receiver<Vec<(f32,f32)>>,
-    queue:Arc<Mutex<Vec<BatchItem>>>
+    queue:Arc<Mutex<VecDeque<BatchItem>>>,
+    active_threads:AtomicUsize,
+    wait_threads:AtomicUsize
 }
 impl Evalutor {
     pub fn new(savedir: String,nna_path:String,nnb_path:String,on_error_handler:Arc<Mutex<OnErrorHandler<FileLogger>>>) -> Result<Evalutor,ApplicationError> {
@@ -241,7 +244,7 @@ impl Evalutor {
                             (a[0],b[0])
                         }).collect::<Vec<(f32,f32)>>();
 
-                        ts.send(r);
+                        ts.send(r)?;
                     },
                     Message::Quit => {
                         break;
@@ -253,9 +256,126 @@ impl Evalutor {
 
         Ok(Evalutor {
             sender:s,
+            transaction_sender:Arc::new(Mutex::new(VecDeque::new())),
+            active_threads:AtomicUsize::new(0),
+            wait_threads:AtomicUsize::new(0),
             receiver:r,
-            queue:Arc::new(Mutex::new(Vec::new()))
+            queue:Arc::new(Mutex::new(VecDeque::new()))
         })
+    }
+
+    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>) -> Result<(),ApplicationError>{
+        let input = InputCreator::make_input(true,t,b,mc);
+
+        match self.queue.lock() {
+            Ok(mut queue) => {
+                queue.push_back(BatchItem {
+                    m:m,
+                    input:input,
+                    sender:sender
+                });
+
+                Ok(())
+            },
+            Err(e) => {
+                return Err(ApplicationError::PoisonError(format!("{}",e)));
+            }
+        }
+    }
+
+    pub fn inc_threads(&self) {
+        self.active_threads.fetch_add(1,Ordering::Release);
+    }
+
+    pub fn dec_threads(&self) -> Result<(),ApplicationError> {
+        self.active_threads.fetch_sub(1,Ordering::Release);
+
+        if self.wait_threads.load(Ordering::Acquire) == self.active_threads.load(Ordering::Acquire) {
+            self.start_evaluation()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn begin_transaction(&self) -> Result<Transaction,ApplicationError> {
+        let (s,r) = mpsc::channel();
+
+        match self.transaction_sender.lock() {
+            Ok(mut sender) => {
+                sender.push_back(s);
+            },
+            Err(e) => {
+                return Err(ApplicationError::from(e));
+            }
+        }
+
+        self.wait_threads.fetch_add(1,Ordering::Release);
+
+        if self.wait_threads.load(Ordering::Acquire) == self.active_threads.load(Ordering::Acquire) {
+            self.start_evaluation()?;
+        }
+
+        Ok(Transaction::new(r))
+    }
+
+    pub fn start_evaluation(&self) -> Result<(),ApplicationError> {
+        self.wait_threads.store(0,Ordering::Release);
+
+        let queue = match self.queue.lock() {
+            Ok(mut queue) => {
+                let mut q = Vec::with_capacity(queue.len());
+
+                for item in queue.pop_front() {
+                    q.push(item);
+                }
+
+                q
+            },
+            Err(e) => {
+                return Err(ApplicationError::PoisonError(format!("{}",e)));
+            }
+        };
+
+        let (m,input,s) = queue.into_iter().fold((vec![],vec![],vec![]),|mut acc,item| {
+            acc.0.push(item.m);
+            acc.1.push(item.input);
+            acc.2.push(item.sender);
+
+            acc
+        });
+
+        self.sender.send(Message::Eval(input))?;
+
+        for (r,(m,s)) in self.receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
+            s.send((m.clone(),((r.0 + r.1) * (1 << 21) as f32) as i32))?;
+        }
+
+        match self.transaction_sender.lock() {
+            Ok(mut sender) => {
+                while let Some(s) = sender.pop_front() {
+                    s.send(())?;
+                }
+            },
+            Err(e) => {
+                return Err(ApplicationError::from(e));
+            }
+        }
+
+        Ok(())
+    }
+}
+pub struct Transaction {
+    receiver:Receiver<()>
+}
+impl Transaction {
+    fn new(receiver:Receiver<()>) -> Transaction {
+        Transaction {
+            receiver:receiver
+        }
+    }
+
+    pub fn wait(&self) -> Result<(),ApplicationError>{
+        Ok(self.receiver.recv()?)
     }
 }
 pub struct Trainer<M>
@@ -272,15 +392,7 @@ pub struct Trainer<M>
     bias_shake_shake:bool,
 }
 pub struct TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
-    nna:M,
-    nnb:M,
-    optimizer:MomentumSGD<f32>,
-    nna_path:String,
-    nnb_path:String,
-    nnsavedir:String,
-    packed_sfen_reader:PackedSfenReader,
-    hcpe_reader:HcpeReader,
-    bias_shake_shake:bool,
+    m:PhantomData<M>,
 }
 
 impl<M> TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
@@ -767,12 +879,12 @@ impl<M> Trainer<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,L
         fs::rename(Path::new(&nna_path.join(".tmp")),nna_path.as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-        ))?);
+        ))?)?;
 
         fs::rename(Path::new(&nnb_path.join(".tmp")),nnb_path.as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-        ))?);
+        ))?)?;
 
         Ok(())
     }
