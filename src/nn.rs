@@ -481,7 +481,7 @@ impl<M> TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence
                 nna.load(&mut pa)?;
             }
 
-            let nnb_path = Path::new(&nna_path);
+            let nnb_path = Path::new(&nnb_path);
 
             if save_dir.join(nnb_path).exists() {
                 let mut pb = BinFilePersistence::new(save_dir
