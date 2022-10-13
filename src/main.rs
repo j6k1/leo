@@ -14,6 +14,7 @@ extern crate csaparser;
 extern crate packedsfen;
 
 pub mod error;
+pub mod nn;
 
 fn main() {
 }
