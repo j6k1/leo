@@ -11,12 +11,13 @@ use rand::{prelude, Rng, SeedableRng};
 use rand::prelude::{Distribution};
 use rand_distr::Normal;
 use rand_xorshift::XorShiftRng;
+use rayon::iter::IntoParallelRefIterator;
 use nncombinator::activation::{ReLu, Tanh};
 use nncombinator::arr::{Arr, VecArr};
 use nncombinator::cuda::mem::{Alloctype, MemoryPool};
 use nncombinator::device::{Device, DeviceGpu};
 use nncombinator::error::EvaluateError;
-use nncombinator::layer::{ActivationLayer, AddLayer, AddLayerTrain, BatchForwardBase, BatchTrain, ForwardAll, InputLayer, LinearLayer, LinearOutputLayer, TryAddLayer};
+use nncombinator::layer::{ActivationLayer, AddLayer, AddLayerTrain, BatchForward, BatchForwardBase, BatchTrain, ForwardAll, InputLayer, LinearLayer, LinearOutputLayer, TryAddLayer};
 use nncombinator::lossfunction::CrossEntropy;
 use nncombinator::ope::UnitValue;
 use nncombinator::optimizer::MomentumSGD;
@@ -26,6 +27,7 @@ use packedsfen::traits::Reader;
 use packedsfen::{hcpe, yaneuraou};
 use packedsfen::hcpe::haffman_code::GameResult;
 use packedsfen::yaneuraou::reader::PackedSfenReader;
+use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
 use usiagent::error::EventDispatchError;
 use usiagent::event::{EventQueue, GameEndState, UserEvent, UserEventKind};
 use usiagent::rule::LegalMove;
@@ -103,15 +105,15 @@ const OPPONENT_INDEX_MAP:[usize; 7] = [
     OPPONENT_MOCHIGOMA_HISHA_INDEX
 ];
 const SCALE:f32 = 1.;
-
+pub struct BatchItem {
+    m:LegalMove,
+    input:Arr<f32,2517>
+}
 pub enum Message {
-    Eval(EvalItem),
+    Eval(Vec<Arr<f32,2517>>),
     Quit
 }
-pub struct EvalItem {
-    pub m:LegalMove,
-    pub input:Arr<f32,2517>
-}
+
 pub trait BatchNN<U,D,P,PT,I,O>: ForwardAll<Input=I,Output=O> +
                                  BatchForwardBase<BatchInput=VecArr<U,I>,BatchOutput=VecArr<U,O>> +
                                  BatchTrain<U,D> + Persistence<U,P,PT>
@@ -127,8 +129,8 @@ impl<T,U,D,P,PT,I,O> BatchNN<U,D,P,PT,I,O> for T
              PT: PersistenceType {}
 pub struct Evalutor {
     sender:Sender<Message>,
-    receiver:Receiver<VecArr<f32,Arr<f32,1>>>,
-    queue:Arc<Mutex<Vec<EvalItem>>>
+    receiver:Receiver<Vec<(f32,f32)>>,
+    queue:Arc<Mutex<Vec<BatchItem>>>
 }
 impl Evalutor {
     pub fn new(savedir: String,nna_path:String,nnb_path:String,on_error_handler:Arc<Mutex<OnErrorHandler<FileLogger>>>) -> Result<Evalutor,ApplicationError> {
@@ -228,6 +230,24 @@ impl Evalutor {
 
                 nnb.load(&mut pb)?;
             }
+
+            loop {
+                match tr.recv()? {
+                    Message::Eval(batch) => {
+                        let ra = nna.batch_forward(batch.clone().into())?;
+                        let rb = nnb.batch_forward(batch.into())?;
+
+                        let r = ra.par_iter().zip(rb.par_iter()).map(|(a,b)| {
+                            (a[0],b[0])
+                        }).collect::<Vec<(f32,f32)>>();
+
+                        ts.send(r);
+                    },
+                    Message::Quit => {
+                        break;
+                    }
+                }
+            }
             Ok(())
         }, on_error_handler));
 
@@ -238,35 +258,34 @@ impl Evalutor {
         })
     }
 }
-pub struct Trainer<'b,M>
+pub struct Trainer<M>
     where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
 
     nna:M,
     nnb:M,
     optimizer:MomentumSGD<f32>,
-    nna_path:&'b Path,
-    nnb_path:&'b Path,
-    nnsavedir:&'b Path,
+    nna_path:String,
+    nnb_path:String,
+    nnsavedir:String,
     packed_sfen_reader:PackedSfenReader,
     hcpe_reader:HcpeReader,
     bias_shake_shake:bool,
 }
-pub struct TrainerCreator<'a,M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+pub struct TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
     nna:M,
     nnb:M,
     optimizer:MomentumSGD<f32>,
-    nna_path:&'a Path,
-    nnb_path:&'a Path,
-    nnsavedir:&'a Path,
-    p:PhantomData<&'a ()>,
+    nna_path:String,
+    nnb_path:String,
+    nnsavedir:String,
     packed_sfen_reader:PackedSfenReader,
     hcpe_reader:HcpeReader,
     bias_shake_shake:bool,
 }
 
-impl<'a,M> TrainerCreator<'a,M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
-    pub fn create(savedir:&'a Path, nna_path:&'a Path, nnb_path:&'a Path, enable_shake_shake:bool)
-                  -> Result<Trainer<'a,impl BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>>>,ApplicationError> {
+impl<M> TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+    pub fn create(save_dir:String, nna_path:String, nnb_path:String, enable_shake_shake:bool)
+                  -> Result<Trainer<impl BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>>>,ApplicationError> {
 
         let mut rnd = prelude::thread_rng();
         let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
@@ -334,26 +353,34 @@ impl<'a,M> TrainerCreator<'a,M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersi
             LinearOutputLayer::new(l,&device)
         });
 
-        if savedir.join(nna_path).exists() {
-            let mut pa = BinFilePersistence::new(savedir
-                .join(nna_path)
-                .as_os_str()
-                .to_str().ok_or(ApplicationError::InvalidSettingError(
-                String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-            ))?)?;
+        {
+            let save_dir = Path::new(&save_dir);
 
-            nna.load(&mut pa)?;
-        }
+            let nna_path = Path::new(&nna_path);
 
-        if savedir.join(nnb_path).exists() {
-            let mut pb = BinFilePersistence::new(savedir
-                .join(nnb_path)
-                .as_os_str()
-                .to_str().ok_or(ApplicationError::InvalidSettingError(
-                String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-            ))?)?;
+            if save_dir.join(nna_path).exists() {
+                let mut pa = BinFilePersistence::new(save_dir
+                    .join(nna_path)
+                    .as_os_str()
+                    .to_str().ok_or(ApplicationError::InvalidSettingError(
+                    String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
+                ))?)?;
 
-            nnb.load(&mut pb)?;
+                nna.load(&mut pa)?;
+            }
+
+            let nnb_path = Path::new(&nna_path);
+
+            if save_dir.join(nnb_path).exists() {
+                let mut pb = BinFilePersistence::new(save_dir
+                    .join(nnb_path)
+                    .as_os_str()
+                    .to_str().ok_or(ApplicationError::InvalidSettingError(
+                    String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
+                ))?)?;
+
+                nnb.load(&mut pb)?;
+            }
         }
 
         Ok(Trainer {
@@ -362,14 +389,14 @@ impl<'a,M> TrainerCreator<'a,M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersi
             optimizer:MomentumSGD::new(0.001),
             nna_path: nna_path,
             nnb_path: nnb_path,
-            nnsavedir:savedir,
+            nnsavedir: save_dir,
             packed_sfen_reader:PackedSfenReader::new(),
             hcpe_reader:HcpeReader::new(),
             bias_shake_shake:enable_shake_shake,
         })
     }
 }
-impl<'b,M> Trainer<'b,M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+impl<M> Trainer<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
     pub fn calc_alpha_beta(bias_shake_shake:bool) -> (f32,f32) {
         if bias_shake_shake {
             let mut rnd = rand::thread_rng();
@@ -718,14 +745,15 @@ impl<'b,M> Trainer<'b,M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<
     }
 
     pub fn save(&mut self) -> Result<(),ApplicationError> {
-        let mut pa = BinFilePersistence::new(self.nna_path
-                                           .as_os_str()
-                                           .to_str().ok_or(ApplicationError::InvalidSettingError(
+        let nna_path = Path::new(&self.nnsavedir).join(&self.nna_path);
+        let nnb_path = Path::new(&self.nnsavedir).join(&self.nnb_path);
+
+        let mut pa = BinFilePersistence::new(&nna_path.as_os_str()
+            .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
 
-        let mut pb = BinFilePersistence::new(self.nnb_path
-            .as_os_str()
+        let mut pb = BinFilePersistence::new(&nnb_path.as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
@@ -733,11 +761,19 @@ impl<'b,M> Trainer<'b,M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<
         self.nna.save(&mut pa)?;
         self.nnb.save(&mut pb)?;
 
-        pa.save(self.nna_path.join(".tmp"))?;
-        pb.save(self.nnb_path.join(".tmp"))?;
+        pa.save(nna_path.join(".tmp"))?;
+        pb.save(nnb_path.join(".tmp"))?;
 
-        fs::rename(self.nna_path.join(".tmp"),self.nna_path);
-        fs::rename(self.nnb_path.join(".tmp"),self.nnb_path);
+        fs::rename(Path::new(&nna_path.join(".tmp")),nna_path.as_os_str()
+            .to_str().ok_or(ApplicationError::InvalidSettingError(
+            String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
+        ))?);
+
+        fs::rename(Path::new(&nnb_path.join(".tmp")),nnb_path.as_os_str()
+            .to_str().ok_or(ApplicationError::InvalidSettingError(
+            String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
+        ))?);
+
         Ok(())
     }
 }

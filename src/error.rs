@@ -1,5 +1,6 @@
 use std::{error, fmt, io};
 use std::num::{ParseFloatError, ParseIntError};
+use std::sync::mpsc::RecvError;
 use csaparser::error::CsaParserError;
 use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
@@ -27,6 +28,7 @@ pub enum ApplicationError {
     DeviceError(DeviceError),
     PersistenceError(PersistenceError),
     CudaError(CudaError),
+    RecvError(RecvError)
 }
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -50,6 +52,7 @@ impl fmt::Display for ApplicationError {
             ApplicationError::DeviceError(ref e) => write!(f,"{}",e),
             ApplicationError::PersistenceError(ref e) => write!(f,"{}",e),
             ApplicationError::CudaError(ref e) => write!(f, "An error occurred in the process of cuda. ({})",e),
+            ApplicationError::RecvError(ref e) => write!(f, "{}",e),
         }
     }
 }
@@ -75,6 +78,7 @@ impl error::Error for ApplicationError {
             ApplicationError::DeviceError(_) => "An error occurred during device initialization.",
             ApplicationError::PersistenceError(_) => "An error occurred when saving model information.",
             ApplicationError::CudaError(_) => "An error occurred in the process of cuda.",
+            ApplicationError::RecvError(_) => "An error occurred while receiving the message."
         }
     }
 
@@ -98,7 +102,8 @@ impl error::Error for ApplicationError {
             ApplicationError::EvaluateError(ref e) => Some(e),
             ApplicationError::DeviceError(ref e) => Some(e),
             ApplicationError::PersistenceError(ref e) => Some(e),
-            ApplicationError::CudaError(_) => None
+            ApplicationError::CudaError(_) => None,
+            ApplicationError::RecvError(ref e) => Some(e),
         }
     }
 }
@@ -172,5 +177,10 @@ impl From<PersistenceError> for ApplicationError {
 impl From<CudaError> for ApplicationError {
     fn from(err: CudaError) -> ApplicationError {
         ApplicationError::CudaError(err)
+    }
+}
+impl From<RecvError> for ApplicationError {
+    fn from(err: RecvError) -> ApplicationError {
+        ApplicationError::RecvError(err)
     }
 }

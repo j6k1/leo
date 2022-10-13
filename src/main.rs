@@ -4,6 +4,7 @@ extern crate rand_xorshift;
 extern crate statrs;
 extern crate getopts;
 extern crate toml;
+extern crate rayon;
 //#[macro_use]
 extern crate serde_derive;
 extern crate crossbeam_channel;
