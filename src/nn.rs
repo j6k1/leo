@@ -285,7 +285,8 @@ impl Evalutor {
     pub fn dec_threads(&self) -> Result<(),ApplicationError> {
         self.active_threads.fetch_sub(1,Ordering::Release);
 
-        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) {
+        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) &&
+            self.active_threads.load(Ordering::Acquire) > 0 {
             self.start_evaluation()?;
         }
 
@@ -299,7 +300,8 @@ impl Evalutor {
 
         self.wait_threads.fetch_add(1,Ordering::Release);
 
-        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) {
+        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) &&
+            self.active_threads.load(Ordering::Acquire) > 0 {
             self.start_evaluation()?;
         }
 
@@ -307,7 +309,8 @@ impl Evalutor {
     }
 
     pub fn start_evaluation(&self) -> Result<(),ApplicationError> {
-        if self.wait_threads.swap(0,Ordering::Release) >= self.active_threads.load(Ordering::Acquire) {
+        if self.wait_threads.swap(0,Ordering::Release) >= self.active_threads.load(Ordering::Acquire) &&
+            self.active_threads.load(Ordering::Acquire) > 0 {
             let mut queue = Vec::with_capacity(self.queue.len());
 
             while !self.queue.is_empty() {
