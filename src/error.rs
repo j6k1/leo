@@ -1,15 +1,16 @@
 use std::{error, fmt, io};
 use std::collections::VecDeque;
 use std::num::{ParseFloatError, ParseIntError};
-use std::sync::mpsc::{RecvError, SendError};
+use std::sync::mpsc::{RecvError, Sender, SendError};
 use std::sync::{MutexGuard, PoisonError};
+use concurrent_queue::{PopError, PushError};
 use csaparser::error::CsaParserError;
 use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
 use usiagent::error::{EventDispatchError, PlayerError, SfenStringConvertError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind};
 use usiagent::rule::LegalMove;
-use crate::nn::{Message};
+use crate::nn::{BatchItem, Message};
 
 #[derive(Debug)]
 pub enum ApplicationError {
@@ -37,7 +38,10 @@ pub enum ApplicationError {
     ResultSendError(SendError<(LegalMove,i32)>),
     AllResultSendError(SendError<Vec<(f32,f32)>>),
     EndTransactionSendError(SendError<()>),
-    PoisonError(String)
+    PoisonError(String),
+    TransactionPushError(PushError<Sender<()>>),
+    BatchItemPushError(PushError<BatchItem>),
+    ConcurrentQueuePopError(PopError),
 }
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -67,6 +71,9 @@ impl fmt::Display for ApplicationError {
             ApplicationError::AllResultSendError(ref e) => write!(f,"{}",e),
             ApplicationError::EndTransactionSendError(ref e) => write!(f,"{}",e),
             ApplicationError::PoisonError(ref s) => write!(f,"{}",s),
+            ApplicationError::TransactionPushError(ref e) => write!(f,"{}",e),
+            ApplicationError::BatchItemPushError(ref e) => write!(f,"{}",e),
+            ApplicationError::ConcurrentQueuePopError(ref e) => write!(f,"{}",e)
         }
     }
 }
@@ -98,6 +105,9 @@ impl error::Error for ApplicationError {
             ApplicationError::AllResultSendError(_) => "An error occurred in the process of sending the all results of the neural network calculation.",
             ApplicationError::EndTransactionSendError(_) => "An error occurred when sending the transaction termination notification.",
             ApplicationError::PoisonError(_) => "panic occurred during thread execution.",
+            ApplicationError::TransactionPushError(_) => "An error occurred in adding the transaction to the queue.",
+            ApplicationError::BatchItemPushError(_) => "An error occurred while adding a batch item to the queue.",
+            ApplicationError::ConcurrentQueuePopError(_) => "Error retrieving element from concurrent queue.",
         }
     }
 
@@ -128,6 +138,9 @@ impl error::Error for ApplicationError {
             ApplicationError::AllResultSendError(ref e) => Some(e),
             ApplicationError::EndTransactionSendError(ref e) => Some(e),
             ApplicationError::PoisonError(_) => None,
+            ApplicationError::TransactionPushError(ref e) => Some(e),
+            ApplicationError::BatchItemPushError(ref e) => Some(e),
+            ApplicationError::ConcurrentQueuePopError(ref e) => Some(e),
         }
     }
 }
@@ -232,6 +245,21 @@ impl From<SendError<()>> for ApplicationError {
 impl From<PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>> for ApplicationError {
     fn from(err: PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>) -> ApplicationError {
         ApplicationError::PoisonError(format!("{}",err))
+    }
+}
+impl From<PushError<Sender<()>>> for ApplicationError {
+    fn from(err: PushError<Sender<()>>) -> ApplicationError {
+        ApplicationError::TransactionPushError(err)
+    }
+}
+impl From<PushError<BatchItem>> for ApplicationError {
+    fn from(err: PushError<BatchItem>) -> ApplicationError {
+        ApplicationError::BatchItemPushError(err)
+    }
+}
+impl From<PopError> for ApplicationError {
+    fn from(err: PopError) -> ApplicationError {
+        ApplicationError::ConcurrentQueuePopError(err)
     }
 }
 #[derive(Debug)]

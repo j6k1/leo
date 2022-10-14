@@ -8,6 +8,7 @@ use std::{fs, thread};
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use concurrent_queue::ConcurrentQueue;
 use rand::{prelude, Rng, SeedableRng};
 use rand::prelude::{Distribution};
 use rand_distr::Normal;
@@ -104,11 +105,13 @@ const OPPONENT_INDEX_MAP:[usize; 7] = [
     OPPONENT_MOCHIGOMA_HISHA_INDEX
 ];
 const SCALE:f32 = 1.;
+#[derive(Debug)]
 pub struct BatchItem {
     m:LegalMove,
     input:Arr<f32,2517>,
     sender:Sender<(LegalMove,i32)>
 }
+#[derive(Debug)]
 pub enum Message {
     Eval(Vec<Arr<f32,2517>>),
     Quit
@@ -129,11 +132,11 @@ impl<T,U,D,P,PT,I,O> BatchNN<U,D,P,PT,I,O> for T
              PT: PersistenceType {}
 pub struct Evalutor {
     sender:Sender<Message>,
-    transaction_sender:VecDeque<Sender<()>>,
-    receiver:Receiver<Vec<(f32,f32)>>,
-    queue:VecDeque<BatchItem>,
-    active_threads:AtomicUsize,
-    wait_threads:AtomicUsize
+    transaction_sender_queue:Arc<ConcurrentQueue<Sender<()>>>,
+    receiver:Arc<Receiver<Vec<(f32,f32)>>>,
+    queue:Arc<ConcurrentQueue<BatchItem>>,
+    active_threads:Arc<AtomicUsize>,
+    wait_threads:Arc<AtomicUsize>
 }
 impl Evalutor {
     pub fn new(savedir: String,nna_path:String,nnb_path:String,on_error_handler:Arc<Mutex<OnErrorHandler<FileLogger>>>) -> Result<Evalutor,ApplicationError> {
@@ -256,80 +259,95 @@ impl Evalutor {
 
         Ok(Evalutor {
             sender:s,
-            transaction_sender:VecDeque::new(),
-            active_threads:AtomicUsize::new(0),
-            wait_threads:AtomicUsize::new(0),
-            receiver:r,
-            queue:VecDeque::new()
+            transaction_sender_queue:Arc::new(ConcurrentQueue::unbounded()),
+            active_threads:Arc::new(AtomicUsize::new(0)),
+            wait_threads:Arc::new(AtomicUsize::new(0)),
+            receiver:Arc::new(r),
+            queue:Arc::new(ConcurrentQueue::unbounded())
         })
     }
 
-    pub fn submit(&mut self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>) {
+    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>)
+        -> Result<(),ApplicationError> {
         let input = InputCreator::make_input(true,t,b,mc);
 
-        self.queue.push_back(BatchItem {
+        Ok(self.queue.push(BatchItem {
             m:m,
             input:input,
             sender:sender
-        });
+        })?)
     }
 
     pub fn inc_threads(&self) {
         self.active_threads.fetch_add(1,Ordering::Release);
     }
 
-    pub fn dec_threads(&mut self) -> Result<(),ApplicationError> {
+    pub fn dec_threads(&self) -> Result<(),ApplicationError> {
         self.active_threads.fetch_sub(1,Ordering::Release);
 
-        if self.wait_threads.load(Ordering::Acquire) == self.active_threads.load(Ordering::Acquire) {
+        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) {
             self.start_evaluation()?;
         }
 
         Ok(())
     }
 
-    pub fn begin_transaction(&mut self) -> Result<Transaction,ApplicationError> {
+    pub fn begin_transaction(&self) -> Result<Transaction,ApplicationError> {
         let (s,r) = mpsc::channel();
 
-        self.transaction_sender.push_back(s);
+        self.transaction_sender_queue.push(s)?;
 
         self.wait_threads.fetch_add(1,Ordering::Release);
 
-        if self.wait_threads.load(Ordering::Acquire) == self.active_threads.load(Ordering::Acquire) {
+        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) {
             self.start_evaluation()?;
         }
 
         Ok(Transaction::new(r))
     }
 
-    pub fn start_evaluation(&mut self) -> Result<(),ApplicationError> {
-        self.wait_threads.store(0,Ordering::Release);
+    pub fn start_evaluation(&self) -> Result<(),ApplicationError> {
+        if self.wait_threads.swap(0,Ordering::Release) >= self.active_threads.load(Ordering::Acquire) {
+            let mut queue = Vec::with_capacity(self.queue.len());
 
-        let mut queue = Vec::with_capacity(self.queue.len());
+            while !self.queue.is_empty() {
+                queue.push(self.queue.pop()?);
+            }
 
-        while let Some(item) = self.queue.pop_front() {
-            queue.push(item);
-        }
+            let (m, input, s) = queue.into_iter().fold((vec![], vec![], vec![]), |mut acc, item| {
+                acc.0.push(item.m);
+                acc.1.push(item.input);
+                acc.2.push(item.sender);
 
-        let (m,input,s) = queue.into_iter().fold((vec![],vec![],vec![]),|mut acc,item| {
-            acc.0.push(item.m);
-            acc.1.push(item.input);
-            acc.2.push(item.sender);
+                acc
+            });
 
-            acc
-        });
+            self.sender.send(Message::Eval(input))?;
 
-        self.sender.send(Message::Eval(input))?;
+            for (r, (m, s)) in self.receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
+                s.send((m.clone(), ((r.0 + r.1) * (1 << 21) as f32) as i32))?;
+            }
 
-        for (r,(m,s)) in self.receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
-            s.send((m.clone(),((r.0 + r.1) * (1 << 21) as f32) as i32))?;
-        }
+            while !self.transaction_sender_queue.is_empty() {
+                let s = self.transaction_sender_queue.pop()?;
 
-        while let Some(s) = self.transaction_sender.pop_front() {
-            s.send(())?;
+                s.send(())?;
+            }
         }
 
         Ok(())
+    }
+}
+impl Clone for Evalutor {
+    fn clone(&self) -> Self {
+        Evalutor {
+            sender:self.sender.clone(),
+            transaction_sender_queue:Arc::clone(&self.transaction_sender_queue),
+            active_threads:Arc::clone(&self.active_threads),
+            wait_threads:Arc::clone(&self.wait_threads),
+            receiver:Arc::clone(&self.receiver),
+            queue:Arc::clone(&self.queue)
+        }
     }
 }
 pub struct Transaction {

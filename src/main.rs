@@ -5,9 +5,9 @@ extern crate statrs;
 extern crate getopts;
 extern crate toml;
 extern crate rayon;
+extern crate concurrent_queue;
 //#[macro_use]
 extern crate serde_derive;
-extern crate crossbeam_channel;
 
 extern crate usiagent;
 extern crate nncombinator;
