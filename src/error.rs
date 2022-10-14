@@ -6,7 +6,7 @@ use std::sync::{MutexGuard, PoisonError};
 use csaparser::error::CsaParserError;
 use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
-use usiagent::error::{EventDispatchError, SfenStringConvertError};
+use usiagent::error::{EventDispatchError, PlayerError, SfenStringConvertError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind};
 use usiagent::rule::LegalMove;
 use crate::nn::{Message};
@@ -131,6 +131,7 @@ impl error::Error for ApplicationError {
         }
     }
 }
+impl PlayerError for ApplicationError {}
 impl From<io::Error> for ApplicationError {
     fn from(err: io::Error) -> ApplicationError {
         ApplicationError::IOError(err)
@@ -231,5 +232,15 @@ impl From<SendError<()>> for ApplicationError {
 impl From<PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>> for ApplicationError {
     fn from(err: PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>) -> ApplicationError {
         ApplicationError::PoisonError(format!("{}",err))
+    }
+}
+#[derive(Debug)]
+pub enum EvaluationError {
+    InternalError(ApplicationError),
+    Timeout,
+}
+impl From<ApplicationError> for EvaluationError {
+    fn from(err: ApplicationError) -> EvaluationError {
+        EvaluationError::InternalError(err)
     }
 }

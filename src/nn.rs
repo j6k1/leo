@@ -129,9 +129,9 @@ impl<T,U,D,P,PT,I,O> BatchNN<U,D,P,PT,I,O> for T
              PT: PersistenceType {}
 pub struct Evalutor {
     sender:Sender<Message>,
-    transaction_sender:Arc<Mutex<VecDeque<Sender<()>>>>,
+    transaction_sender:VecDeque<Sender<()>>,
     receiver:Receiver<Vec<(f32,f32)>>,
-    queue:Arc<Mutex<VecDeque<BatchItem>>>,
+    queue:VecDeque<BatchItem>,
     active_threads:AtomicUsize,
     wait_threads:AtomicUsize
 }
@@ -256,38 +256,29 @@ impl Evalutor {
 
         Ok(Evalutor {
             sender:s,
-            transaction_sender:Arc::new(Mutex::new(VecDeque::new())),
+            transaction_sender:VecDeque::new(),
             active_threads:AtomicUsize::new(0),
             wait_threads:AtomicUsize::new(0),
             receiver:r,
-            queue:Arc::new(Mutex::new(VecDeque::new()))
+            queue:VecDeque::new()
         })
     }
 
-    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>) -> Result<(),ApplicationError>{
+    pub fn submit(&mut self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>) {
         let input = InputCreator::make_input(true,t,b,mc);
 
-        match self.queue.lock() {
-            Ok(mut queue) => {
-                queue.push_back(BatchItem {
-                    m:m,
-                    input:input,
-                    sender:sender
-                });
-
-                Ok(())
-            },
-            Err(e) => {
-                return Err(ApplicationError::PoisonError(format!("{}",e)));
-            }
-        }
+        self.queue.push_back(BatchItem {
+            m:m,
+            input:input,
+            sender:sender
+        });
     }
 
     pub fn inc_threads(&self) {
         self.active_threads.fetch_add(1,Ordering::Release);
     }
 
-    pub fn dec_threads(&self) -> Result<(),ApplicationError> {
+    pub fn dec_threads(&mut self) -> Result<(),ApplicationError> {
         self.active_threads.fetch_sub(1,Ordering::Release);
 
         if self.wait_threads.load(Ordering::Acquire) == self.active_threads.load(Ordering::Acquire) {
@@ -297,17 +288,10 @@ impl Evalutor {
         Ok(())
     }
 
-    pub fn begin_transaction(&self) -> Result<Transaction,ApplicationError> {
+    pub fn begin_transaction(&mut self) -> Result<Transaction,ApplicationError> {
         let (s,r) = mpsc::channel();
 
-        match self.transaction_sender.lock() {
-            Ok(mut sender) => {
-                sender.push_back(s);
-            },
-            Err(e) => {
-                return Err(ApplicationError::from(e));
-            }
-        }
+        self.transaction_sender.push_back(s);
 
         self.wait_threads.fetch_add(1,Ordering::Release);
 
@@ -318,23 +302,14 @@ impl Evalutor {
         Ok(Transaction::new(r))
     }
 
-    pub fn start_evaluation(&self) -> Result<(),ApplicationError> {
+    pub fn start_evaluation(&mut self) -> Result<(),ApplicationError> {
         self.wait_threads.store(0,Ordering::Release);
 
-        let queue = match self.queue.lock() {
-            Ok(mut queue) => {
-                let mut q = Vec::with_capacity(queue.len());
+        let mut queue = Vec::with_capacity(self.queue.len());
 
-                for item in queue.pop_front() {
-                    q.push(item);
-                }
-
-                q
-            },
-            Err(e) => {
-                return Err(ApplicationError::PoisonError(format!("{}",e)));
-            }
-        };
+        while let Some(item) = self.queue.pop_front() {
+            queue.push(item);
+        }
 
         let (m,input,s) = queue.into_iter().fold((vec![],vec![],vec![]),|mut acc,item| {
             acc.0.push(item.m);
@@ -350,15 +325,8 @@ impl Evalutor {
             s.send((m.clone(),((r.0 + r.1) * (1 << 21) as f32) as i32))?;
         }
 
-        match self.transaction_sender.lock() {
-            Ok(mut sender) => {
-                while let Some(s) = sender.pop_front() {
-                    s.send(())?;
-                }
-            },
-            Err(e) => {
-                return Err(ApplicationError::from(e));
-            }
+        while let Some(s) = self.transaction_sender.pop_front() {
+            s.send(())?;
         }
 
         Ok(())
