@@ -23,7 +23,8 @@ pub enum MaybeMate {
     MaxDepth,
     MaxNodes,
     Timeout,
-    Unknown
+    Unknown,
+    Aborted
 }
 
 pub struct GameStateForMate {
@@ -40,7 +41,8 @@ pub struct GameStateForMate {
     mc:MochigomaCollections
 }
 pub struct Solver {
-    receiver:Receiver<Result<MaybeMate,ApplicationError>>
+    receiver:Receiver<Result<MaybeMate,ApplicationError>>,
+    aborted:Arc<AtomicBool>,
 }
 impl Solver {
     pub fn new<'a,L,S>(strict_moves:bool,
@@ -57,6 +59,7 @@ impl Solver {
                        quited:Arc<AtomicBool>,
                        ms: GameStateForMate) -> Solver where L: Logger + Send + 'static, S: InfoSender {
         let (s,r) = mpsc::channel();
+        let aborted = Arc::new(AtomicBool::new(false));
 
         {
             let s = s.clone();
@@ -71,6 +74,7 @@ impl Solver {
             let hasher = Arc::clone(&hasher);
             let stop = Arc::clone(&stop);
             let quited = Arc::clone(&quited);
+            let aborted = Arc::clone(&aborted);
 
             let mut already_oute_kyokumen_map = ms.already_oute_kyokumen_map.clone();
             let current_depth = ms.current_depth;
@@ -101,6 +105,7 @@ impl Solver {
                                                           on_error_handler.clone(),
                                                           base_depth,
                                                           stop,
+                                                          aborted,
                                                           current_depth);
                 if let Err(ref e) = s.send(mate_strategy.oute_process(&mut already_oute_kyokumen_map,
                                            current_depth,
@@ -132,6 +137,7 @@ impl Solver {
             let hasher = Arc::clone(&hasher);
             let stop = Arc::clone(&stop);
             let quited = Arc::clone(&quited);
+            let aborted = Arc::clone(&aborted);
 
             let mut already_oute_kyokumen_map = ms.already_oute_kyokumen_map.clone();
             let current_depth = ms.current_depth;
@@ -162,6 +168,7 @@ impl Solver {
                     on_error_handler.clone(),
                     base_depth,
                     stop,
+                    aborted,
                     current_depth);
                 if let Err(ref e) = s.send(nomate_strategy.oute_process(&mut already_oute_kyokumen_map,
                                                                       current_depth,
@@ -181,12 +188,15 @@ impl Solver {
         }
 
         Solver {
-            receiver:r
+            receiver:r,
+            aborted:aborted
         }
     }
 
     pub fn checkmate(&self) -> Result<MaybeMate,ApplicationError> {
         let r = self.receiver.recv();
+
+        self.aborted.store(true,atomic::Ordering::Release);
 
         let _ = self.receiver.recv();
 
@@ -295,6 +305,7 @@ pub mod checkmate {
         on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
         base_depth:u32,
         stop:Arc<AtomicBool>,
+        aborted:Arc<AtomicBool>,
         current_depth:u32,
         nodes:u64,
     }
@@ -318,6 +329,7 @@ pub mod checkmate {
                on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                base_depth:u32,
                stop:Arc<AtomicBool>,
+               aborted:Arc<AtomicBool>,
                current_depth:u32,
        ) -> CheckmateStrategy<O,R,L,S> {
             CheckmateStrategy {
@@ -334,6 +346,7 @@ pub mod checkmate {
                 on_error_handler:on_error_handler,
                 base_depth:base_depth,
                 stop:stop,
+                aborted:aborted,
                 current_depth:current_depth,
                 nodes:0,
             }
@@ -355,6 +368,10 @@ pub mod checkmate {
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       S: InfoSender + Send, L: Logger + Send + 'static {
+            if self.aborted.load(atomic::Ordering::Acquire) {
+                return Ok(MaybeMate::Aborted)
+            }
+
             self.nodes += 1;
 
             self.send_seldepth(current_depth)?;
@@ -488,6 +505,10 @@ pub mod checkmate {
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       S: InfoSender + Send, L: Logger + Send + 'static {
+            if self.aborted.load(atomic::Ordering::Acquire) {
+                return Ok(MaybeMate::Aborted)
+            }
+
             self.nodes += 1;
 
             self.send_seldepth(current_depth)?;
