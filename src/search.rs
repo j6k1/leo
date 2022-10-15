@@ -10,13 +10,33 @@ use usiagent::player::InfoSender;
 use usiagent::rule::{AppliedMove, State};
 use usiagent::shogi::{MochigomaCollections, ObtainKind, Teban};
 use crate::error::ApplicationError;
+use crate::nn::Evalutor;
 use crate::solver::Solver;
 
+pub const BASE_DEPTH:u32 = 2;
+pub const MAX_DEPTH:u32 = 6;
+pub const TIMELIMIT_MARGIN:u64 = 50;
+pub const NETWORK_DELAY:u32 = 1100;
+pub const DEFALUT_DISPLAY_EVALUTE_SCORE:bool = false;
+pub const DEFAULT_ADJUST_DEPTH:bool = true;
+pub const MAX_THREADS:u32 = 1;
+pub const MAX_PLY:u32 = 200;
+pub const MAX_PLY_TIMELIMIT:u64 = 0;
+pub const TURN_COUNT:u32 = 50;
+pub const MIN_TURN_COUNT:u32 = 5;
+
+pub trait Search<L,S> where L: Logger + Send + 'static, S: InfoSender {
+    fn search<'a>(&self,env:&mut Environment<L,S>, gs:GameState<'a,L,S>, evalutor:Evalutor) -> Result<EvaluationResult,ApplicationError>;
+}
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub struct EvaluationResult(Score, Option<AppliedMove>);
+pub enum EvaluationResult {
+    Immediate(Score, Option<AppliedMove>),
+    Async,
+    Timeout
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-enum Score {
+pub enum Score {
     NEGINFINITE,
     Value(i32),
     INFINITE,
@@ -54,18 +74,6 @@ impl Sub<i32> for Score {
         }
     }
 }
-
-pub const BASE_DEPTH:u32 = 2;
-pub const MAX_DEPTH:u32 = 6;
-pub const TIMELIMIT_MARGIN:u64 = 50;
-pub const NETWORK_DELAY:u32 = 1100;
-pub const DEFALUT_DISPLAY_EVALUTE_SCORE:bool = false;
-pub const DEFAULT_ADJUST_DEPTH:bool = true;
-pub const MAX_THREADS:u32 = 1;
-pub const MAX_PLY:u32 = 200;
-pub const MAX_PLY_TIMELIMIT:u64 = 0;
-pub const TURN_COUNT:u32 = 50;
-pub const MIN_TURN_COUNT:u32 = 5;
 
 pub struct Environment<L,S> where L: Logger, S: InfoSender {
     event_queue:Arc<Mutex<UserEventQueue>>,
@@ -121,7 +129,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
         }
     }
 }
-pub struct GameState<'a,S,L> where L: Logger {
+pub struct GameState<'a,L,S> where L: Logger + Send + 'static, S: InfoSender {
     event_dispatcher:&'a mut UserEventDispatcher<'a,S,ApplicationError,L>,
     solver_event_dispatcher:&'a mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
     teban:Teban,

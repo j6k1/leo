@@ -1,11 +1,9 @@
-use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::marker::PhantomData;
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
-use usiagent::error::{EventHandlerError, PlayerError};
+use usiagent::error::{EventHandlerError};
 use usiagent::event::{EventDispatcher, EventQueue, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, USIEventDispatcher};
 use usiagent::hash::{KyokumenHash, KyokumenMap};
 use usiagent::logger::Logger;
@@ -14,7 +12,7 @@ use usiagent::player::InfoSender;
 use usiagent::rule::{LegalMove, State};
 use usiagent::shogi::*;
 use crate::error::ApplicationError;
-use crate::solver::checkmate::{AscComparator, CheckmateStrategy, DescComparator, MateStrategy};
+use crate::solver::checkmate::{AscComparator, CheckmateStrategy, DescComparator};
 
 #[derive(Debug,Clone)]
 pub enum MaybeMate {
@@ -196,7 +194,7 @@ impl Solver {
     pub fn checkmate(&self) -> Result<MaybeMate,ApplicationError> {
         let r = self.receiver.recv();
 
-        let mut m = MaybeMate::Unknown;
+        let m;
 
         match r {
             Ok(Ok(MaybeMate::MateMoves(depth,mvs))) => {
@@ -216,19 +214,9 @@ impl Solver {
 
         self.aborted.store(true,atomic::Ordering::Release);
 
-        let r = self.receiver.recv()?;
+        let _ = self.receiver.recv()?;
 
-        match m {
-            MaybeMate::MateMoves(depth,mvs) => {
-                Ok(MaybeMate::MateMoves(depth,mvs))
-            },
-            MaybeMate::Nomate => {
-                Ok(MaybeMate::Nomate)
-            },
-            _ => {
-                r
-            }
-        }
+        Ok(m)
     }
 
     fn create_event_dispatcher<'a,T,L>(on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,stop:&Arc<AtomicBool>,quited:&Arc<AtomicBool>)
@@ -273,13 +261,10 @@ impl Solver {
 pub mod checkmate {
     use std::cmp::Ordering;
     use std::collections::VecDeque;
-    use std::marker::PhantomData;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, atomic, mpsc, Mutex};
-    use std::sync::mpsc::Receiver;
+    use std::sync::{Arc, atomic, Mutex};
     use std::time::{Duration, Instant};
     use usiagent::command::UsiInfoSubCommand;
-    use usiagent::error::PlayerError;
     use usiagent::event::{EventDispatcher, EventQueue, UserEvent, UserEventKind, USIEventDispatcher};
     use usiagent::hash::{KyokumenHash, KyokumenMap};
     use usiagent::logger::Logger;
@@ -289,8 +274,7 @@ pub mod checkmate {
     use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
     use crate::error::{ApplicationError, SendSelDepthError};
     use crate::search::TIMELIMIT_MARGIN;
-    use crate::solver::{MaybeMate, Solver};
-    use crate::solver::MaybeMate::MateMoves;
+    use crate::solver::{MaybeMate};
 
     pub trait Comparator<T>: Clone {
         fn cmp(&mut self,l:&T,r:&T) -> Ordering;
