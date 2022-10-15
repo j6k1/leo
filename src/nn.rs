@@ -30,7 +30,7 @@ use packedsfen::hcpe::haffman_code::GameResult;
 use packedsfen::yaneuraou::reader::PackedSfenReader;
 use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
 use usiagent::event::{EventQueue, GameEndState, UserEvent, UserEventKind};
-use usiagent::rule::LegalMove;
+use usiagent::rule::{AppliedMove, LegalMove};
 use usiagent::{OnErrorHandler, SandBox};
 use usiagent::logger::FileLogger;
 use usiagent::shogi::{Banmen, KomaKind, Mochigoma, MOCHIGOMA_KINDS, MochigomaCollections, MochigomaKind, Teban};
@@ -107,9 +107,9 @@ const OPPONENT_INDEX_MAP:[usize; 7] = [
 const SCALE:f32 = 1.;
 #[derive(Debug)]
 pub struct BatchItem {
-    m:LegalMove,
+    m:AppliedMove,
     input:Arr<f32,2517>,
-    sender:Sender<(LegalMove,i32)>
+    sender:Sender<(AppliedMove,i32)>
 }
 #[derive(Debug)]
 pub enum Message {
@@ -267,7 +267,7 @@ impl Evalutor {
         })
     }
 
-    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>)
+    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:AppliedMove,sender:Sender<(AppliedMove,i32)>)
         -> Result<(),ApplicationError> {
         let input = InputCreator::make_input(true,t,b,mc);
 
@@ -328,7 +328,7 @@ impl Evalutor {
             self.sender.send(Message::Eval(input))?;
 
             for (r, (m, s)) in self.receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
-                s.send((m.clone(), ((r.0 + r.1) * (1 << 21) as f32) as i32))?;
+                s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32))?;
             }
 
             while !self.transaction_sender_queue.is_empty() {
@@ -1026,34 +1026,5 @@ impl InputCreator {
         };
 
         Ok(index as usize)
-    }
-
-    #[inline]
-    fn input_index_with_of_mochigoma_get(teban:Teban, kind:MochigomaKind, mc:&MochigomaCollections)
-                                         -> Result<usize,ApplicationError> {
-
-        let ms = Mochigoma::new();
-        let mg = Mochigoma::new();
-
-        let (ms,mg) = match mc {
-            &MochigomaCollections::Pair(ref ms,ref mg) => (ms,mg),
-            &MochigomaCollections::Empty => (&ms,&mg),
-        };
-
-        let mc = match teban {
-            Teban::Sente => ms,
-            Teban::Gote => mg,
-        };
-
-        let offset = if teban == Teban::Sente {
-            SELF_INDEX_MAP[kind as usize]
-        } else {
-            OPPONENT_INDEX_MAP[kind as usize]
-        };
-
-        let c = mc.get(kind);
-        let offset = offset as usize;
-
-        Ok(offset + c as usize)
     }
 }

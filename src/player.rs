@@ -2,12 +2,13 @@ use std::ops::{Add, Neg, Sub};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
-use usiagent::event::UserEventQueue;
+use usiagent::event::{UserEventDispatcher, UserEventQueue};
 use usiagent::hash::KyokumenMap;
 use usiagent::logger::Logger;
 use usiagent::OnErrorHandler;
 use usiagent::player::InfoSender;
-use usiagent::rule::AppliedMove;
+use usiagent::rule::{AppliedMove, State};
+use usiagent::shogi::{MochigomaCollections, ObtainKind, Teban};
 use crate::error::ApplicationError;
 use crate::solver::Solver;
 
@@ -56,7 +57,7 @@ impl Sub<i32> for Score {
 
 const BASE_DEPTH:u32 = 2;
 const MAX_DEPTH:u32 = 6;
-const TIMELIMIT_MARGIN:u64 = 50;
+pub const TIMELIMIT_MARGIN:u64 = 50;
 const NETWORK_DELAY:u32 = 1100;
 const DEFALUT_DISPLAY_EVALUTE_SCORE:bool = false;
 const DEFAULT_ADJUST_DEPTH:bool = true;
@@ -67,7 +68,6 @@ const TURN_COUNT:u32 = 50;
 const MIN_TURN_COUNT:u32 = 5;
 
 pub struct Environment<L,S> where L: Logger, S: InfoSender {
-    solver:Solver<ApplicationError>,
     event_queue:Arc<Mutex<UserEventQueue>>,
     info_sender:S,
     on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
@@ -84,7 +84,6 @@ impl<L,S> Clone for Environment<L,S>
           S: InfoSender {
     fn clone(&self) -> Self {
         Environment {
-            solver:Solver::new(),
             event_queue:self.event_queue.clone(),
             info_sender:self.info_sender.clone(),
             on_error_handler:self.on_error_handler.clone(),
@@ -109,7 +108,6 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
         let quited = Arc::new(AtomicBool::new(false));
 
         Environment {
-            solver:Solver::new(),
             event_queue:event_queue,
             info_sender:info_sender,
             on_error_handler:on_error_handler,
@@ -122,4 +120,26 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             nodes:Arc::new(AtomicU64::new(0))
         }
     }
+}
+pub struct GameState<'a,S,L> where L: Logger {
+    event_dispatcher:&'a mut UserEventDispatcher<'a,S,ApplicationError,L>,
+    solver_event_dispatcher:&'a mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
+    teban:Teban,
+    state:&'a Arc<State>,
+    alpha:Score,
+    beta:Score,
+    m:Option<AppliedMove>,
+    mc:&'a Arc<MochigomaCollections>,
+    pv:&'a Vec<AppliedMove>,
+    obtained:Option<ObtainKind>,
+    current_kyokumen_map:&'a KyokumenMap<u64,u32>,
+    self_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
+    opponent_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
+    oute_kyokumen_map:&'a KyokumenMap<u64,()>,
+    mhash:u64,
+    shash:u64,
+    depth:u32,
+    current_depth:u32,
+    base_depth:u32,
+    node_count:u64,
 }

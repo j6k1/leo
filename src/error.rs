@@ -9,7 +9,7 @@ use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError
 use packedsfen::error::ReadError;
 use usiagent::error::{EventDispatchError, PlayerError, SfenStringConvertError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind};
-use usiagent::rule::LegalMove;
+use usiagent::rule::AppliedMove;
 use crate::nn::{BatchItem, Message};
 
 #[derive(Debug)]
@@ -35,7 +35,7 @@ pub enum ApplicationError {
     CudaError(CudaError),
     RecvError(RecvError),
     NNSendError(SendError<Message>),
-    ResultSendError(SendError<(LegalMove,i32)>),
+    ResultSendError(SendError<(AppliedMove,i32)>),
     AllResultSendError(SendError<Vec<(f32,f32)>>),
     EndTransactionSendError(SendError<()>),
     PoisonError(String),
@@ -227,8 +227,8 @@ impl From<SendError<Message>> for ApplicationError {
         ApplicationError::NNSendError(err)
     }
 }
-impl From<SendError<(LegalMove,i32)>> for ApplicationError {
-    fn from(err: SendError<(LegalMove,i32)>) -> ApplicationError {
+impl From<SendError<(AppliedMove,i32)>> for ApplicationError {
+    fn from(err: SendError<(AppliedMove,i32)>) -> ApplicationError {
         ApplicationError::ResultSendError(err)
     }
 }
