@@ -308,7 +308,7 @@ impl Evalutor {
         Ok(r.recv()?)
     }
 
-    pub fn start_evaluation(&self) -> Result<(),ApplicationError> {
+    fn start_evaluation(&self) -> Result<(),ApplicationError> {
         if self.wait_threads.swap(0,Ordering::Release) >= self.active_threads.load(Ordering::Acquire) &&
             self.active_threads.load(Ordering::Acquire) > 0 {
             let mut queue = Vec::with_capacity(self.queue.len());
@@ -328,7 +328,7 @@ impl Evalutor {
             self.sender.send(Message::Eval(input))?;
 
             for (r, (m, s)) in self.receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
-                s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32))?;
+                let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32));
             }
 
             while !self.transaction_sender_queue.is_empty() {

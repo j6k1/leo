@@ -288,7 +288,7 @@ pub mod checkmate {
     use usiagent::rule::{LegalMove, Rule, State};
     use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
     use crate::error::{ApplicationError, SendSelDepthError};
-    use crate::player::TIMELIMIT_MARGIN;
+    use crate::search::TIMELIMIT_MARGIN;
     use crate::solver::{MaybeMate, Solver};
     use crate::solver::MaybeMate::MateMoves;
 

@@ -17,6 +17,7 @@ extern crate packedsfen;
 pub mod error;
 pub mod nn;
 pub mod player;
+pub mod search;
 pub mod solver;
 
 fn main() {
