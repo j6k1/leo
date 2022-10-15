@@ -69,37 +69,62 @@ mod checkmate {
         }
     }
 
-    pub struct CheckmateStrategy<O,R> where O: Comparator<(LegalMove,usize)>,
-                                            R: Comparator<(LegalMove,usize)> {
-        oute_comparator:O,
+    pub struct CheckmateStrategy<O,R,L,S> where O: Comparator<(LegalMove,usize)>,
+                                            R: Comparator<(LegalMove,usize)>,
+                                            L: Logger + Send,
+                                            S: InfoSender, Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
+        oute_comparator: O,
         response_oute_comparator:R,
-        current_depth:u32,
-        nodes:u64,
+        strict_moves:bool,
         limit:Option<Instant>,
         checkmate_limit:Option<Instant>,
-        network_delay:u32
+        network_delay:u32,
+        max_depth:Option<u32>,
+        max_nodes:Option<u64>,
+        info_sender:S,
+        on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
+        base_depth:u32,
+        stop:Arc<AtomicBool>,
+        current_depth:u32,
+        nodes:u64,
     }
 
-    pub type MateStrategy = CheckmateStrategy<DescComparator,AscComparator>;
-    pub type NomateStrategy= CheckmateStrategy<AscComparator,DescComparator>;
+    pub type MateStrategy<L,S> = CheckmateStrategy<DescComparator,AscComparator,L,S>;
+    pub type NomateStrategy<L,S> = CheckmateStrategy<AscComparator,DescComparator,L,S>;
 
-    impl<O,R> CheckmateStrategy<O,R>
+    impl<O,R,L,S> CheckmateStrategy<O,R,L,S>
         where O: Comparator<(LegalMove,usize)>,
-              R: Comparator<(LegalMove,usize)> {
+              R: Comparator<(LegalMove,usize)>,
+              L: Logger + Send, S: InfoSender, Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
         fn new(oute_comparator: O, response_oute_comparator: R,
-               current_depth:u32,
+               strict_moves:bool,
                limit:Option<Instant>,
                checkmate_limit:Option<Instant>,
-               network_delay:u32
-        ) -> CheckmateStrategy<O, R> {
+               network_delay:u32,
+               max_depth:Option<u32>,
+               max_nodes:Option<u64>,
+               info_sender:S,
+               on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
+               base_depth:u32,
+               stop:Arc<AtomicBool>,
+               current_depth:u32,
+               nodes:u64,
+       ) -> CheckmateStrategy<O,R,L,S> {
             CheckmateStrategy {
                 oute_comparator: oute_comparator,
                 response_oute_comparator: response_oute_comparator,
-                current_depth:current_depth,
-                nodes:0,
+                strict_moves:strict_moves,
                 limit:limit,
                 checkmate_limit:checkmate_limit,
-                network_delay:network_delay
+                network_delay:network_delay,
+                max_depth:max_depth,
+                max_nodes:max_nodes,
+                info_sender:info_sender,
+                on_error_handler:on_error_handler,
+                base_depth:base_depth,
+                stop:stop,
+                current_depth:current_depth,
+                nodes:0,
             }
         }
 
@@ -116,19 +141,10 @@ mod checkmate {
             r
         }
 
-        fn oute_process<S,L>(&mut self,
-                             strict_moves:bool,
-                             max_depth:Option<u32>,
-                             max_nodes:Option<u64>,
-                             limit:&Option<Instant>,
-                             network_delay:u32,
+        fn oute_process(&mut self,
                              already_oute_kyokumen_map:&mut Option<KyokumenMap<u64,bool>>,
                              hasher:&KyokumenHash<u64>,
-                             info_sender:&mut S,
-                             on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,
-                             base_depth:u32,
                              current_depth:u32,
-                             stop:&Arc<AtomicBool>,
                              mhash:u64,
                              shash:u64,
                              ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
@@ -143,17 +159,17 @@ mod checkmate {
                                S: InfoSender + Send, L: Logger + Send + 'static {
             self.nodes += 1;
 
-            self.send_seldepth(info_sender, &on_error_handler, base_depth, self.current_depth + current_depth);
+            self.send_seldepth(current_depth);
 
-            if max_depth.map(|d| current_depth >= d).unwrap_or(false) {
+            if self.max_depth.map(|d| current_depth >= d).unwrap_or(false) {
                 return MaybeMate::MaxDepth;
             }
 
-            if max_nodes.map(|n| self.nodes >= n).unwrap_or(false) {
+            if self.max_nodes.map(|n| self.nodes >= n).unwrap_or(false) {
                 return MaybeMate::MaxNodes;
             }
 
-            if self.check_timelimit() || stop.load(atomic::Ordering::Acquire) {
+            if self.check_timelimit() || self.stop.load(atomic::Ordering::Acquire) {
                 return MaybeMate::Timeout;
             }
 
@@ -195,7 +211,7 @@ mod checkmate {
                     });
 
                     if let Some(true) = completed {
-                        if !strict_moves {
+                        if !self.strict_moves {
                             let mut mvs = VecDeque::new();
                             mvs.push_front(m);
                             return MaybeMate::MateMoves(current_depth,mvs);
@@ -228,18 +244,9 @@ mod checkmate {
 
                     oute_kyokumen_map.insert(teban, mhash, shash, ());
 
-                    match self.response_oute_process(strict_moves,
-                                                     max_depth,
-                                                     max_nodes,
-                                                     limit,
-                                                     network_delay,
-                                                     already_oute_kyokumen_map,
+                    match self.response_oute_process(already_oute_kyokumen_map,
                                                      hasher,
-                                                     info_sender,
-                                                     on_error_handler,
-                                                     base_depth,
                                                      current_depth,
-                                                     stop,
                                                      mhash,
                                                      shash,
                                                      ignore_kyokumen_map,
@@ -267,19 +274,10 @@ mod checkmate {
             }
         }
 
-        fn response_oute_process<S,L>(&mut self,
-                                      strict_moves:bool,
-                                      max_depth:Option<u32>,
-                                      max_nodes:Option<u64>,
-                                      limit:&Option<Instant>,
-                                      network_delay:u32,
+        fn response_oute_process(&mut self,
                                       already_oute_kyokumen_map:&mut Option<KyokumenMap<u64,bool>>,
                                       hasher:&KyokumenHash<u64>,
-                                      info_sender:&mut S,
-                                      on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,
-                                      base_depth:u32,
                                       current_depth:u32,
-                                      stop:&Arc<AtomicBool>,
                                       mhash:u64,
                                       shash:u64,
                                       ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
@@ -294,17 +292,17 @@ mod checkmate {
                                S: InfoSender + Send, L: Logger + Send + 'static {
             self.nodes += 1;
 
-            self.send_seldepth(info_sender, &on_error_handler, base_depth, self.current_depth + current_depth);
+            self.send_seldepth(current_depth);
 
-            if max_depth.map(|d| current_depth >= d).unwrap_or(false) {
+            if self.max_depth.map(|d| current_depth >= d).unwrap_or(false) {
                 return MaybeMate::MaxDepth;
             }
 
-            if max_nodes.map(|n| self.nodes >= n).unwrap_or(false) {
+            if self.max_nodes.map(|n| self.nodes >= n).unwrap_or(false) {
                 return MaybeMate::MaxNodes;
             }
 
-            if self.check_timelimit() || stop.load(atomic::Ordering::Acquire) {
+            if self.check_timelimit() || self.stop.load(atomic::Ordering::Acquire) {
                 return MaybeMate::Timeout;
             }
 
@@ -360,18 +358,9 @@ mod checkmate {
                         }
                     }
 
-                    match self.oute_process(strict_moves,
-                                            max_depth,
-                                            max_nodes,
-                                            limit,
-                                            network_delay,
-                                            already_oute_kyokumen_map,
+                    match self.oute_process(already_oute_kyokumen_map,
                                             hasher,
-                                            info_sender,
-                                            on_error_handler,
-                                            base_depth,
                                             current_depth,
-                                            stop,
                                             mhash,
                                             shash,
                                             ignore_kyokumen_map,
@@ -399,19 +388,16 @@ mod checkmate {
             }
         }
 
-        fn send_seldepth<L,S>(&self, info_sender:&mut S,
-                              on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>, depth:u32, seldepth:u32)
-            where L: Logger + Send, S: InfoSender, Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
-
+        fn send_seldepth(&mut self, depth:u32) {
             let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
-            commands.push(UsiInfoSubCommand::Depth(depth));
-            commands.push(UsiInfoSubCommand::SelDepth(seldepth));
+            commands.push(UsiInfoSubCommand::Depth(self.base_depth));
+            commands.push(UsiInfoSubCommand::SelDepth(self.current_depth + depth));
 
 
-            match info_sender.send(commands) {
+            match self.info_sender.send(commands) {
                 Ok(_) => (),
                 Err(ref e) => {
-                    let _ = on_error_handler.lock().map(|h| h.call(e));
+                    let _ = self.on_error_handler.lock().map(|h| h.call(e));
                 }
             }
         }
