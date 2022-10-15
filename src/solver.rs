@@ -195,12 +195,31 @@ impl Solver {
 
     pub fn checkmate(&self) -> Result<MaybeMate,ApplicationError> {
         let r = self.receiver.recv();
+        let mut m = MaybeMate::Unknown;
+
+        match r {
+            Ok(Ok(MaybeMate::MateMoves(depth,mvs))) => {
+                m = MaybeMate::MateMoves(depth,mvs);
+            },
+            Ok(Ok(MaybeMate::Nomate)) => {
+                m = MaybeMate::Nomate;
+            },
+            _ => ()
+        }
 
         self.aborted.store(true,atomic::Ordering::Release);
 
-        let _ = self.receiver.recv();
+        let n = self.receiver.recv();
 
-        r?
+        match m {
+            MaybeMate::MateMoves(depth,mvs) => {
+                Ok(MaybeMate::MateMoves(depth,mvs))
+            },
+            MaybeMate::Nomate => {
+                Ok(MaybeMate::Nomate)
+            },
+            _ => n?
+        }
     }
 
     fn create_event_dispatcher<'a,T,L>(on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,stop:&Arc<AtomicBool>,quited:&Arc<AtomicBool>)
