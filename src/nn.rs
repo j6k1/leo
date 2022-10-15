@@ -117,13 +117,13 @@ pub enum Message {
     Quit
 }
 
-pub trait BatchNN<U,D,P,PT,I,O>: ForwardAll<Input=I,Output=O> +
+pub trait BatchNeuralNetwork<U,D,P,PT,I,O>: ForwardAll<Input=I,Output=O> +
                                  BatchForwardBase<BatchInput=VecArr<U,I>,BatchOutput=VecArr<U,O>> +
                                  BatchTrain<U,D> + Persistence<U,P,PT>
                                  where U: UnitValue<U>,
                                        D: Device<U>,
                                        PT: PersistenceType {}
-impl<T,U,D,P,PT,I,O> BatchNN<U,D,P,PT,I,O> for T
+impl<T,U,D,P,PT,I,O> BatchNeuralNetwork<U,D,P,PT,I,O> for T
     where T: ForwardAll<Input=I,Output=O> +
              BatchForwardBase<BatchInput=VecArr<U,I>,BatchOutput=VecArr<U,O>> +
              BatchTrain<U,D> + Persistence<U,P,PT>,
@@ -293,7 +293,7 @@ impl Evalutor {
         Ok(())
     }
 
-    pub fn begin_transaction(&self) -> Result<Transaction,ApplicationError> {
+    pub fn begin_transaction(&self) -> Result<(),ApplicationError> {
         let (s,r) = mpsc::channel();
 
         self.transaction_sender_queue.push(s)?;
@@ -305,7 +305,7 @@ impl Evalutor {
             self.start_evaluation()?;
         }
 
-        Ok(Transaction::new(r))
+        Ok(r.recv()?)
     }
 
     pub fn start_evaluation(&self) -> Result<(),ApplicationError> {
@@ -353,22 +353,8 @@ impl Clone for Evalutor {
         }
     }
 }
-pub struct Transaction {
-    receiver:Receiver<()>
-}
-impl Transaction {
-    fn new(receiver:Receiver<()>) -> Transaction {
-        Transaction {
-            receiver:receiver
-        }
-    }
-
-    pub fn wait(&self) -> Result<(),ApplicationError>{
-        Ok(self.receiver.recv()?)
-    }
-}
 pub struct Trainer<M>
-    where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+    where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
 
     nna:M,
     nnb:M,
@@ -380,13 +366,13 @@ pub struct Trainer<M>
     hcpe_reader:HcpeReader,
     bias_shake_shake:bool,
 }
-pub struct TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+pub struct TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
     m:PhantomData<M>,
 }
 
-impl<M> TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+impl<M> TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
     pub fn create(save_dir:String, nna_path:String, nnb_path:String, enable_shake_shake:bool)
-                  -> Result<Trainer<impl BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>>>,ApplicationError> {
+                  -> Result<Trainer<impl BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>>>,ApplicationError> {
 
         let mut rnd = prelude::thread_rng();
         let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
@@ -497,7 +483,7 @@ impl<M> TrainerCreator<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence
         })
     }
 }
-impl<M> Trainer<M> where M: BatchNN<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
     pub fn calc_alpha_beta(bias_shake_shake:bool) -> (f32,f32) {
         if bias_shake_shake {
             let mut rnd = rand::thread_rng();
