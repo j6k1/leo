@@ -16,7 +16,7 @@ use usiagent::shogi::*;
 use crate::error::ApplicationError;
 use crate::solver::checkmate::{AscComparator, CheckmateStrategy, DescComparator, MateStrategy};
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum MaybeMate {
     Nomate,
     MateMoves(u32,VecDeque<LegalMove>),
@@ -195,6 +195,7 @@ impl Solver {
 
     pub fn checkmate(&self) -> Result<MaybeMate,ApplicationError> {
         let r = self.receiver.recv();
+
         let mut m = MaybeMate::Unknown;
 
         match r {
@@ -204,12 +205,18 @@ impl Solver {
             Ok(Ok(MaybeMate::Nomate)) => {
                 m = MaybeMate::Nomate;
             },
-            _ => ()
+            e => {
+                self.aborted.store(true,atomic::Ordering::Release);
+
+                let _ = self.receiver.recv();
+
+                return e?;
+            }
         }
 
         self.aborted.store(true,atomic::Ordering::Release);
 
-        let n = self.receiver.recv();
+        let r = self.receiver.recv()?;
 
         match m {
             MaybeMate::MateMoves(depth,mvs) => {
@@ -218,7 +225,9 @@ impl Solver {
             MaybeMate::Nomate => {
                 Ok(MaybeMate::Nomate)
             },
-            _ => n?
+            _ => {
+                r
+            }
         }
     }
 
