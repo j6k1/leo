@@ -1,5 +1,7 @@
 use std::{error, fmt, io};
 use std::collections::VecDeque;
+use std::error::Error;
+use std::fmt::Formatter;
 use std::num::{ParseFloatError, ParseIntError};
 use std::sync::mpsc::{RecvError, Sender, SendError};
 use std::sync::{MutexGuard, PoisonError};
@@ -7,7 +9,7 @@ use concurrent_queue::{PopError, PushError};
 use csaparser::error::CsaParserError;
 use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
-use usiagent::error::{EventDispatchError, PlayerError, SfenStringConvertError};
+use usiagent::error::{EventDispatchError, InfoSendError, PlayerError, SfenStringConvertError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind};
 use usiagent::rule::AppliedMove;
 use crate::nn::{BatchItem, Message};
@@ -42,6 +44,7 @@ pub enum ApplicationError {
     TransactionPushError(PushError<Sender<()>>),
     BatchItemPushError(PushError<BatchItem>),
     ConcurrentQueuePopError(PopError),
+    SendSelDepthError(SendSelDepthError)
 }
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -73,7 +76,8 @@ impl fmt::Display for ApplicationError {
             ApplicationError::PoisonError(ref s) => write!(f,"{}",s),
             ApplicationError::TransactionPushError(ref e) => write!(f,"{}",e),
             ApplicationError::BatchItemPushError(ref e) => write!(f,"{}",e),
-            ApplicationError::ConcurrentQueuePopError(ref e) => write!(f,"{}",e)
+            ApplicationError::ConcurrentQueuePopError(ref e) => write!(f,"{}",e),
+            ApplicationError::SendSelDepthError(ref e) => write!(f,"{}",e)
         }
     }
 }
@@ -108,6 +112,7 @@ impl error::Error for ApplicationError {
             ApplicationError::TransactionPushError(_) => "An error occurred in adding the transaction to the queue.",
             ApplicationError::BatchItemPushError(_) => "An error occurred while adding a batch item to the queue.",
             ApplicationError::ConcurrentQueuePopError(_) => "Error retrieving element from concurrent queue.",
+            ApplicationError::SendSelDepthError(_) => "An error occurred when sending the seldepth of the info command.",
         }
     }
 
@@ -141,6 +146,7 @@ impl error::Error for ApplicationError {
             ApplicationError::TransactionPushError(ref e) => Some(e),
             ApplicationError::BatchItemPushError(ref e) => Some(e),
             ApplicationError::ConcurrentQueuePopError(ref e) => Some(e),
+            ApplicationError::SendSelDepthError(ref e) => Some(e)
         }
     }
 }
@@ -262,6 +268,11 @@ impl From<PopError> for ApplicationError {
         ApplicationError::ConcurrentQueuePopError(err)
     }
 }
+impl From<SendSelDepthError> for ApplicationError {
+    fn from(err: SendSelDepthError) -> ApplicationError {
+        ApplicationError::SendSelDepthError(err)
+    }
+}
 #[derive(Debug)]
 pub enum EvaluationError {
     InternalError(ApplicationError),
@@ -270,5 +281,27 @@ pub enum EvaluationError {
 impl From<ApplicationError> for EvaluationError {
     fn from(err: ApplicationError) -> EvaluationError {
         EvaluationError::InternalError(err)
+    }
+}
+#[derive(Debug)]
+pub struct SendSelDepthError(pub InfoSendError);
+
+impl fmt::Display for SendSelDepthError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f,"{}",self)
+    }
+}
+impl error::Error for SendSelDepthError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+
+    fn description(&self) -> &str {
+        "An error occurred when sending the seldepth of the info command."
+    }
+}
+impl From<InfoSendError> for SendSelDepthError {
+    fn from(err: InfoSendError) -> SendSelDepthError {
+        SendSelDepthError(err)
     }
 }
