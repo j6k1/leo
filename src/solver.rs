@@ -36,8 +36,8 @@ pub struct GameStateForMate<'a> {
     pub ignore_kyokumen_map:KyokumenMap<u64,()>,
     pub event_queue:Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
     pub teban:Teban,
-    pub state:Arc<State>,
-    pub mc:Arc<MochigomaCollections>
+    pub state:&'a Arc<State>,
+    pub mc:&'a Arc<MochigomaCollections>
 }
 pub struct Solver {
     receiver:Receiver<Result<MaybeMate,ApplicationError>>,
@@ -84,8 +84,8 @@ impl Solver {
             let mut current_kyokumen_map = ms.current_kyokumen_map.clone();
             let event_queue = Arc::clone(&ms.event_queue);
             let teban = ms.teban;
-            let state = ms.state.clone();
-            let mc = ms.mc.clone();
+            let state = Arc.clone(ms.state);
+            let mc = Arc::clone(&ms.mc);
 
             std::thread::spawn(move || {
                 let mut event_dispatcher = search::Root::create_event_dispatcher(&on_error_handler,&stop,&quited);
@@ -116,8 +116,8 @@ impl Solver {
                                            &event_queue,
                                            &mut event_dispatcher,
                                            teban,
-                                           &state,
-                                           &mc)) {
+                                           &*state,
+                                           &*mc)) {
                     let _ = on_error_handler.lock().map(|h| h.call(e));
                 }
             });
@@ -147,8 +147,8 @@ impl Solver {
             let mut current_kyokumen_map = ms.current_kyokumen_map.clone();
             let event_queue = Arc::clone(&ms.event_queue);
             let teban = ms.teban;
-            let state = ms.state.clone();
-            let mc = ms.mc.clone();
+            let state = Arc.clone(ms.state);
+            let mc = Arc::clone(&ms.mc);
 
             std::thread::spawn(move || {
                 let mut event_dispatcher = search::Root::create_event_dispatcher(&on_error_handler,&stop,&quited);
@@ -179,8 +179,8 @@ impl Solver {
                                                                       &event_queue,
                                                                       &mut event_dispatcher,
                                                                       teban,
-                                                                      &state,
-                                                                      &mc)) {
+                                                                      &*state,
+                                                                      &*mc)) {
                     let _ = on_error_handler.lock().map(|h| h.call(e));
                 }
             });
