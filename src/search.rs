@@ -1,8 +1,9 @@
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::ops::{Add, Neg, Sub};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, atomic, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 use usiagent::command::UsiInfoSubCommand;
 use usiagent::event::{UserEventDispatcher, UserEventQueue};
@@ -14,6 +15,7 @@ use usiagent::rule::{AppliedMove, LegalMove, State};
 use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError, SendSelDepthError};
 use crate::nn::Evalutor;
+use crate::search::Score::NEGINFINITE;
 use crate::solver::Solver;
 
 pub const BASE_DEPTH:u32 = 2;
@@ -175,9 +177,9 @@ pub trait Search<L,S> where L: Logger + Send + 'static, S: InfoSender {
         Some((depth,obtained,mhash,shash,oute_kyokumen_map,current_kyokumen_map,is_sennichite))
     }
 }
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum EvaluationResult {
-    Immediate(Score, Option<AppliedMove>),
+    Immediate(Score, VecDeque<AppliedMove>),
     Async,
     Timeout
 }
@@ -232,6 +234,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     adjust_depth:bool,
     network_delay:u32,
     display_evalute_score:bool,
+    max_threads:u32,
     stop:Arc<AtomicBool>,
     quited:Arc<AtomicBool>,
     kyokumen_score_map:KyokumenMap<u64,(Score,u32)>,
@@ -252,6 +255,7 @@ impl<L,S> Clone for Environment<L,S>
             adjust_depth:self.adjust_depth,
             network_delay:self.network_delay,
             display_evalute_score:self.display_evalute_score,
+            max_threads:self.max_threads,
             stop:Arc::clone(&self.stop),
             quited:Arc::clone(&self.quited),
             kyokumen_score_map:self.kyokumen_score_map.clone(),
@@ -270,7 +274,8 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                current_limit:Option<Instant>,
                adjust_depth:bool,
                network_delay:u32,
-               display_evalute_score:bool
+               display_evalute_score:bool,
+               max_threads:u32
     ) -> Environment<L,S> {
         let stop = Arc::new(AtomicBool::new(false));
         let quited = Arc::new(AtomicBool::new(false));
@@ -286,6 +291,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             adjust_depth:adjust_depth,
             network_delay:network_delay,
             display_evalute_score:display_evalute_score,
+            max_threads:max_threads,
             stop:stop,
             quited:quited,
             kyokumen_score_map:KyokumenMap::new(),
@@ -326,6 +332,67 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             s:PhantomData::<S>
         }
     }
+
+    fn termination(&self,
+                        r:&Receiver<Result<EvaluationResult,ApplicationError>>,
+                        await_mvs:Vec<Receiver<Result<EvaluationResult,ApplicationError>>>,
+                        threads:u32,
+                        env:&mut Environment<L,S>,
+                        score:Score,
+                        mut best_moves:VecDeque<AppliedMove>) -> Result<EvaluationResult,ApplicationError> {
+        env.stop.store(true,atomic::Ordering::Release);
+
+        let mut score = score;
+        let mut opt_error = None;
+
+        for _ in threads..env.max_threads {
+            match r.recv() {
+                Ok(Ok(EvaluationResult::Immediate(s,mut mvs))) => {
+                    if -s > score {
+                        score = -s;
+                        best_moves = mvs;
+                    }
+                },
+                Err(e) => {
+                    opt_error = Some(ApplicationError::from(e));
+                },
+                Ok(Err(e)) => {
+                    opt_error = Some(e);
+                },
+                _ => ()
+            }
+        }
+
+        for r in await_mvs {
+            match r.recv() {
+                Ok(Ok(EvaluationResult::Immediate(s,mut mvs))) => {
+                    if -s > score {
+                        score = -s;
+                        best_moves = mvs;
+                    }
+                },
+                Err(e) => {
+                    opt_error = Some(ApplicationError::from(e));
+                },
+                Ok(Err(e)) => {
+                    opt_error = Some(e);
+                },
+                _ => ()
+            }
+        }
+
+        match opt_error {
+            Some(e) => {
+                Err(e)
+            },
+            None if best_moves.len() == 0 => {
+                Ok(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new()))
+            },
+            None => {
+                Ok(EvaluationResult::Immediate(score,best_moves))
+            }
+        }
+    }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a>(&self, env: &mut Environment<L, S>, gs: GameState<'a, L, S>, evalutor: Evalutor)
@@ -336,10 +403,10 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
 pub struct Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
     l:PhantomData<L>,
     s:PhantomData<S>,
-    sender:Sender<(AppliedMove,i32)>
+    sender:Sender<Result<EvaluationResult,ApplicationError>>
 }
 impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
-    pub fn new(sender:Sender<(AppliedMove,i32)>) -> Recursive<L,S> {
+    pub fn new(sender:Sender<Result<EvaluationResult,ApplicationError>>) -> Recursive<L,S> {
         Recursive {
             l:PhantomData::<L>,
             s:PhantomData::<S>,
