@@ -230,22 +230,23 @@ impl Sub<i32> for Score {
 }
 
 pub struct Environment<L,S> where L: Logger, S: InfoSender {
-    event_queue:Arc<Mutex<UserEventQueue>>,
-    info_sender:S,
-    on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
-    hasher:Arc<KyokumenHash<u64>>,
-    limit:Option<Instant>,
-    current_limit:Option<Instant>,
-    max_depth:u32,
-    adjust_depth:bool,
-    network_delay:u32,
-    display_evalute_score:bool,
-    max_threads:u32,
-    stop:Arc<AtomicBool>,
-    quited:Arc<AtomicBool>,
-    kyokumen_score_map:KyokumenMap<u64,(Score,u32)>,
-    nodes:Arc<AtomicU64>,
-    think_start_time:Instant
+    pub event_queue:Arc<Mutex<UserEventQueue>>,
+    pub info_sender:S,
+    pub on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
+    pub hasher:Arc<KyokumenHash<u64>>,
+    pub limit:Option<Instant>,
+    pub current_limit:Option<Instant>,
+    pub max_depth:Option<u32>,
+    pub max_nodes:Option<u64>,
+    pub adjust_depth:bool,
+    pub network_delay:u32,
+    pub display_evalute_score:bool,
+    pub max_threads:u32,
+    pub stop:Arc<AtomicBool>,
+    pub quited:Arc<AtomicBool>,
+    pub kyokumen_score_map:KyokumenMap<u64,(Score,u32)>,
+    pub nodes:Arc<AtomicU64>,
+    pub think_start_time:Instant
 }
 impl<L,S> Clone for Environment<L,S>
     where L: Logger,
@@ -258,7 +259,8 @@ impl<L,S> Clone for Environment<L,S>
             hasher:Arc::clone(&self.hasher),
             limit:self.limit.clone(),
             current_limit:self.current_limit.clone(),
-            max_depth:self.max_depth,
+            max_depth:self.max_depth.clone(),
+            max_nodes:self.max_nodes.clone(),
             adjust_depth:self.adjust_depth,
             network_delay:self.network_delay,
             display_evalute_score:self.display_evalute_score,
@@ -279,7 +281,8 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                think_start_time:Instant,
                limit:Option<Instant>,
                current_limit:Option<Instant>,
-               max_depth:u32,
+               max_depth:Option<u32>,
+               max_nodes:Option<u64>,
                adjust_depth:bool,
                network_delay:u32,
                display_evalute_score:bool,
@@ -297,6 +300,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             limit:limit,
             current_limit:current_limit,
             max_depth:max_depth,
+            max_nodes:max_nodes,
             adjust_depth:adjust_depth,
             network_delay:network_delay,
             display_evalute_score:display_evalute_score,
@@ -679,6 +683,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                         }
 
                         if self.timeout_expected(env,start_time,gs.current_depth,nodes,processed_nodes) {
+                            is_timeout = true;
                             self.send_message(env,"think timeout!");
                             break;
                         }
@@ -702,6 +707,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                 }
 
                 if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+                    is_timeout = true;
                     break;
                 }
             } else if let Some(&(priority,m)) = it.next() {
@@ -798,7 +804,19 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                                         };
 
                                         let mut solver = Solver::new(
-
+                                            false,
+                                            env.limit.clone(),
+                                            env.checkmate_limit.clone(),
+                                            env.network_delay,
+                                            env.max_depth.clone(),
+                                            env.max_nodes.clone(),
+                                            env.info_sender.clone(),
+                                            env.on_error_handler.clone(),
+                                            hasher: Arc::clone(&env.hasher),
+                                            env.base_depth,
+                                            Arc::clone(&env.stop),
+                                            Arc::clone(&quited:quited),
+                                            ms: GameStateForMate
                                         );
 
                                         let gs = GameState {
@@ -811,10 +829,10 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                                             m:m,
                                             mc: &mc,
                                             obtained:obtained,
-                                            current_kyokumen_map:&mut current_kyokumen_map,
+                                            current_kyokumen_map:&current_kyokumen_map,
                                             self_already_oute_map:&mut self_already_oute_map,
                                             opponent_already_oute_map:&mut opponent_already_oute_map,
-                                            oute_kyokumen_map:&mut oute_kyokumen_map,
+                                            oute_kyokumen_map:&oute_kyokumen_map,
                                             mhash:mhash,
                                             shash:shash,
                                             depth:depth,
