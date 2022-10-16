@@ -12,6 +12,7 @@ use usiagent::player::InfoSender;
 use usiagent::rule::{LegalMove, State};
 use usiagent::shogi::*;
 use crate::error::ApplicationError;
+use crate::search;
 use crate::solver::checkmate::{AscComparator, CheckmateStrategy, DescComparator};
 
 #[derive(Debug,Clone)]
@@ -25,18 +26,18 @@ pub enum MaybeMate {
     Aborted
 }
 
-pub struct GameStateForMate {
-    already_oute_kyokumen_map:Option<KyokumenMap<u64,bool>>,
-    current_depth:u32,
-    mhash:u64,
-    shash:u64,
-    ignore_kyokumen_map:KyokumenMap<u64,()>,
-    oute_kyokumen_map:KyokumenMap<u64,()>,
-    current_kyokumen_map:KyokumenMap<u64,u32>,
-    event_queue:Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
-    teban:Teban,
-    state:State,
-    mc:MochigomaCollections
+pub struct GameStateForMate<'a> {
+    pub already_oute_kyokumen_map:&'a mut Option<KyokumenMap<u64,bool>>,
+    pub current_depth:u32,
+    pub mhash:u64,
+    pub shash:u64,
+    pub oute_kyokumen_map:&'a mut KyokumenMap<u64,()>,
+    pub current_kyokumen_map:&'a mut KyokumenMap<u64,u32>,
+    pub ignore_kyokumen_map:KyokumenMap<u64,()>,
+    pub event_queue:Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
+    pub teban:Teban,
+    pub state:Arc<State>,
+    pub mc:Arc<MochigomaCollections>
 }
 pub struct Solver {
     receiver:Receiver<Result<MaybeMate,ApplicationError>>,
@@ -87,7 +88,7 @@ impl Solver {
             let mc = ms.mc.clone();
 
             std::thread::spawn(move || {
-                let mut event_dispatcher = Self::create_event_dispatcher(&on_error_handler,&stop,&quited);
+                let mut event_dispatcher = search::Root::create_event_dispatcher(&on_error_handler,&stop,&quited);
 
                 let mut mate_strategy = CheckmateStrategy::new(
                                             DescComparator,
@@ -150,7 +151,7 @@ impl Solver {
             let mc = ms.mc.clone();
 
             std::thread::spawn(move || {
-                let mut event_dispatcher = Self::create_event_dispatcher(&on_error_handler,&stop,&quited);
+                let mut event_dispatcher = search::Root::create_event_dispatcher(&on_error_handler,&stop,&quited);
 
                 let mut nomate_strategy = CheckmateStrategy::new(
                     AscComparator,
@@ -217,44 +218,6 @@ impl Solver {
         let _ = self.receiver.recv()?;
 
         Ok(m)
-    }
-
-    fn create_event_dispatcher<'a,T,L>(on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,stop:&Arc<AtomicBool>,quited:&Arc<AtomicBool>)
-                                    -> UserEventDispatcher<'a,T,ApplicationError,L> where L: Logger {
-
-        let mut event_dispatcher = USIEventDispatcher::new(&on_error_handler.clone());
-
-        {
-            let stop = stop.clone();
-
-            event_dispatcher.add_handler(UserEventKind::Stop, move |_,e| {
-                match e {
-                    &UserEvent::Stop => {
-                        stop.store(true,atomic::Ordering::Release);
-                        Ok(())
-                    },
-                    e => Err(EventHandlerError::InvalidState(e.event_kind())),
-                }
-            });
-        }
-
-        {
-            let stop = stop.clone();
-            let quited = quited.clone();
-
-            event_dispatcher.add_handler(UserEventKind::Quit, move |_,e| {
-                match e {
-                    &UserEvent::Quit => {
-                        quited.store(true,atomic::Ordering::Release);
-                        stop.store(true,atomic::Ordering::Release);
-                        Ok(())
-                    },
-                    e => Err(EventHandlerError::InvalidState(e.event_kind())),
-                }
-            });
-        }
-
-        event_dispatcher
     }
 }
 
