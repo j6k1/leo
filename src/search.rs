@@ -15,7 +15,6 @@ use usiagent::player::InfoSender;
 use usiagent::rule::{AppliedMove, LegalMove, Rule, SquareToPoint, State};
 use usiagent::shogi::{KomaKind, MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError, SendSelDepthError};
-use crate::error::ApplicationError::AllResultSendError;
 use crate::nn::Evalutor;
 use crate::search::Score::{INFINITE, NEGINFINITE};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
@@ -32,8 +31,8 @@ pub const MAX_PLY_TIMELIMIT:u64 = 0;
 pub const TURN_COUNT:u32 = 50;
 pub const MIN_TURN_COUNT:u32 = 5;
 
-pub trait Search<L,S> where L: Logger + Send + 'static, S: InfoSender {
-    fn search<'a>(&self,env:&mut Environment<L,S>, gs:GameState<'a,L,S>, evalutor: &Evalutor, solver: &mut Solver) -> Result<EvaluationResult,ApplicationError>;
+pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
+    fn search<'a>(&self,env:&mut Environment<L,S>, gs:GameState<'a,L,Self>, evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
 
     fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
         let network_delay = env.network_delay;
@@ -68,7 +67,6 @@ pub trait Search<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 
     fn send_seldepth(&self, env:&mut Environment<L,S>,
-                            on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,
                             depth:u32, seldepth:u32) -> Result<(),ApplicationError> {
 
         let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
@@ -79,7 +77,7 @@ pub trait Search<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 
     fn send_info(&self, env:&mut Environment<L,S>,
-                      depth:u32, seldepth:u32, pv:&Vec<AppliedMove>) -> Result<(),ApplicationError>
+                      depth:u32, seldepth:u32, pv:&VecDeque<AppliedMove>) -> Result<(),ApplicationError>
         where Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
 
         let mut commands: Vec<UsiInfoSubCommand> = Vec::new();
@@ -122,7 +120,7 @@ pub trait Search<L,S> where L: Logger + Send + 'static, S: InfoSender {
         }
     }
 
-    fn startup_strategy<'a>(&self,env:&'a mut Environment<L,S>, gs:&'a mut GameState<'a,L,S>, m:LegalMove, priority:u32)
+    fn startup_strategy<'a>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a,L,Self>, m:LegalMove, priority:u32)
                             -> Option<(u32,Option<ObtainKind>,u64,u64,KyokumenMap<u64,()>,KyokumenMap<u64,u32>,bool)> {
 
         let obtained = match m {
@@ -176,15 +174,195 @@ pub trait Search<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         Some((depth,obtained,mhash,shash,oute_kyokumen_map,current_kyokumen_map,is_sennichite))
     }
+
+    fn before_search<'a>(&self,
+                             env: &mut Environment<L, S>,
+                             gs: &mut GameState<'a, L,Self>,
+                             evalutor: &Evalutor)
+                             -> Result<BeforeSearchResult, ApplicationError> {
+        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
+        }
+
+        if let None = env.kyokumen_score_map.get(gs.teban,&gs.mhash,&gs.shash) {
+            env.nodes.fetch_add(1,atomic::Ordering::Release);
+        }
+
+        if let Some(ObtainKind::Ou) = gs.obtained {
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new())));
+        }
+
+        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
+        }
+
+        if let Some(&(s, d)) = env.kyokumen_score_map.get(gs.teban, &gs.mhash, &gs.shash) {
+            match s {
+                Score::INFINITE => {
+                    if env.display_evalute_score {
+                        self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.");
+                    }
+                    return Ok(BeforeSearchResult::Complete(
+                        EvaluationResult::Immediate(INFINITE, VecDeque::new())
+                    ));
+                },
+                Score::NEGINFINITE => {
+                    if env.display_evalute_score {
+                        self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.");
+                    }
+                    return Ok(BeforeSearchResult::Complete(
+                        EvaluationResult::Immediate(NEGINFINITE, VecDeque::new())
+                    ));
+                },
+                Score::Value(s) if d >= gs.depth => {
+                    if env.display_evalute_score {
+                        self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s));
+                    }
+                    return Ok(BeforeSearchResult::Complete(
+                        EvaluationResult::Immediate(Score::Value(s), VecDeque::new())
+                    ));
+                },
+                _ => ()
+            }
+
+            if (gs.depth == 0 || gs.current_depth > env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+                let ms = GameStateForMate {
+                    already_oute_kyokumen_map: gs.self_already_oute_map,
+                    current_depth:gs.current_depth,
+                    mhash:gs.mhash,
+                    shash:gs.shash,
+                    oute_kyokumen_map: gs.oute_kyokumen_map,
+                    current_kyokumen_map: gs.current_kyokumen_map,
+                    ignore_kyokumen_map: KyokumenMap::new(),
+                    event_queue:env.event_queue.clone(),
+                    teban:gs.teban,
+                    state:gs.state,
+                    mc:gs.mc
+                };
+
+                let solver = Solver::new(
+                    false,
+                    env.limit.clone(),
+                    env.max_ply_timelimit.map(|l| Instant::now() + l),
+                    env.network_delay,
+                    env.max_ply_mate.clone(),
+                    env.max_nodes.clone(),
+                    env.info_sender.clone(),
+                    Arc::clone(&env.on_error_handler),
+                    Arc::clone(&env.hasher),
+                    env.base_depth,
+                    Arc::clone(&env.stop),
+                    Arc::clone(&env.quited),
+                    ms
+                );
+
+                match solver.checkmate()? {
+                    MaybeMate::MateMoves(_, mvs) => {
+                        return Ok(BeforeSearchResult::Complete(
+                            EvaluationResult::Immediate(INFINITE, mvs.into_iter().map(|m| {
+                                AppliedMove::from(m)
+                            }).collect::<VecDeque<AppliedMove>>())
+                        ));
+                    },
+                    _ => ()
+                }
+            }
+        }
+
+        if let Err(e) = gs.event_dispatcher.dispatch_events(self,&*env.event_queue) {
+            return Err(ApplicationError::from(e));
+        }
+
+        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
+        }
+
+        let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
+            if gs.depth == 0 || gs.current_depth == env.max_depth {
+                if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
+                }
+            }
+
+            let mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
+
+            if mvs.len() == 0 {
+                return Ok(BeforeSearchResult::Complete(
+                    EvaluationResult::Immediate(NEGINFINITE, VecDeque::new())
+                ));
+            } else if gs.depth == 0 || gs.current_depth == env.max_depth {
+                match gs.m {
+                    None => {
+                        return Err(ApplicationError::LogicError(String::from("move is not set.")));
+                    },
+                    Some(m) => {
+                        let (s,r) = mpsc::channel();
+                        evalutor.submit(gs.teban,gs.state.get_banmen(),&gs.mc,m,s);
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Async(r)));
+                    }
+                }
+            } else {
+                mvs
+            }
+        } else {
+            if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+                self.send_message(env, "think timeout!");
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
+            }
+
+            let mvs:Vec<LegalMove> = Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc);
+
+            mvs
+        };
+
+        let mvs = mvs.into_iter().map(|m| {
+            let ps = Rule::apply_move_to_partial_state_none_check(gs.state,gs.teban,gs.mc,m.to_applied_move());
+
+            let (x,y,kind) = match m {
+                LegalMove::To(ref mv) => {
+                    let banmen = gs.state.get_banmen();
+                    let (sx,sy) = mv.src().square_to_point();
+                    let (x,y) = mv.dst().square_to_point();
+                    let kind = banmen.0[sy as usize][sx as usize];
+
+                    let kind = if mv.is_nari() {
+                        kind.to_nari()
+                    } else {
+                        kind
+                    };
+
+                    (x,y,kind)
+                },
+                LegalMove::Put(ref mv) => {
+                    let (x,y) = mv.dst().square_to_point();
+                    let kind = mv.kind();
+
+                    (x,y,KomaKind::from((gs.teban,kind)))
+                }
+            };
+            if Rule::is_mate_with_partial_state_and_point_and_kind(gs.teban,&ps,x,y,kind) ||
+                Rule::is_mate_with_partial_state_repeat_move_kinds(gs.teban,&ps) {
+                (10,m)
+            } else {
+                match m {
+                    LegalMove::To(ref mv) if mv.obtained().is_some() => {
+                        (5,m)
+                    },
+                    _ => (1,m),
+                }
+            }
+        }).collect::<Vec<(u32,LegalMove)>>();
+
+        Ok(BeforeSearchResult::Mvs(mvs))
+    }
 }
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum EvaluationResult {
-    Immediate(Score, VecDeque<AppliedMove>,AppliedMove),
-    Async(Receiver<Result<EvaluationResult,ApplicationError>>),
-    None,
+    Immediate(Score, VecDeque<AppliedMove>),
+    Async(Receiver<(AppliedMove,i32)>),
     Timeout
 }
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Debug)]
 pub enum BeforeSearchResult {
     Complete(EvaluationResult),
     Mvs(Vec<(u32,LegalMove)>)
@@ -236,8 +414,11 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub hasher:Arc<KyokumenHash<u64>>,
     pub limit:Option<Instant>,
     pub current_limit:Option<Instant>,
-    pub max_depth:Option<u32>,
+    pub base_depth:u32,
+    pub max_depth:u32,
+    pub max_ply_mate:Option<u32>,
     pub max_nodes:Option<u64>,
+    pub max_ply_timelimit:Option<Duration>,
     pub adjust_depth:bool,
     pub network_delay:u32,
     pub display_evalute_score:bool,
@@ -248,9 +429,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub nodes:Arc<AtomicU64>,
     pub think_start_time:Instant
 }
-impl<L,S> Clone for Environment<L,S>
-    where L: Logger,
-          S: InfoSender {
+impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
     fn clone(&self) -> Self {
         Environment {
             event_queue:Arc::clone(&self.event_queue),
@@ -259,8 +438,11 @@ impl<L,S> Clone for Environment<L,S>
             hasher:Arc::clone(&self.hasher),
             limit:self.limit.clone(),
             current_limit:self.current_limit.clone(),
-            max_depth:self.max_depth.clone(),
+            base_depth:self.base_depth,
+            max_depth:self.max_depth,
+            max_ply_mate:self.max_ply_mate.clone(),
             max_nodes:self.max_nodes.clone(),
+            max_ply_timelimit:self.max_ply_timelimit.clone(),
             adjust_depth:self.adjust_depth,
             network_delay:self.network_delay,
             display_evalute_score:self.display_evalute_score,
@@ -281,8 +463,11 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                think_start_time:Instant,
                limit:Option<Instant>,
                current_limit:Option<Instant>,
-               max_depth:Option<u32>,
+               base_depth:u32,
+               max_depth:u32,
+               max_ply_mate:Option<u32>,
                max_nodes:Option<u64>,
+               max_ply_timelimit:Option<Duration>,
                adjust_depth:bool,
                network_delay:u32,
                display_evalute_score:bool,
@@ -299,8 +484,11 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             think_start_time:think_start_time,
             limit:limit,
             current_limit:current_limit,
+            base_depth:base_depth,
             max_depth:max_depth,
+            max_ply_mate:max_ply_mate,
             max_nodes:max_nodes,
+            max_ply_timelimit:max_ply_timelimit,
             adjust_depth:adjust_depth,
             network_delay:network_delay,
             display_evalute_score:display_evalute_score,
@@ -312,26 +500,25 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
         }
     }
 }
-pub struct GameState<'a,L,S> where L: Logger + Send + 'static, S: InfoSender {
-    event_dispatcher:&'a mut UserEventDispatcher<'a,S,ApplicationError,L>,
-    solver_event_dispatcher:&'a mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
-    teban:Teban,
-    state:&'a Arc<State>,
-    alpha:Score,
-    beta:Score,
-    m:Option<AppliedMove>,
-    mc:&'a Arc<MochigomaCollections>,
-    obtained:Option<ObtainKind>,
-    current_kyokumen_map:&'a KyokumenMap<u64,u32>,
-    self_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
-    opponent_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
-    oute_kyokumen_map:&'a KyokumenMap<u64,()>,
-    mhash:u64,
-    shash:u64,
-    depth:u32,
-    current_depth:u32,
-    base_depth:u32,
-    node_count:u64,
+pub struct GameState<'a,L,T> where L: Logger + Send + 'static {
+    pub event_dispatcher:&'a mut UserEventDispatcher<'a,T,ApplicationError,L>,
+    pub solver_event_dispatcher:&'a mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
+    pub teban:Teban,
+    pub state:&'a Arc<State>,
+    pub alpha:Score,
+    pub beta:Score,
+    pub m:Option<AppliedMove>,
+    pub mc:&'a Arc<MochigomaCollections>,
+    pub obtained:Option<ObtainKind>,
+    pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
+    pub self_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
+    pub opponent_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
+    pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
+    pub mhash:u64,
+    pub shash:u64,
+    pub depth:u32,
+    pub current_depth:u32,
+    pub node_count:u64,
 }
 pub struct Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     l:PhantomData<L>,
@@ -348,7 +535,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     pub fn create_event_dispatcher<'a,T>(on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,stop:&Arc<AtomicBool>,quited:&Arc<AtomicBool>)
                                        -> UserEventDispatcher<'a,T,ApplicationError,L> {
 
-        let mut event_dispatcher = USIEventDispatcher::new(&on_error_handler.clone());
+        let mut event_dispatcher = USIEventDispatcher::new(&on_error_handler);
 
         {
             let stop = stop.clone();
@@ -384,27 +571,25 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 
     pub fn termination(&self,
-                        r:&Receiver<Result<EvaluationResult,ApplicationError>>,
-                        mut is_timeout:bool,
-                        ignore_await:bool,
-                        await_mvs:Vec<Receiver<(AppliedMove,i32)>>,
-                        threads:u32,
-                        env:&mut Environment<L,S>,
-                        score:Score) -> Result<EvaluationResult,ApplicationError> {
+                       r:&Receiver<Result<EvaluationResult,ApplicationError>>,
+                       mut is_timeout:bool,
+                       ignore_await:bool,
+                       await_mvs:Vec<Receiver<(AppliedMove,i32)>>,
+                       threads:u32,
+                       env:&mut Environment<L,S>,
+                       score:Score,
+                       mut best_moves:VecDeque<AppliedMove>) -> Result<EvaluationResult,ApplicationError> {
         env.stop.store(true,atomic::Ordering::Release);
-
-        let mut best_moves = VecDeque::new();
 
         let mut score = score;
         let mut opt_error = None;
 
         for _ in threads..env.max_threads {
             match r.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,mut mvs,m)) if !is_timeout => {
+                Ok(EvaluationResult::Immediate(s,mvs)) if !is_timeout => {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
-                        best_moves.push_front(m);
                     }
                 },
                 Ok(EvaluationResult::Timeout) => {
@@ -423,8 +608,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         if !ignore_await {
             for r in await_mvs {
-                match r.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
+                match r.recv().map_err(|e| ApplicationError::from(e)) {
                     Ok((m,s)) if !is_timeout => {
+                        let s = Score::Value(s);
+
                         if -s > score {
                             score = -s;
                             best_moves = VecDeque::new();
@@ -441,179 +628,26 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         match opt_error {
             Some(e) => {
-                Err(e)
+                e
             },
             None if best_moves.len() == 0 => {
-                Ok(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new(),m))
+                Ok(EvaluationResult::Immediate(NEGINFINITE, VecDeque::new()))
             },
             None => {
-                Ok(EvaluationResult::Immediate(score,best_moves,m))
+                Ok(EvaluationResult::Immediate(score, best_moves))
             }
         }
-    }
-
-    pub fn before_search<'a>(&self,
-                             env: &mut Environment<L, S>,
-                             gs: &'a mut GameState<'a, L, S>,
-                             evalutor: &Evalutor,
-                             solver: &mut Solver)
-                             -> Result<BeforeSearchResult, ApplicationError> {
-        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
-            return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
-        }
-
-        if let None = env.kyokumen_score_map.get(gs.teban,&gs.mhash,&gs.shash) {
-            env.nodes.fetch_add(1,atomic::Ordering::Release);
-        }
-
-        if let Some(ObtainKind::Ou) = gs.obtained {
-            return Ok(gs.m.map(|m| {
-                BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new(),m))
-            }).unwrap_or(BeforeSearchResult::Complete(EvaluationResult::None)));
-        }
-
-        if Rule::is_mate(gs.teban,&*gs.state) {
-            return Ok(gs.m.map(|m| {
-                BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new(),m))
-            }).unwrap_or(BeforeSearchResult::Complete(EvaluationResult::None)));
-        }
-
-        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
-            self.send_message(env,"think timeout!");
-            return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
-        }
-
-        if let Some(m) = gs.m {
-            if let Some(&(s, d)) = env.kyokumen_score_map.get(gs.teban, &gs.mhash, &gs.shash) {
-                match s {
-                    Score::INFINITE => {
-                        self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.");
-                        return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(INFINITE, VecDeque::new(), m)
-                        ));
-                    },
-                    Score::NEGINFINITE => {
-                        self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.");
-                        return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(NEGINFINITE, VecDeque::new(), m)
-                        ));
-                    },
-                    Score::Value(s) if d >= depth => {
-                        self.send_message(env & format!("score corresponding to the hash was found in the map. value is {}.", s));
-                        return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(s, VecDeque::new(), m)
-                        ));
-                    },
-                    _ => ()
-                }
-            }
-
-            if (gs.depth == 0 || gs.current_depth > env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
-                match env.solver.checkmate()? {
-                    MaybeMate::MateMoves(_, mvs) => {
-                        return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(INFINITE, mvs, m)
-                        ));
-                    },
-                    MaybeMate::MateMoves(_, _) => {
-                        return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(NEGINFINITE, mvs, m)
-                        ));
-                    },
-                    _ => ()
-                }
-            }
-        }
-
-        let _ = event_dispatcher.dispatch_events(self,&*env.event_queue);
-
-        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
-            self.send_message(env,"think timeout!");
-            return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
-        }
-
-        let mvs = if Rule::is_mate(teban.opposite(),&*gs.state) {
-            if gs.depth == 0 || gs.current_depth == env.max_depth {
-                if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
-                    self.send_message(env,"think timeout!");
-                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
-                }
-            }
-
-            let mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
-
-            if mvs.len() == 0 {
-                return gs.m.map(|m| {
-                    Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(NEGINFINITE, VecDeque::new(), m)
-                    ))
-                }).unwrap_or(Ok(BeforeSearchResult::Complete(EvaluationResult::None)));
-            } else if gs.depth == 0 || gs.current_depth == env.max_depth {
-            } else {
-                mvs
-            }
-        } else {
-            if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
-                self.send_message(env, "think timeout!");
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
-            }
-
-            let mvs:Vec<LegalMove> = Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc);
-
-            mvs
-        };
-
-        let mut mvs = gs.mvs.into_iter().map(|m| {
-            let ps = Rule::apply_move_to_partial_state_none_check(gs.state,gs.teban,gs.mc,gs.m.to_applied_move());
-
-            let (x,y,kind) = match m {
-                LegalMove::To(ref mv) => {
-                    let banmen = gs.state.get_banmen();
-                    let (sx,sy) = mv.src().square_to_point();
-                    let (x,y) = mv.dst().square_to_point();
-                    let kind = banmen.0[sy as usize][sx as usize];
-
-                    let kind = if mv.is_nari() {
-                        kind.to_nari()
-                    } else {
-                        kind
-                    };
-
-                    (x,y,kind)
-                },
-                LegalMove::Put(ref mv) => {
-                    let (x,y) = mv.dst().square_to_point();
-                    let kind = mv.kind();
-
-                    (x,y,KomaKind::from((gs.teban,kind)))
-                }
-            };
-            if Rule::is_mate_with_partial_state_and_point_and_kind(gs.teban,&ps,x,y,kind) ||
-                Rule::is_mate_with_partial_state_repeat_move_kinds(gs.teban,&ps) {
-                (10,m)
-            } else {
-                match m {
-                    LegalMove::To(ref mv) if mv.obtained().is_some() => {
-                        (5,m)
-                    },
-                    _ => (1,m),
-                }
-            }
-        }).collect::<Vec<(u32,LegalMove)>>();
-
-        Ok(BeforeSearchResult::Mvs(mvs))
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a>(&self,
                   env: &mut Environment<L, S>,
-                  gs: GameState<'a, L, S>,
-                  evalutor: &Evalutor,
-                  solver: &mut Solver)
+                  gs: GameState<'a,L,Self>,
+                  evalutor: &Evalutor)
         -> Result<EvaluationResult, ApplicationError> {
         let mut gs = gs;
 
-        let mvs = match self.before_search(env,&mut gs,evalutor,solver)? {
+        let mvs = match self.before_search(env,&mut gs,evalutor)? {
             BeforeSearchResult::Complete(r) => {
                 return Ok(r);
             },
@@ -630,7 +664,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
 
         let (sender,receiver):(_,Receiver<Result<EvaluationResult, ApplicationError>>) = mpsc::channel();
 
-        let mut threads = env.max_threads;s
+        let mut threads = env.max_threads;
 
         let mvs_count = mvs.len() as u64;
 
@@ -648,7 +682,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                 let nodes = gs.node_count * mvs_count - processed_nodes as u64;
 
                 match r {
-                    Ok(EvaluationResult::Immediate(s,mvs,m)) => {
+                    Ok(EvaluationResult::Immediate(s,mvs)) => {
                         if let Some(&(_,d)) = env.kyokumen_score_map.get(gs.teban.opposite(),&gs.mhash,&gs.shash) {
                             if d < gs.depth {
                                 env.kyokumen_score_map.insert(gs.teban.opposite(), gs.mhash, gs.shash, (s,gs.depth));
@@ -665,12 +699,11 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                             env.kyokumen_score_map.insert(gs.teban, gs.mhash, gs.shash, (-s,gs.depth));
                         }
 
-                        if -s > scoreval {
-                            self.send_info(env, gs.base_depth,gs.current_depth,&mvs);
-                            self.send_score(env,gs.teban,-s);
+                        self.send_info(env, env.base_depth,gs.current_depth,&mvs);
+                        self.send_score(env,gs.teban,-s);
 
+                        if -s > scoreval {
                             scoreval = -s;
-                            mvs.push_front(m);
 
                             best_moves = mvs;
 
@@ -684,7 +717,6 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
 
                         if self.timeout_expected(env,start_time,gs.current_depth,nodes,processed_nodes) {
                             is_timeout = true;
-                            self.send_message(env,"think timeout!");
                             break;
                         }
                     },
@@ -696,21 +728,23 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                         break;
                     },
                     Err(e) => {
-                        self.termination(&receiver, false,true,await_mvs,threads, env, scoreval)?;
-                        return e;
+                        self.termination(&receiver, false,true,await_mvs,threads, env, scoreval,best_moves)?;
+                        return Err(e);
                     }
                 }
 
-                if let Err(e) = gs.event_dispatcher.dispatch_events(gs,&*env.event_queue) {
-                    self.termination(&receiver, false,true,await_mvs,threads, env, scoreval)?;
-                    return e.map_err(|e| ApplicationError::from(e));
+                let r = gs.event_dispatcher.dispatch_events(self,&*env.event_queue);
+
+                if let Err(e) = r {
+                    self.termination(&receiver, false,true,await_mvs,threads, env, scoreval,best_moves)?;
+                    return Err(ApplicationError::from(e));
                 }
 
                 if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
                     is_timeout = true;
                     break;
                 }
-            } else if let Some(&(priority,m)) = it.next() {
+            } else if let Some((priority,m)) = it.next() {
                 match self.startup_strategy(env,
                                             &mut gs,
                                             m,
@@ -740,138 +774,59 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                                             alpha = scoreval;
                                         }
                                         if scoreval >= gs.beta {
-                                            return self.termination(&receiver, false,true,await_mvs,threads, env, scorevals);
+                                            return self.termination(&receiver, false,true,await_mvs,threads, env, scoreval,best_moves);
                                         }
                                     }
                                     continue;
                                 }
 
                                 let teban = gs.teban;
-                                let mut state = Arc::new(state);
-                                let mut mc = Arc::new(mc);
+                                let state = Arc::new(state);
+                                let mc = Arc::new(mc);
                                 let alpha = gs.alpha;
                                 let beta = gs.beta;
                                 let mut self_already_oute_map = gs.self_already_oute_map.clone();
                                 let mut opponent_already_oute_map = gs.opponent_already_oute_map.clone();
                                 let current_depth = gs.current_depth;
-                                let base_depth = gs.base_depth;
                                 let node_count = gs.node_count;
 
                                 let mut env = env.clone();
-                                let mut evalutor = evalutor.clone();
+                                let evalutor = evalutor.clone();
 
                                 let sender = sender.clone();
 
                                 let b = std::thread::Builder::new();
 
                                 let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
-                                    let repeat = match alpha {
-                                        Score::NEGINFINITE | Score::INFINITE => 1,
-                                        Score::Value(_) => 2,
+                                    let mut event_dispatcher = Self::create_event_dispatcher(&env.on_error_handler,&env.stop,&env.quited);
+                                    let mut solver_event_dispatcher = Self::create_event_dispatcher(&env.on_error_handler,&env.stop,&env.quited);
+
+                                    let gs = GameState {
+                                        event_dispatcher:&mut event_dispatcher,
+                                        solver_event_dispatcher:&mut solver_event_dispatcher,
+                                        teban: teban,
+                                        state: &state,
+                                        alpha: -beta,
+                                        beta: -alpha,
+                                        m:Some(m),
+                                        mc: &mc,
+                                        obtained:obtained,
+                                        current_kyokumen_map:&current_kyokumen_map,
+                                        self_already_oute_map:&mut self_already_oute_map,
+                                        opponent_already_oute_map:&mut opponent_already_oute_map,
+                                        oute_kyokumen_map:&oute_kyokumen_map,
+                                        mhash:mhash,
+                                        shash:shash,
+                                        depth:depth,
+                                        current_depth:current_depth,
+                                        node_count:node_count
                                     };
 
-                                    let mut a = alpha;
+                                    let strategy  = Recursive::new(sender.clone());
 
-                                    let mut res = Ok(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new(),m));
+                                    let r = strategy.search(&mut env,gs,&evalutor);
 
-                                    for i in 0..repeat {
-                                        let b = match (i,repeat) {
-                                            (0,2) => alpha + 1,
-                                            (1,2) | (0,1) => gs.beta,
-                                            _ => {
-                                                let _ = sender.send(Err(ApplicationError::LogicError(String::from(
-                                                    "The combination of i,repeat is invalid."
-                                                ))))?;
-                                                return;
-                                            }
-                                        };
-
-                                        let mut event_dispatcher = Self::create_event_dispatcher(&env.on_error_handler,&env.stop,&env.quited);
-                                        let mut solver_event_dispatcher = Self::create_event_dispatcher(&env.on_error_handler,&env.stop,&env.quited);
-
-                                        let ms = GameStateForMate {
-                                            already_oute_kyokumen_map: &mut self_already_oute_map,
-                                            current_depth:current_depth,
-                                            mhash:mhash,
-                                            shash:shash,
-                                            oute_kyokumen_map: &mut oute_kyokumen_map,
-                                            current_kyokumen_map: &mut current_kyokumen_map,
-                                            ignore_kyokumen_map: KykumenMap::new(),
-                                            event_queue:env.event_queue.clone(),
-                                            teban:teban,
-                                            state:&state,
-                                            mc:&mc
-                                        };
-
-                                        let mut solver = Solver::new(
-                                            false,
-                                            env.limit.clone(),
-                                            env.checkmate_limit.clone(),
-                                            env.network_delay,
-                                            env.max_depth.clone(),
-                                            env.max_nodes.clone(),
-                                            env.info_sender.clone(),
-                                            env.on_error_handler.clone(),
-                                            hasher: Arc::clone(&env.hasher),
-                                            env.base_depth,
-                                            Arc::clone(&env.stop),
-                                            Arc::clone(&quited:quited),
-                                            ms: GameStateForMate
-                                        );
-
-                                        let gs = GameState {
-                                            event_dispatcher: &mut event_dispatcher,
-                                            solver_event_dispatcher: &mut solver_event_dispatcher,
-                                            teban: teban,
-                                            state: &state,
-                                            alpha: alpha,
-                                            beta: beta,
-                                            m:m,
-                                            mc: &mc,
-                                            obtained:obtained,
-                                            current_kyokumen_map:&current_kyokumen_map,
-                                            self_already_oute_map:&mut self_already_oute_map,
-                                            opponent_already_oute_map:&mut opponent_already_oute_map,
-                                            oute_kyokumen_map:&oute_kyokumen_map,
-                                            mhash:mhash,
-                                            shash:shash,
-                                            depth:depth,
-                                            current_depth:current_depth,
-                                            base_depth:base_depth,
-                                            node_count:node_count
-                                        };
-
-                                        let (s,r) = mpsc::channel();
-
-                                        let mut strategy  = Recursive::new(s);
-
-                                        let r = strategy.search(&mut env,gs,&evalutor,&mut solver);
-
-                                        match r.map_err(|e| ApplicationError::from(e)) {
-                                            Ok(EvaluationResult::Immediate(s,mut mvs,m)) => {
-                                               res = Ok(EvaluationResult::Immediate(s,mvs, m));
-
-                                                if -s <= alpha || -s  >= gs.beta {
-                                                    break;
-                                                } else {
-                                                    a = -s;
-                                                }
-                                            },
-                                            r @ Ok(EvaluationResult::Async(_)) => {
-                                                let _ = sender.send(r);
-                                                a = -s;
-                                            },
-                                            r @ Ok(EvaluationResult::Timepout) => {
-                                                res = r;
-                                                break;
-                                            }
-                                            Err(e) => {
-                                                res = Err(e);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    let _ = sender.send(res);
+                                    let _ = sender.send(r);
                                 });
 
                                 threads -= 1;
@@ -885,7 +840,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
             }
         }
 
-        self.termination(&receiver, is_timeout,true,await_mvs,threads, env, scoreval)
+        self.termination(&receiver, is_timeout,true,await_mvs,threads, env, scoreval,best_moves)
     }
 }
 pub struct Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -904,8 +859,8 @@ impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
 }
 impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a>(&self,
-                  env: &mut Environment<L, S>, gs: GameState<'a, L, S>,
-                  evalutor: &Evalutor, solver: &mut Solver) -> Result<EvaluationResult, ApplicationError> {
+                  env: &mut Environment<L, S>, gs: GameState<'a, L,Self>,
+                  evalutor: &Evalutor) -> Result<EvaluationResult, ApplicationError> {
         todo!()
     }
 }

@@ -3,8 +3,8 @@ use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
-use usiagent::error::{EventHandlerError};
-use usiagent::event::{EventDispatcher, EventQueue, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, USIEventDispatcher};
+
+use usiagent::event::{EventQueue, UserEvent, UserEventKind};
 use usiagent::hash::{KyokumenHash, KyokumenMap};
 use usiagent::logger::Logger;
 use usiagent::OnErrorHandler;
@@ -27,12 +27,12 @@ pub enum MaybeMate {
 }
 
 pub struct GameStateForMate<'a> {
-    pub already_oute_kyokumen_map:&'a mut Option<KyokumenMap<u64,bool>>,
+    pub already_oute_kyokumen_map:&'a Option<KyokumenMap<u64,bool>>,
     pub current_depth:u32,
     pub mhash:u64,
     pub shash:u64,
-    pub oute_kyokumen_map:&'a mut KyokumenMap<u64,()>,
-    pub current_kyokumen_map:&'a mut KyokumenMap<u64,u32>,
+    pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
+    pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
     pub ignore_kyokumen_map:KyokumenMap<u64,()>,
     pub event_queue:Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
     pub teban:Teban,
@@ -84,11 +84,11 @@ impl Solver {
             let mut current_kyokumen_map = ms.current_kyokumen_map.clone();
             let event_queue = Arc::clone(&ms.event_queue);
             let teban = ms.teban;
-            let state = Arc.clone(ms.state);
+            let state = Arc::clone(ms.state);
             let mc = Arc::clone(&ms.mc);
 
             std::thread::spawn(move || {
-                let mut event_dispatcher = search::Root::create_event_dispatcher(&on_error_handler,&stop,&quited);
+                let mut event_dispatcher = search::Root::<L,S>::create_event_dispatcher(&on_error_handler,&stop,&quited);
 
                 let mut mate_strategy = CheckmateStrategy::new(
                                             DescComparator,
@@ -101,7 +101,7 @@ impl Solver {
                                                           max_depth,
                                                           max_nodes,
                                                           info_sender,
-                                                          on_error_handler.clone(),
+                                                          Arc::clone(&on_error_handler),
                                                           base_depth,
                                                           stop,
                                                           aborted,
@@ -147,11 +147,11 @@ impl Solver {
             let mut current_kyokumen_map = ms.current_kyokumen_map.clone();
             let event_queue = Arc::clone(&ms.event_queue);
             let teban = ms.teban;
-            let state = Arc.clone(ms.state);
+            let state = Arc::clone(ms.state);
             let mc = Arc::clone(&ms.mc);
 
             std::thread::spawn(move || {
-                let mut event_dispatcher = search::Root::create_event_dispatcher(&on_error_handler,&stop,&quited);
+                let mut event_dispatcher = search::Root::<L,S>::create_event_dispatcher(&on_error_handler,&stop,&quited);
 
                 let mut nomate_strategy = CheckmateStrategy::new(
                     AscComparator,
@@ -164,7 +164,7 @@ impl Solver {
                     max_depth,
                     max_nodes,
                     info_sender,
-                    on_error_handler.clone(),
+                    Arc::clone(&on_error_handler),
                     base_depth,
                     stop,
                     aborted,

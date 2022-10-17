@@ -10,7 +10,7 @@ use csaparser::error::CsaParserError;
 use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
 use usiagent::error::{EventDispatchError, InfoSendError, PlayerError, SfenStringConvertError};
-use usiagent::event::{EventQueue, SystemEvent, SystemEventKind};
+use usiagent::event::{EventQueue, SystemEvent, SystemEventKind, UserEvent, UserEventKind};
 use usiagent::rule::AppliedMove;
 use crate::nn::{BatchItem, Message};
 
@@ -176,10 +176,14 @@ impl From<SfenStringConvertError> for ApplicationError {
         ApplicationError::SfenStringConvertError(err)
     }
 }
-impl<'a> From<EventDispatchError<'a,EventQueue<SystemEvent,SystemEventKind>,SystemEvent,ApplicationError>>
-for ApplicationError {
+impl<'a> From<EventDispatchError<'a,EventQueue<SystemEvent,SystemEventKind>,SystemEvent,ApplicationError>> for ApplicationError {
     fn from(err: EventDispatchError<'a, EventQueue<SystemEvent, SystemEventKind>, SystemEvent, ApplicationError>)
             -> ApplicationError {
+        ApplicationError::EventDispatchError(format!("{}",err))
+    }
+}
+impl<'a> From<EventDispatchError<'_, EventQueue<UserEvent, UserEventKind>, UserEvent, ApplicationError>> for ApplicationError {
+    fn from(err: EventDispatchError<'_, EventQueue<UserEvent, UserEventKind>, UserEvent, ApplicationError>) -> Self {
         ApplicationError::EventDispatchError(format!("{}",err))
     }
 }
@@ -250,6 +254,11 @@ impl From<SendError<()>> for ApplicationError {
 }
 impl From<PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>> for ApplicationError {
     fn from(err: PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>) -> ApplicationError {
+        ApplicationError::PoisonError(format!("{}",err))
+    }
+}
+impl From<PoisonError<MutexGuard<'_, std::sync::mpsc::Receiver<Vec<(f32, f32)>>>>> for ApplicationError {
+    fn from(err: PoisonError<MutexGuard<'_, std::sync::mpsc::Receiver<Vec<(f32, f32)>>>>) -> ApplicationError {
         ApplicationError::PoisonError(format!("{}",err))
     }
 }

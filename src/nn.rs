@@ -132,7 +132,7 @@ impl<T,U,D,P,PT,I,O> BatchNeuralNetwork<U,D,P,PT,I,O> for T
 pub struct Evalutor {
     sender:Sender<Message>,
     transaction_sender_queue:Arc<ConcurrentQueue<Sender<()>>>,
-    receiver:Arc<Receiver<Vec<(f32,f32)>>>,
+    receiver:Arc<Mutex<Receiver<Vec<(f32,f32)>>>>,
     queue:Arc<ConcurrentQueue<BatchItem>>,
     active_threads:Arc<AtomicUsize>,
     wait_threads:Arc<AtomicUsize>
@@ -261,7 +261,7 @@ impl Evalutor {
             transaction_sender_queue:Arc::new(ConcurrentQueue::unbounded()),
             active_threads:Arc::new(AtomicUsize::new(0)),
             wait_threads:Arc::new(AtomicUsize::new(0)),
-            receiver:Arc::new(r),
+            receiver:Arc::new(Mutex::new(r)),
             queue:Arc::new(ConcurrentQueue::unbounded())
         })
     }
@@ -326,8 +326,15 @@ impl Evalutor {
 
             self.sender.send(Message::Eval(input))?;
 
-            for (r, (m, s)) in self.receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
-                let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32));
+            match self.receiver.lock() {
+                Ok(receiver) => {
+                    for (r, (m, s)) in receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
+                        let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32));
+                    }
+                },
+                Err(e) => {
+                    return Err(ApplicationError::from(e));
+                }
             }
 
             while !self.transaction_sender_queue.is_empty() {
