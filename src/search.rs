@@ -32,7 +32,10 @@ pub const TURN_COUNT:u32 = 50;
 pub const MIN_TURN_COUNT:u32 = 5;
 
 pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
-    fn search<'a>(&self,env:&mut Environment<L,S>, gs:GameState<'a,L,Self>, evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
+    fn search<'a>(&self,env:&mut Environment<L,S>, gs:GameState<'a>,
+                  event_dispatcher:&mut UserEventDispatcher<'a,Self,ApplicationError,L>,
+                  solver_event_dispatcher:&mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
+                  evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
 
     fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
         let network_delay = env.network_delay;
@@ -120,7 +123,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
     }
 
-    fn startup_strategy<'a>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a,L,Self>, m:LegalMove, priority:u32)
+    fn startup_strategy<'a>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>, m:LegalMove, priority:u32)
                             -> Option<(u32,Option<ObtainKind>,u64,u64,KyokumenMap<u64,()>,KyokumenMap<u64,u32>,bool)> {
 
         let obtained = match m {
@@ -176,10 +179,11 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     }
 
     fn before_search<'a>(&self,
-                             env: &mut Environment<L, S>,
-                             gs: &mut GameState<'a, L,Self>,
-                             evalutor: &Evalutor)
-                             -> Result<BeforeSearchResult, ApplicationError> {
+                         env: &mut Environment<L, S>,
+                         gs: &mut GameState<'a>,
+                         event_dispatcher:&mut UserEventDispatcher<'a,Self,ApplicationError,L>,
+                         evalutor: &Evalutor)
+        -> Result<BeforeSearchResult, ApplicationError> {
         if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
@@ -269,7 +273,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
-        if let Err(e) = gs.event_dispatcher.dispatch_events(self,&*env.event_queue) {
+        if let Err(e) = event_dispatcher.dispatch_events(self,&*env.event_queue) {
             return Err(ApplicationError::from(e));
         }
 
@@ -500,9 +504,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
         }
     }
 }
-pub struct GameState<'a,L,T> where L: Logger + Send + 'static {
-    pub event_dispatcher:&'a mut UserEventDispatcher<'a,T,ApplicationError,L>,
-    pub solver_event_dispatcher:&'a mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
+pub struct GameState<'a> {
     pub teban:Teban,
     pub state:&'a Arc<State>,
     pub alpha:Score,
@@ -640,14 +642,13 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
-    fn search<'a>(&self,
-                  env: &mut Environment<L, S>,
-                  gs: GameState<'a,L,Self>,
-                  evalutor: &Evalutor)
-        -> Result<EvaluationResult, ApplicationError> {
+    fn search<'a>(&self,env:&mut Environment<L,S>, gs:GameState<'a>,
+                  event_dispatcher:&mut UserEventDispatcher<'a,Root<L,S>,ApplicationError,L>,
+                  _:&mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
+                  evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         let mut gs = gs;
 
-        let mvs = match self.before_search(env,&mut gs,evalutor)? {
+        let mvs = match self.before_search(env,&mut gs,event_dispatcher,evalutor)? {
             BeforeSearchResult::Complete(r) => {
                 return Ok(r);
             },
@@ -733,7 +734,8 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                     }
                 }
 
-                let r = gs.event_dispatcher.dispatch_events(self,&*env.event_queue);
+                let event_queue = Arc::clone(&env.event_queue);
+                let r = event_dispatcher.dispatch_events(self,&*event_queue);
 
                 if let Err(e) = r {
                     self.termination(&receiver, false,true,await_mvs,threads, env, scoreval,best_moves)?;
@@ -798,12 +800,10 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                                 let b = std::thread::Builder::new();
 
                                 let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
-                                    let mut event_dispatcher = Self::create_event_dispatcher(&env.on_error_handler,&env.stop,&env.quited);
-                                    let mut solver_event_dispatcher = Self::create_event_dispatcher(&env.on_error_handler,&env.stop,&env.quited);
+                                    let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L,S>>(&env.on_error_handler,&env.stop,&env.quited);
+                                    let mut solver_event_dispatcher = Self::create_event_dispatcher::<Solver>(&env.on_error_handler,&env.stop,&env.quited);
 
                                     let gs = GameState {
-                                        event_dispatcher:&mut event_dispatcher,
-                                        solver_event_dispatcher:&mut solver_event_dispatcher,
                                         teban: teban,
                                         state: &state,
                                         alpha: -beta,
@@ -824,7 +824,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
 
                                     let strategy  = Recursive::new(sender.clone());
 
-                                    let r = strategy.search(&mut env,gs,&evalutor);
+                                    let r = strategy.search(&mut env,gs,&mut event_dispatcher, &mut solver_event_dispatcher, &evalutor);
 
                                     let _ = sender.send(r);
                                 });
@@ -858,9 +858,10 @@ impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 }
 impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
-    fn search<'a>(&self,
-                  env: &mut Environment<L, S>, gs: GameState<'a, L,Self>,
-                  evalutor: &Evalutor) -> Result<EvaluationResult, ApplicationError> {
+    fn search<'a>(&self,env:&mut Environment<L,S>, gs:GameState<'a>,
+              event_dispatcher:&mut UserEventDispatcher<'a,Recursive<L,S>,ApplicationError,L>,
+              solver_event_dispatcher:&mut UserEventDispatcher<'a,Solver,ApplicationError,L>,
+              evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         todo!()
     }
 }
