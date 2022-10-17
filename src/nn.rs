@@ -3,7 +3,7 @@ use std::ops::DerefMut;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, mpsc, Mutex};
+use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::{fs, thread};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -277,11 +277,15 @@ impl Evalutor {
         })?)
     }
 
-    pub fn inc_threads(&self) {
+    pub fn active_threads(&self) -> usize {
+        self.active_threads.load(atomic::Ordering::Acquire)
+    }
+
+    pub fn begin_thread(&self) {
         self.active_threads.fetch_add(1,Ordering::Release);
     }
 
-    pub fn dec_threads(&self) -> Result<(),ApplicationError> {
+    pub fn end_thread(&self) -> Result<(),ApplicationError> {
         self.active_threads.fetch_sub(1,Ordering::Release);
 
         if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) &&

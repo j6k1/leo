@@ -101,7 +101,6 @@ impl Solver {
                                                           max_depth,
                                                           max_nodes,
                                                           info_sender,
-                                                          Arc::clone(&on_error_handler),
                                                           base_depth,
                                                           stop,
                                                           aborted,
@@ -164,7 +163,6 @@ impl Solver {
                     max_depth,
                     max_nodes,
                     info_sender,
-                    Arc::clone(&on_error_handler),
                     base_depth,
                     stop,
                     aborted,
@@ -231,7 +229,6 @@ pub mod checkmate {
     use usiagent::event::{EventDispatcher, EventQueue, UserEvent, UserEventKind, USIEventDispatcher};
     use usiagent::hash::{KyokumenHash, KyokumenMap};
     use usiagent::logger::Logger;
-    use usiagent::OnErrorHandler;
     use usiagent::player::InfoSender;
     use usiagent::rule::{LegalMove, Rule, State};
     use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
@@ -262,11 +259,10 @@ pub mod checkmate {
         }
     }
 
-    pub struct CheckmateStrategy<O,R,L,S>
+    pub struct CheckmateStrategy<O,R,S>
         where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
               R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-              L: Logger + Send,
-              S: InfoSender, Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
+              S: InfoSender {
         oute_comparator: O,
         response_oute_comparator:R,
         hasher:Arc<KyokumenHash<u64>>,
@@ -277,7 +273,6 @@ pub mod checkmate {
         max_depth:Option<u32>,
         max_nodes:Option<u64>,
         info_sender:S,
-        on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
         base_depth:u32,
         stop:Arc<AtomicBool>,
         aborted:Arc<AtomicBool>,
@@ -285,13 +280,13 @@ pub mod checkmate {
         nodes:u64,
     }
 
-    pub type MateStrategy<L,S> = CheckmateStrategy<DescComparator,AscComparator,L,S>;
-    pub type NomateStrategy<L,S> = CheckmateStrategy<AscComparator,DescComparator,L,S>;
+    pub type MateStrategy<S> = CheckmateStrategy<DescComparator,AscComparator,S>;
+    pub type NomateStrategy<S> = CheckmateStrategy<AscComparator,DescComparator,S>;
 
-    impl<O,R,L,S> CheckmateStrategy<O,R,L,S>
+    impl<O,R,S> CheckmateStrategy<O,R,S>
         where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
               R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-              L: Logger + Send, S: InfoSender, Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
+              S: InfoSender {
         pub fn new(oute_comparator: O, response_oute_comparator: R,
                hasher:Arc<KyokumenHash<u64>>,
                strict_moves:bool,
@@ -301,12 +296,11 @@ pub mod checkmate {
                max_depth:Option<u32>,
                max_nodes:Option<u64>,
                info_sender:S,
-               on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                base_depth:u32,
                stop:Arc<AtomicBool>,
                aborted:Arc<AtomicBool>,
                current_depth:u32,
-       ) -> CheckmateStrategy<O,R,L,S> {
+       ) -> CheckmateStrategy<O,R,S> {
             CheckmateStrategy {
                 oute_comparator: oute_comparator,
                 response_oute_comparator: response_oute_comparator,
@@ -318,7 +312,6 @@ pub mod checkmate {
                 max_depth:max_depth,
                 max_nodes:max_nodes,
                 info_sender:info_sender,
-                on_error_handler:on_error_handler,
                 base_depth:base_depth,
                 stop:stop,
                 aborted:aborted,
@@ -327,7 +320,7 @@ pub mod checkmate {
             }
         }
 
-        pub fn oute_process(&mut self,
+        pub fn oute_process<L: Logger>(&mut self,
                              already_oute_kyokumen_map:&mut Option<KyokumenMap<u64,bool>>,
                              current_depth:u32,
                              mhash:u64,
@@ -342,7 +335,7 @@ pub mod checkmate {
             -> Result<MaybeMate,ApplicationError>
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-                      S: InfoSender + Send, L: Logger + Send + 'static {
+                      S: InfoSender + Send {
             if self.aborted.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
@@ -464,7 +457,7 @@ pub mod checkmate {
             }
         }
 
-        pub fn response_oute_process(&mut self,
+        pub fn response_oute_process<L: Logger>(&mut self,
                                       already_oute_kyokumen_map:&mut Option<KyokumenMap<u64,bool>>,
                                       current_depth:u32,
                                       mhash:u64,
@@ -479,7 +472,7 @@ pub mod checkmate {
             -> Result<MaybeMate,ApplicationError>
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-                      S: InfoSender + Send, L: Logger + Send + 'static {
+                      S: InfoSender + Send {
             if self.aborted.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
