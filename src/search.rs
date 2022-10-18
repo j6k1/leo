@@ -913,12 +913,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
             let nodes = gs.node_count * mvs.len() as u64 - processed_nodes as u64;
 
-            let r = self.startup_strategy(env,
-                                                     gs,
-                                                     m,
-                                                     priority);
-
-            match r {
+            match self.startup_strategy(env,gs,m,priority) {
                 Some((depth,obtained,mhash,shash,
                          oute_kyokumen_map,
                          current_kyokumen_map,
