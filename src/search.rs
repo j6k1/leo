@@ -34,7 +34,6 @@ pub const MIN_TURN_COUNT:u32 = 5;
 pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
-                     solver_event_dispatcher:&mut UserEventDispatcher<'b,Solver,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
 
     fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
@@ -651,7 +650,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
     fn parallelized<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                            event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
-                           _:&mut UserEventDispatcher<'b,Solver,ApplicationError,L>,
                            evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>  {
         let mut gs = gs;
 
@@ -807,7 +805,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                                 let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
                                     let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L,S>>(&env.on_error_handler,&env.stop,&env.quited);
-                                    let mut solver_event_dispatcher = Self::create_event_dispatcher::<Solver>(&env.on_error_handler,&env.stop,&env.quited);
 
                                     let mut gs = GameState {
                                         teban: teban.opposite(),
@@ -833,7 +830,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                     let r = strategy.search(&mut env,
                                                                                            &mut gs,
                                                                                            &mut event_dispatcher,
-                                                                                           &mut solver_event_dispatcher,
                                                                                            &evalutor);
 
                                     let _ = sender.send(r);
@@ -856,9 +852,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
-                     solver_event_dispatcher:&mut UserEventDispatcher<'b,Solver,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
-        let r = self.parallelized(env,gs,event_dispatcher,solver_event_dispatcher,evalutor);
+        let r = self.parallelized(env,gs,event_dispatcher,evalutor);
 
         env.stop.store(true,atomic::Ordering::Release);
 
@@ -892,7 +887,6 @@ impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
 impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Recursive<L,S>,ApplicationError,L>,
-                     solver_event_dispatcher:&mut UserEventDispatcher<'b,Solver,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         let mut gs = gs;
 
@@ -980,7 +974,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             let strategy = Recursive::new(self.sender.clone());
 
-                            match strategy.search(env, &mut gs, event_dispatcher,solver_event_dispatcher,evalutor)? {
+                            match strategy.search(env, &mut gs, event_dispatcher,evalutor)? {
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Timeout);
                                 },
