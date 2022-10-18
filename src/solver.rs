@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use usiagent::event::{EventQueue, UserEvent, UserEventKind};
@@ -40,24 +39,27 @@ pub struct GameStateForMate<'a> {
     pub mc:&'a Arc<MochigomaCollections>
 }
 pub struct Solver {
-    receiver:Receiver<Result<MaybeMate,ApplicationError>>,
-    aborted:Arc<AtomicBool>,
 }
 impl Solver {
-    pub fn new<'a,L,S>(strict_moves:bool,
-                       limit:Option<Instant>,
-                       checkmate_limit:Option<Instant>,
-                       network_delay:u32,
-                       max_depth:Option<u32>,
-                       max_nodes:Option<u64>,
-                       info_sender:S,
-                       on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
-                       hasher:Arc<KyokumenHash<u64>>,
-                       base_depth:u32,
-                       stop:Arc<AtomicBool>,
-                       quited:Arc<AtomicBool>,
-                       ms: GameStateForMate) -> Solver where L: Logger + Send + 'static, S: InfoSender {
-        let (s,r) = mpsc::channel();
+    pub fn new() -> Solver {
+        Solver {
+        }
+    }
+
+    pub fn checkmate<'a,L,S>(&self,strict_moves:bool,
+                     limit:Option<Instant>,
+                     checkmate_limit:Option<Instant>,
+                     network_delay:u32,
+                     max_depth:Option<u32>,
+                     max_nodes:Option<u64>,
+                     info_sender:S,
+                     on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
+                     hasher:Arc<KyokumenHash<u64>>,
+                     base_depth:u32,
+                     stop:Arc<AtomicBool>,
+                     quited:Arc<AtomicBool>,
+                     ms: GameStateForMate) -> Result<MaybeMate,ApplicationError> where L: Logger + Send + 'static, S: InfoSender {
+        let (s,receiver) = mpsc::channel();
         let aborted = Arc::new(AtomicBool::new(false));
 
         {
@@ -91,36 +93,36 @@ impl Solver {
                 let mut event_dispatcher = search::Root::<L,S>::create_event_dispatcher(&on_error_handler,&stop,&quited);
 
                 let mut mate_strategy = CheckmateStrategy::new(
-                                            DescComparator,
-                                                         AscComparator,
-                                                          hasher,
-                                                          strict_moves,
-                                                          limit,
-                                                          checkmate_limit,
-                                                          network_delay,
-                                                          max_depth,
-                                                          max_nodes,
-                                                          info_sender,
-                                                          base_depth,
-                                                          stop,
-                                                          aborted,
-                                                          current_depth);
+                    DescComparator,
+                    AscComparator,
+                    hasher,
+                    strict_moves,
+                    limit,
+                    checkmate_limit,
+                    network_delay,
+                    max_depth,
+                    max_nodes,
+                    info_sender,
+                    base_depth,
+                    stop,
+                    aborted,
+                    current_depth);
                 if let Err(ref e) = s.send(mate_strategy.oute_process(&mut already_oute_kyokumen_map,
-                                           current_depth,
-                                           mhash,
-                                           shash,
-                                           &mut ignore_kyokumen_map,
-                                           &mut oute_kyokumen_map,
-                                           &mut current_kyokumen_map,
-                                           &event_queue,
-                                           &mut event_dispatcher,
-                                           teban,
-                                           &*state,
-                                           &*mc)) {
+                                                                      current_depth,
+                                                                      mhash,
+                                                                      shash,
+                                                                      &mut ignore_kyokumen_map,
+                                                                      &mut oute_kyokumen_map,
+                                                                      &mut current_kyokumen_map,
+                                                                      &event_queue,
+                                                                      &mut event_dispatcher,
+                                                                      teban,
+                                                                      &*state,
+                                                                      &*mc)) {
                     let _ = on_error_handler.lock().map(|h| h.call(e));
                 }
             });
-       }
+        }
 
         {
             let s = s.clone();
@@ -168,30 +170,23 @@ impl Solver {
                     aborted,
                     current_depth);
                 if let Err(ref e) = s.send(nomate_strategy.oute_process(&mut already_oute_kyokumen_map,
-                                                                      current_depth,
-                                                                      mhash,
-                                                                      shash,
-                                                                      &mut ignore_kyokumen_map,
-                                                                      &mut oute_kyokumen_map,
-                                                                      &mut current_kyokumen_map,
-                                                                      &event_queue,
-                                                                      &mut event_dispatcher,
-                                                                      teban,
-                                                                      &*state,
-                                                                      &*mc)) {
+                                                                        current_depth,
+                                                                        mhash,
+                                                                        shash,
+                                                                        &mut ignore_kyokumen_map,
+                                                                        &mut oute_kyokumen_map,
+                                                                        &mut current_kyokumen_map,
+                                                                        &event_queue,
+                                                                        &mut event_dispatcher,
+                                                                        teban,
+                                                                        &*state,
+                                                                        &*mc)) {
                     let _ = on_error_handler.lock().map(|h| h.call(e));
                 }
             });
         }
 
-        Solver {
-            receiver:r,
-            aborted:aborted
-        }
-    }
-
-    pub fn checkmate(&self) -> Result<MaybeMate,ApplicationError> {
-        let r = self.receiver.recv();
+        let r = receiver.recv();
 
         let m;
 
@@ -203,17 +198,17 @@ impl Solver {
                 m = MaybeMate::Nomate;
             },
             e => {
-                self.aborted.store(true,atomic::Ordering::Release);
+                aborted.store(true,atomic::Ordering::Release);
 
-                let _ = self.receiver.recv();
+                let _ = receiver.recv();
 
                 return e?;
             }
         }
 
-        self.aborted.store(true,atomic::Ordering::Release);
+        aborted.store(true,atomic::Ordering::Release);
 
-        let _ = self.receiver.recv()?;
+        let _ = receiver.recv()?;
 
         Ok(m)
     }
@@ -447,9 +442,10 @@ pub mod checkmate {
                             mvs.push_front(m);
                             return Ok(MaybeMate::MateMoves(depth,mvs))
                         },
-                        r @ _ => {
+                        r @ MaybeMate::MaxNodes | r @ MaybeMate::MaxDepth | r @ MaybeMate::Timeout | r @ MaybeMate::Aborted => {
                             return Ok(r);
-                        }
+                        },
+                        MaybeMate::Nomate | MaybeMate::Unknown => ()
                     }
                 }
 
@@ -569,13 +565,13 @@ pub mod checkmate {
                                             teban,
                                             &next,
                                             &nmc)? {
-                        MaybeMate::MateMoves(depth,mut mvs) => {
-                            mvs.push_front(m);
-                            return Ok(MaybeMate::MateMoves(depth,mvs));
+                        MaybeMate::Nomate => {
+                            return Ok(MaybeMate::Nomate)
                         },
-                        r @ _ => {
+                        r @ MaybeMate::MaxNodes | r @ MaybeMate::MaxDepth | r @ MaybeMate::Timeout | r @ MaybeMate::Aborted => {
                             return Ok(r)
-                        }
+                        },
+                        MaybeMate::MateMoves(_,_) | MaybeMate::Unknown => ()
                     }
                 }
 
@@ -587,7 +583,6 @@ pub mod checkmate {
             let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
             commands.push(UsiInfoSubCommand::Depth(self.base_depth));
             commands.push(UsiInfoSubCommand::SelDepth(self.current_depth + depth));
-
 
             Ok(self.info_sender.send(commands)?)
         }

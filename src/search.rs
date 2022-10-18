@@ -234,7 +234,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 _ => ()
             }
 
-            if (gs.depth == 0 || gs.current_depth > env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+            if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
                     already_oute_kyokumen_map: gs.self_already_oute_map,
                     current_depth:gs.current_depth,
@@ -249,7 +249,9 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     mc:gs.mc
                 };
 
-                let solver = Solver::new(
+                let solver = Solver::new();
+
+                match solver.checkmate(
                     false,
                     env.limit.clone(),
                     env.max_ply_timelimit.map(|l| Instant::now() + l),
@@ -263,9 +265,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     Arc::clone(&env.stop),
                     Arc::clone(&env.quited),
                     ms
-                );
-
-                match solver.checkmate()? {
+                )? {
                     MaybeMate::MateMoves(_, mvs) => {
                         return Ok(BeforeSearchResult::Complete(
                             EvaluationResult::Immediate(INFINITE, mvs.into_iter().map(|m| {
@@ -600,6 +600,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
+                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?
                     }
                 },
                 Ok(EvaluationResult::Timeout) => {
@@ -683,7 +684,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             if threads == 0 {
                 let r = self.receiver.recv();
 
-                evalutor.end_thread()?;
+                evalutor.on_end_thread()?;
 
                 let r = r?.map_err(|e| ApplicationError::from(e))?;
 
@@ -801,7 +802,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                                 let sender = sender.clone();
 
-                                evalutor.begin_thread();
+                                evalutor.on_begin_thread();
 
                                 let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
                                     let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L,S>>(&env.on_error_handler,&env.stop,&env.quited);
@@ -820,17 +821,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         oute_kyokumen_map:&oute_kyokumen_map,
                                         mhash:mhash,
                                         shash:shash,
-                                        depth:depth,
-                                        current_depth:current_depth,
+                                        depth:depth - 1,
+                                        current_depth:current_depth + 1,
                                         node_count:node_count
                                     };
 
                                     let strategy  = Recursive::new(sender.clone());
 
-                                    let r = strategy.search(&mut env,
-                                                                                           &mut gs,
-                                                                                           &mut event_dispatcher,
-                                                                                           &evalutor);
+                                    let r = strategy.search(&mut env,&mut gs, &mut event_dispatcher, &evalutor);
 
                                     let _ = sender.send(r);
                                 });
@@ -859,11 +857,12 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
 
         while evalutor.active_threads() > 0 {
             let _ = self.receiver.recv()?.map_err(|e| ApplicationError::from(e));
-            let _ = evalutor.end_thread();
+            let _ = evalutor.on_end_thread();
         }
 
         if let Err(e) = r {
             let _ = env.on_error_handler.lock().map(|h| h.call(&e));
+            let _ = self.send_message(env,format!("{}",&e).as_str());
             Err(e)
         } else {
             r
@@ -1001,8 +1000,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                     if alpha < -s {
                                         alpha = -s;
-                                    } else {
-                                        break;
                                     }
                                 },
                                 EvaluationResult::Async(r) => {
