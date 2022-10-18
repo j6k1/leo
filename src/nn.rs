@@ -18,7 +18,7 @@ use nncombinator::arr::{Arr, VecArr};
 use nncombinator::cuda::mem::{Alloctype, MemoryPool};
 use nncombinator::device::{Device, DeviceGpu};
 use nncombinator::layer::{ActivationLayer, AddLayer, AddLayerTrain, BatchForward, BatchForwardBase, BatchTrain, ForwardAll, InputLayer, LinearLayer, LinearOutputLayer, TryAddLayer};
-use nncombinator::lossfunction::CrossEntropy;
+use nncombinator::lossfunction::{Mse};
 use nncombinator::ope::UnitValue;
 use nncombinator::optimizer::MomentumSGD;
 use nncombinator::persistence::{BinFilePersistence, Linear, Persistence, PersistenceType, SaveToFile};
@@ -27,7 +27,7 @@ use packedsfen::traits::Reader;
 use packedsfen::{hcpe, yaneuraou};
 use packedsfen::hcpe::haffman_code::GameResult;
 use packedsfen::yaneuraou::reader::PackedSfenReader;
-use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use usiagent::event::{EventQueue, GameEndState, UserEvent, UserEventKind};
 use usiagent::rule::{AppliedMove};
 use usiagent::{OnErrorHandler, SandBox};
@@ -320,11 +320,16 @@ impl Evalutor {
                 queue.push(self.queue.pop()?);
             }
 
-            let (m, input, s) = queue.into_iter().fold((vec![], vec![], vec![]), |mut acc, item| {
+            let (m, input, s) = queue.into_par_iter().fold(|| (vec![], vec![], vec![]), |mut acc, item| {
                 acc.0.push(item.m);
                 acc.1.push(item.input);
                 acc.2.push(item.sender);
 
+                acc
+            }).reduce(|| (vec![],vec![],vec![]), |mut acc, (m,input,sender)| {
+                acc.0.extend_from_slice(&m);
+                acc.1.extend_from_slice(&input);
+                acc.2.extend_from_slice(&sender);
                 acc
             });
 
@@ -332,9 +337,11 @@ impl Evalutor {
 
             match self.receiver.lock() {
                 Ok(receiver) => {
-                    for (r, (m, s)) in receiver.recv()?.into_iter().zip(m.into_iter().zip(s.into_iter())) {
+                    receiver.recv()?.into_par_iter()
+                            .zip(m.into_par_iter().zip(s.into_par_iter()))
+                            .for_each(|(r,(m,s))| {
                         let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32));
-                    }
+                    });
                 },
                 Err(e) => {
                     return Err(ApplicationError::from(e));
@@ -483,7 +490,7 @@ impl<M> TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFile
         Ok(Trainer {
             nna:nna,
             nnb:nnb,
-            optimizer:MomentumSGD::new(0.001),
+            optimizer:MomentumSGD::new(0.0001),
             nna_path: nna_path,
             nnb_path: nnb_path,
             nnsavedir: save_dir,
@@ -533,7 +540,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                                         _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>)
                                         -> Result<(f32,f32,f32,f32),ApplicationError> {
 
-        let lossf = CrossEntropy::new();
+        let lossf = Mse::new();
 
         let mut teban = last_teban;
         let bias_shake_shake = self.bias_shake_shake;
@@ -622,7 +629,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                                         _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>)
                                         -> Result<(f32,f32,f32,f32),ApplicationError> {
 
-        let lossf = CrossEntropy::new();
+        let lossf = Mse::new();
         let bias_shake_shake = self.bias_shake_shake;
 
         let mut sfens_with_extended = Vec::with_capacity(packed_sfens.len());
@@ -718,7 +725,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                                 _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>)
                                 -> Result<(f32,f32,f32,f32),ApplicationError> {
 
-        let lossf = CrossEntropy::new();
+        let lossf = Mse::new();
         let bias_shake_shake = self.bias_shake_shake;
 
         let mut sfens_with_extended = Vec::with_capacity(hcpes.len());
