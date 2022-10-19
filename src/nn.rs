@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::{fs, thread};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use concurrent_queue::ConcurrentQueue;
 use rand::{prelude, Rng, SeedableRng};
 use rand::prelude::{Distribution};
@@ -30,10 +30,8 @@ use packedsfen::yaneuraou::reader::PackedSfenReader;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use usiagent::event::{EventQueue, GameEndState, UserEvent, UserEventKind};
 use usiagent::rule::{AppliedMove};
-use usiagent::{OnErrorHandler, SandBox};
-use usiagent::logger::FileLogger;
 use usiagent::shogi::{Banmen, KomaKind, Mochigoma, MOCHIGOMA_KINDS, MochigomaCollections, Teban};
-use crate::error::ApplicationError;
+use crate::error::{ApplicationError, EvaluationThreadError};
 
 const BANMEN_SIZE:usize = 81;
 
@@ -132,129 +130,155 @@ impl<T,U,D,P,PT,I,O> BatchNeuralNetwork<U,D,P,PT,I,O> for T
 pub struct Evalutor {
     sender:Sender<Message>,
     transaction_sender_queue:Arc<ConcurrentQueue<Sender<()>>>,
-    receiver:Arc<Mutex<Receiver<Vec<(f32,f32)>>>>,
+    receiver:Arc<Mutex<Receiver<Result<Vec<(f32,f32)>,EvaluationThreadError>>>>,
     queue:Arc<ConcurrentQueue<BatchItem>>,
     active_threads:Arc<AtomicUsize>,
     wait_threads:Arc<AtomicUsize>
 }
 impl Evalutor {
-    pub fn new(savedir: String,nna_path:String,nnb_path:String,on_error_handler:Arc<Mutex<OnErrorHandler<FileLogger>>>) -> Result<Evalutor,ApplicationError> {
+    pub fn new(savedir: String,nna_path:String,nnb_path:String) -> Result<Evalutor,ApplicationError> {
         let (ts,r) = mpsc::channel();
         let (s,tr) = mpsc::channel();
         let b = thread::Builder::new();
 
-        let _ = b.stack_size(1024 * 1024 * 200).spawn(move || SandBox::immediate::<_,_,ApplicationError,_>(|| {
-            let save_dir = Path::new(&savedir);
-            let nna_path = Path::new(&nna_path);
-            let nnb_path = Path::new(&nnb_path);
+        let (ready_sender,ready_receiver) = mpsc::channel();
 
-            let mut rnd = prelude::thread_rng();
-            let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
+        {
+            let s = ts.clone();
+            let ready_error_sender = ready_sender.clone();
 
-            let n1 = Normal::<f32>::new(0.0, (2f32 / 2517f32).sqrt()).unwrap();
-            let n2 = Normal::<f32>::new(0.0, (2f32 / 256f32).sqrt()).unwrap();
-            let n3 = Normal::<f32>::new(0.0, 1f32 / 32f32.sqrt()).unwrap();
+            let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
+                let is_ready = Arc::new(AtomicBool::new(false));
+                let ir = Arc::clone(&is_ready);
 
-            let memory_pool = Arc::new(Mutex::new(MemoryPool::new(Alloctype::Device)?));
+                let runner = move || {
+                    let save_dir = Path::new(&savedir);
+                    let nna_path = Path::new(&nna_path);
+                    let nnb_path = Path::new(&nnb_path);
 
-            let device = DeviceGpu::new(&memory_pool)?;
+                    let mut rnd = prelude::thread_rng();
+                    let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
 
-            let net: InputLayer<f32, Arr<f32, 2517>, _> = InputLayer::new();
+                    let n1 = Normal::<f32>::new(0.0, (2f32 / 2517f32).sqrt()).unwrap();
+                    let n2 = Normal::<f32>::new(0.0, (2f32 / 256f32).sqrt()).unwrap();
+                    let n3 = Normal::<f32>::new(0.0, 1f32 / 32f32.sqrt()).unwrap();
 
-            let rnd = rnd_base.clone();
+                    let memory_pool = Arc::new(Mutex::new(MemoryPool::new(Alloctype::Device)?));
 
-            let mut nna = net.try_add_layer(|l| {
-                let rnd = rnd.clone();
-                Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 2517, 256>::new(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
-            })?.add_layer(|l| {
-                ActivationLayer::new(l, ReLu::new(&device), &device)
-            }).try_add_layer(|l| {
-                let rnd = rnd.clone();
-                Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 256, 32>::new(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
-            })?.add_layer(|l| {
-                ActivationLayer::new(l, ReLu::new(&device), &device)
-            }).try_add_layer(|l| {
-                let rnd = rnd.clone();
-                Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 32, 1>::new(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
-            })?.add_layer(|l| {
-                ActivationLayer::new(l, Tanh::new(&device), &device)
-            }).add_layer_train(|l| {
-                LinearOutputLayer::new(l, &device)
-            });
+                    let device = DeviceGpu::new(&memory_pool)?;
 
-            let mut rnd = prelude::thread_rng();
-            let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
+                    let net: InputLayer<f32, Arr<f32, 2517>, _> = InputLayer::new();
 
-            let n1 = Normal::<f32>::new(0.0, (2f32 / 2517f32).sqrt()).unwrap();
-            let n2 = Normal::<f32>::new(0.0, (2f32 / 256f32).sqrt()).unwrap();
-            let n3 = Normal::<f32>::new(0.0, 1f32 / 32f32.sqrt()).unwrap();
+                    let rnd = rnd_base.clone();
 
-            let device = DeviceGpu::new(&memory_pool)?;
+                    let mut nna = net.try_add_layer(|l| {
+                        let rnd = rnd.clone();
+                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 2517, 256>::new(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                    })?.add_layer(|l| {
+                        ActivationLayer::new(l, ReLu::new(&device), &device)
+                    }).try_add_layer(|l| {
+                        let rnd = rnd.clone();
+                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 256, 32>::new(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                    })?.add_layer(|l| {
+                        ActivationLayer::new(l, ReLu::new(&device), &device)
+                    }).try_add_layer(|l| {
+                        let rnd = rnd.clone();
+                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 32, 1>::new(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                    })?.add_layer(|l| {
+                        ActivationLayer::new(l, Tanh::new(&device), &device)
+                    }).add_layer_train(|l| {
+                        LinearOutputLayer::new(l, &device)
+                    });
 
-            let net: InputLayer<f32, Arr<f32, 2517>, _> = InputLayer::new();
+                    let mut rnd = prelude::thread_rng();
+                    let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
 
-            let rnd = rnd_base.clone();
+                    let n1 = Normal::<f32>::new(0.0, (2f32 / 2517f32).sqrt()).unwrap();
+                    let n2 = Normal::<f32>::new(0.0, (2f32 / 256f32).sqrt()).unwrap();
+                    let n3 = Normal::<f32>::new(0.0, 1f32 / 32f32.sqrt()).unwrap();
 
-            let mut nnb = net.try_add_layer(|l| {
-                let rnd = rnd.clone();
-                Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 2517, 256>::new(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
-            })?.add_layer(|l| {
-                ActivationLayer::new(l, ReLu::new(&device), &device)
-            }).try_add_layer(|l| {
-                let rnd = rnd.clone();
-                Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 256, 32>::new(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
-            })?.add_layer(|l| {
-                ActivationLayer::new(l, ReLu::new(&device), &device)
-            }).try_add_layer(|l| {
-                let rnd = rnd.clone();
-                Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 32, 1>::new(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
-            })?.add_layer(|l| {
-                ActivationLayer::new(l, Tanh::new(&device), &device)
-            }).add_layer_train(|l| {
-                LinearOutputLayer::new(l, &device)
-            });
+                    let device = DeviceGpu::new(&memory_pool)?;
 
-            if save_dir.join(&nna_path).exists() {
-                let mut pa = BinFilePersistence::new(save_dir
-                    .join(&nna_path)
-                    .as_os_str()
-                    .to_str().ok_or(ApplicationError::InvalidSettingError(
-                    String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-                ))?)?;
+                    let net: InputLayer<f32, Arr<f32, 2517>, _> = InputLayer::new();
 
-                nna.load(&mut pa)?;
-            }
+                    let rnd = rnd_base.clone();
 
-            if save_dir.join(&nnb_path).exists() {
-                let mut pb = BinFilePersistence::new(save_dir
-                    .join(&nnb_path)
-                    .as_os_str()
-                    .to_str().ok_or(ApplicationError::InvalidSettingError(
-                    String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-                ))?)?;
+                    let mut nnb = net.try_add_layer(|l| {
+                        let rnd = rnd.clone();
+                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 2517, 256>::new(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                    })?.add_layer(|l| {
+                        ActivationLayer::new(l, ReLu::new(&device), &device)
+                    }).try_add_layer(|l| {
+                        let rnd = rnd.clone();
+                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 256, 32>::new(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                    })?.add_layer(|l| {
+                        ActivationLayer::new(l, ReLu::new(&device), &device)
+                    }).try_add_layer(|l| {
+                        let rnd = rnd.clone();
+                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 32, 1>::new(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                    })?.add_layer(|l| {
+                        ActivationLayer::new(l, Tanh::new(&device), &device)
+                    }).add_layer_train(|l| {
+                        LinearOutputLayer::new(l, &device)
+                    });
 
-                nnb.load(&mut pb)?;
-            }
+                    if save_dir.join(&nna_path).exists() {
+                        let mut pa = BinFilePersistence::new(save_dir
+                            .join(&nna_path)
+                            .as_os_str()
+                            .to_str().ok_or(EvaluationThreadError::InvalidSettingError(
+                            String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
+                        ))?)?;
 
-            loop {
-                match tr.recv()? {
-                    Message::Eval(batch) => {
-                        let ra = nna.batch_forward(batch.clone().into())?;
-                        let rb = nnb.batch_forward(batch.into())?;
+                        nna.load(&mut pa)?;
+                    }
 
-                        let r = ra.par_iter().zip(rb.par_iter()).map(|(a,b)| {
-                            (a[0],b[0])
-                        }).collect::<Vec<(f32,f32)>>();
+                    if save_dir.join(&nnb_path).exists() {
+                        let mut pb = BinFilePersistence::new(save_dir
+                            .join(&nnb_path)
+                            .as_os_str()
+                            .to_str().ok_or(EvaluationThreadError::InvalidSettingError(
+                            String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
+                        ))?)?;
 
-                        ts.send(r)?;
-                    },
-                    Message::Quit => {
-                        break;
+                        nnb.load(&mut pb)?;
+                    }
+
+                    ir.store(true,atomic::Ordering::Release);
+
+                    ready_sender.send(Ok(()))?;
+
+                    loop {
+                        match tr.recv()? {
+                            Message::Eval(batch) => {
+                                let ra = nna.batch_forward(batch.clone().into())?;
+                                let rb = nnb.batch_forward(batch.into())?;
+
+                                let r = ra.par_iter().zip(rb.par_iter()).map(|(a, b)| {
+                                    (a[0], b[0])
+                                }).collect::<Vec<(f32, f32)>>();
+
+                                ts.send(Ok(r))?;
+                            },
+                            Message::Quit => {
+                                break;
+                            }
+                        }
+                    }
+                    Ok(())
+                };
+
+                if let Err(e) = runner() {
+                    if is_ready.load(atomic::Ordering::Acquire) {
+                        let _ = s.send(Err(e));
+                    } else {
+                        let _ = ready_error_sender.send(Err(e));
                     }
                 }
-            }
-            Ok(())
-        }, on_error_handler));
+            });
+        }
+
+        ready_receiver.recv().map_err(|e| ApplicationError::from(e))??;
 
         Ok(Evalutor {
             sender:s,
@@ -334,7 +358,7 @@ impl Evalutor {
 
             match self.receiver.lock() {
                 Ok(receiver) => {
-                    receiver.recv()?.into_par_iter()
+                    receiver.recv().map_err(|e| EvaluationThreadError::from(e))??.into_par_iter()
                             .zip(m.into_par_iter().zip(s.into_par_iter()))
                             .for_each(|(r,(m,s))| {
                         let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32));

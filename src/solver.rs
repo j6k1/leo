@@ -51,7 +51,7 @@ impl Solver {
                      checkmate_limit:Option<Instant>,
                      network_delay:u32,
                      max_depth:Option<u32>,
-                     max_nodes:Option<u64>,
+                     max_nodes:Option<i64>,
                      info_sender:S,
                      on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                      hasher:Arc<KyokumenHash<u64>>,
@@ -266,13 +266,13 @@ pub mod checkmate {
         checkmate_limit:Option<Instant>,
         network_delay:u32,
         max_depth:Option<u32>,
-        max_nodes:Option<u64>,
+        max_nodes:Option<i64>,
         info_sender:S,
         base_depth:u32,
         stop:Arc<AtomicBool>,
         aborted:Arc<AtomicBool>,
         current_depth:u32,
-        nodes:u64,
+        nodes:i64,
     }
 
     pub type MateStrategy<S> = CheckmateStrategy<DescComparator,AscComparator,S>;
@@ -289,7 +289,7 @@ pub mod checkmate {
                checkmate_limit:Option<Instant>,
                network_delay:u32,
                max_depth:Option<u32>,
-               max_nodes:Option<u64>,
+               max_nodes:Option<i64>,
                info_sender:S,
                base_depth:u32,
                stop:Arc<AtomicBool>,

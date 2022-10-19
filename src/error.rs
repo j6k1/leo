@@ -3,13 +3,13 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::Formatter;
 use std::num::{ParseFloatError, ParseIntError};
-use std::sync::mpsc::{RecvError, Sender, SendError};
+use std::sync::mpsc::{Receiver, RecvError, Sender, SendError};
 use std::sync::{MutexGuard, PoisonError};
 use concurrent_queue::{PopError, PushError};
 use csaparser::error::CsaParserError;
 use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
-use usiagent::error::{EventDispatchError, InfoSendError, PlayerError, SfenStringConvertError};
+use usiagent::error::{EventDispatchError, InfoSendError, PlayerError, SfenStringConvertError, UsiProtocolError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind, UserEvent, UserEventKind};
 use usiagent::rule::AppliedMove;
 use crate::nn::{BatchItem, Message};
@@ -26,6 +26,7 @@ pub enum ApplicationError {
     AgentRunningError(String),
     CsaParserError(CsaParserError),
     LogicError(String),
+    InvalidStateError(String),
     LearningError(String),
     SerdeError(toml::ser::Error),
     ConfigReadError(ConfigReadError),
@@ -38,13 +39,14 @@ pub enum ApplicationError {
     RecvError(RecvError),
     NNSendError(SendError<Message>),
     ResultSendError(SendError<(AppliedMove,i32)>),
-    AllResultSendError(SendError<Vec<(f32,f32)>>),
+    EvaluationThreadError(EvaluationThreadError),
     EndTransactionSendError(SendError<()>),
     PoisonError(String),
     TransactionPushError(PushError<Sender<()>>),
     BatchItemPushError(PushError<BatchItem>),
     ConcurrentQueuePopError(PopError),
-    SendSelDepthError(SendSelDepthError)
+    SendSelDepthError(SendSelDepthError),
+    UsiProtocolError(UsiProtocolError)
 }
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -59,6 +61,7 @@ impl fmt::Display for ApplicationError {
             ApplicationError::AgentRunningError(ref s) => write!(f, "{}",s),
             ApplicationError::CsaParserError(ref e) => write!(f, "{}",e),
             ApplicationError::LogicError(ref s) => write!(f,"{}",s),
+            ApplicationError::InvalidStateError(ref s) => write!(f,"{}",s),
             ApplicationError::LearningError(ref s) => write!(f,"{}",s),
             ApplicationError::SerdeError(ref e) => write!(f,"{}",e),
             ApplicationError::InvalidSettingError(ref s) => write!(f,"{}",s),
@@ -71,13 +74,14 @@ impl fmt::Display for ApplicationError {
             ApplicationError::RecvError(ref e) => write!(f, "{}",e),
             ApplicationError::NNSendError(ref e) => write!(f,"{}",e),
             ApplicationError::ResultSendError(ref e) => write!(f,"{}",e),
-            ApplicationError::AllResultSendError(ref e) => write!(f,"{}",e),
+            ApplicationError::EvaluationThreadError(ref e) => write!(f,"{}",e),
             ApplicationError::EndTransactionSendError(ref e) => write!(f,"{}",e),
             ApplicationError::PoisonError(ref s) => write!(f,"{}",s),
             ApplicationError::TransactionPushError(ref e) => write!(f,"{}",e),
             ApplicationError::BatchItemPushError(ref e) => write!(f,"{}",e),
             ApplicationError::ConcurrentQueuePopError(ref e) => write!(f,"{}",e),
-            ApplicationError::SendSelDepthError(ref e) => write!(f,"{}",e)
+            ApplicationError::SendSelDepthError(ref e) => write!(f,"{}",e),
+            ApplicationError::UsiProtocolError(ref e) => write!(f,"{}",e),
         }
     }
 }
@@ -94,6 +98,7 @@ impl error::Error for ApplicationError {
             ApplicationError::AgentRunningError(_) => "An error occurred while running USIAgent.",
             ApplicationError::CsaParserError(_) => "An error occurred parsing the csa file.",
             ApplicationError::LogicError(_) => "Logic error.",
+            ApplicationError::InvalidStateError(_) => "Invalid state.",
             ApplicationError::LearningError(_) => "An error occurred while learning the neural network.",
             ApplicationError::SerdeError(_) => "An error occurred during serialization or deserialization.",
             ApplicationError::ConfigReadError(_) => "An error occurred while loading the neural network model.",
@@ -106,13 +111,14 @@ impl error::Error for ApplicationError {
             ApplicationError::RecvError(_) => "An error occurred while receiving the message.",
             ApplicationError::NNSendError(_) => "An error occurred in the communication process with the neural network thread.",
             ApplicationError::ResultSendError(_) => "An error occurred in the process of sending the results of the neural network calculation.",
-            ApplicationError::AllResultSendError(_) => "An error occurred in the process of sending the all results of the neural network calculation.",
+            ApplicationError::EvaluationThreadError(_) => "An error occurred in the process of sending the all results of the neural network calculation.",
             ApplicationError::EndTransactionSendError(_) => "An error occurred when sending the transaction termination notification.",
             ApplicationError::PoisonError(_) => "panic occurred during thread execution.",
             ApplicationError::TransactionPushError(_) => "An error occurred in adding the transaction to the queue.",
             ApplicationError::BatchItemPushError(_) => "An error occurred while adding a batch item to the queue.",
             ApplicationError::ConcurrentQueuePopError(_) => "Error retrieving element from concurrent queue.",
             ApplicationError::SendSelDepthError(_) => "An error occurred when sending the seldepth of the info command.",
+            ApplicationError::UsiProtocolError(_) => "An error occurred in the parsing or string generation process of string processing according to the USI protocol.",
         }
     }
 
@@ -128,6 +134,7 @@ impl error::Error for ApplicationError {
             ApplicationError::AgentRunningError(_) => None,
             ApplicationError::CsaParserError(ref e) => Some(e),
             ApplicationError::LogicError(_) => None,
+            ApplicationError::InvalidStateError(_) => None,
             ApplicationError::LearningError(_) => None,
             ApplicationError::SerdeError(ref e) => Some(e),
             ApplicationError::ConfigReadError(ref e) => Some(e),
@@ -140,13 +147,14 @@ impl error::Error for ApplicationError {
             ApplicationError::RecvError(ref e) => Some(e),
             ApplicationError::NNSendError(ref e) => Some(e),
             ApplicationError::ResultSendError(ref e) =>  Some(e),
-            ApplicationError::AllResultSendError(ref e) => Some(e),
+            ApplicationError::EvaluationThreadError(ref e) => Some(e),
             ApplicationError::EndTransactionSendError(ref e) => Some(e),
             ApplicationError::PoisonError(_) => None,
             ApplicationError::TransactionPushError(ref e) => Some(e),
             ApplicationError::BatchItemPushError(ref e) => Some(e),
             ApplicationError::ConcurrentQueuePopError(ref e) => Some(e),
-            ApplicationError::SendSelDepthError(ref e) => Some(e)
+            ApplicationError::SendSelDepthError(ref e) => Some(e),
+            ApplicationError::UsiProtocolError(ref e) => Some(e),
         }
     }
 }
@@ -242,9 +250,9 @@ impl From<SendError<(AppliedMove,i32)>> for ApplicationError {
         ApplicationError::ResultSendError(err)
     }
 }
-impl From<SendError<Vec<(f32,f32)>>> for ApplicationError {
-    fn from(err: SendError<Vec<(f32,f32)>>) -> ApplicationError {
-        ApplicationError::AllResultSendError(err)
+impl From<EvaluationThreadError> for ApplicationError {
+    fn from(err: EvaluationThreadError) -> ApplicationError {
+        ApplicationError::EvaluationThreadError(err)
     }
 }
 impl From<SendError<()>> for ApplicationError {
@@ -257,8 +265,8 @@ impl From<PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>> fo
         ApplicationError::PoisonError(format!("{}",err))
     }
 }
-impl From<PoisonError<MutexGuard<'_, std::sync::mpsc::Receiver<Vec<(f32, f32)>>>>> for ApplicationError {
-    fn from(err: PoisonError<MutexGuard<'_, std::sync::mpsc::Receiver<Vec<(f32, f32)>>>>) -> ApplicationError {
+impl From<PoisonError<MutexGuard<'_, Receiver<Result<Vec<(f32, f32)>,EvaluationThreadError>>>>> for ApplicationError {
+    fn from(err: PoisonError<MutexGuard<'_, Receiver<Result<Vec<(f32, f32)>,EvaluationThreadError>>>>) -> ApplicationError {
         ApplicationError::PoisonError(format!("{}",err))
     }
 }
@@ -280,6 +288,11 @@ impl From<PopError> for ApplicationError {
 impl From<SendSelDepthError> for ApplicationError {
     fn from(err: SendSelDepthError) -> ApplicationError {
         ApplicationError::SendSelDepthError(err)
+    }
+}
+impl From<UsiProtocolError> for ApplicationError {
+    fn from(err: UsiProtocolError) -> ApplicationError {
+        ApplicationError::UsiProtocolError(err)
     }
 }
 #[derive(Debug)]
@@ -312,5 +325,92 @@ impl error::Error for SendSelDepthError {
 impl From<InfoSendError> for SendSelDepthError {
     fn from(err: InfoSendError) -> SendSelDepthError {
         SendSelDepthError(err)
+    }
+}
+#[derive(Debug)]
+pub enum EvaluationThreadError {
+    CudaError(CudaError),
+    DeviceError(DeviceError),
+    ConfigReadError(ConfigReadError),
+    TrainingError(TrainingError),
+    InvalidSettingError(String),
+    InitializeError(String),
+    SendError(String),
+    RecvError(RecvError),
+}
+impl fmt::Display for EvaluationThreadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            EvaluationThreadError::DeviceError(ref e) => write!(f,"{}",e),
+            EvaluationThreadError::CudaError(ref e) => write!(f, "An error occurred in the process of cuda. ({})",e),
+            EvaluationThreadError::ConfigReadError(ref e) => write!(f,"{}",e),
+            EvaluationThreadError::TrainingError(ref e) => write!(f,"{}",e),
+            EvaluationThreadError::InvalidSettingError(ref s) => write!(f,"{}",s),
+            EvaluationThreadError::RecvError(ref e) => write!(f,"{}",e),
+            EvaluationThreadError::InitializeError(ref s) => write!(f,"{}",s),
+            EvaluationThreadError::SendError(ref s) => write!(f,"{}",s),
+        }
+    }
+}
+impl error::Error for EvaluationThreadError {
+    fn description(&self) -> &str {
+        match *self {
+            EvaluationThreadError::DeviceError(_) => "An error occurred during device initialization.",
+            EvaluationThreadError::CudaError(_) => "An error occurred in the process of cuda.",
+            EvaluationThreadError::ConfigReadError(_) => "An error occurred while loading the neural network model.",
+            EvaluationThreadError::TrainingError(_) => "An error occurred while training the model.",
+            EvaluationThreadError::InvalidSettingError(_) => "Invalid setting.",
+            EvaluationThreadError::RecvError(_) => "An error occurred while receiving the message.",
+            EvaluationThreadError::InitializeError(_) => "An error occurred during initialization of the score evaluation thread.",
+            EvaluationThreadError::SendError(_) => "An error occurred in the process of sending the all results of the neural network calculation.",
+        }
+    }
+
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match *self {
+            EvaluationThreadError::DeviceError(ref e) => Some(e),
+            EvaluationThreadError::CudaError(_) => None,
+            EvaluationThreadError::ConfigReadError(ref e) => Some(e),
+            EvaluationThreadError::TrainingError(ref e) => Some(e),
+            EvaluationThreadError::InvalidSettingError(_) => None,
+            EvaluationThreadError::RecvError(ref e) => Some(e),
+            EvaluationThreadError::InitializeError(_) => None,
+            EvaluationThreadError::SendError(_) => None,
+        }
+    }
+}
+impl From<DeviceError> for EvaluationThreadError {
+    fn from(err: DeviceError) -> EvaluationThreadError {
+        EvaluationThreadError::DeviceError(err)
+    }
+}
+impl From<CudaError> for EvaluationThreadError {
+    fn from(err: CudaError) -> EvaluationThreadError {
+        EvaluationThreadError::CudaError(err)
+    }
+}
+impl From<ConfigReadError> for EvaluationThreadError {
+    fn from(err: ConfigReadError) -> EvaluationThreadError {
+        EvaluationThreadError::ConfigReadError(err)
+    }
+}
+impl From<TrainingError> for EvaluationThreadError {
+    fn from(err: TrainingError) -> EvaluationThreadError {
+        EvaluationThreadError::TrainingError(err)
+    }
+}
+impl From<RecvError> for EvaluationThreadError {
+    fn from(err: RecvError) -> EvaluationThreadError {
+        EvaluationThreadError::RecvError(err)
+    }
+}
+impl From<SendError<Result<Vec<(f32,f32)>,EvaluationThreadError>>> for EvaluationThreadError {
+    fn from(err: SendError<Result<Vec<(f32,f32)>,EvaluationThreadError>>) -> EvaluationThreadError {
+        EvaluationThreadError::SendError(format!("{}",err))
+    }
+}
+impl From<SendError<Result<(),EvaluationThreadError>>> for EvaluationThreadError {
+    fn from(err: SendError<Result<(),EvaluationThreadError>>) -> EvaluationThreadError {
+        EvaluationThreadError::InitializeError(format!("{}",err))
     }
 }
