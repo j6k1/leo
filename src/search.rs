@@ -15,7 +15,6 @@ use usiagent::OnErrorHandler;
 use usiagent::player::InfoSender;
 use usiagent::rule::{AppliedMove, LegalMove, Rule, SquareToPoint, State};
 use usiagent::shogi::{KomaKind, MochigomaCollections, MochigomaKind, ObtainKind, Teban};
-use crate::ApplicationError::EvaluationThreadError;
 use crate::error::{ApplicationError, SendSelDepthError};
 use crate::nn::Evalutor;
 use crate::search::Score::{INFINITE, NEGINFINITE};
@@ -618,14 +617,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mut score = score;
         let mut opt_error = None;
 
-        for _ in threads..env.max_threads {
+        while evalutor.active_threads() > 0 {
             match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
                 Ok(EvaluationResult::Immediate(s,_,mvs)) if !is_timeout => {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
                         gs.m.map(|m| best_moves.push_front(m));
-                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?
+                        opt_error = opt_error.and(self.send_info(env, env.base_depth,gs.current_depth,&best_moves).err());
                     }
                 },
                 Ok(EvaluationResult::Timeout) => {
@@ -639,10 +638,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             opt_error = opt_error.and(evalutor.on_end_thread().map_err(|e| ApplicationError::from(e)).err());
         }
 
-        if is_timeout {
-            return Ok(EvaluationResult::Timeout);
-        } else if let Some(e) = opt_error {
+        if let Some(e) = opt_error {
             return Err(e);
+        } else if is_timeout {
+            return Ok(EvaluationResult::Timeout);
         }
 
         for r in await_mvs {
@@ -654,7 +653,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         score = -s;
                         best_moves = VecDeque::new();
                         gs.m.map(|m| best_moves.push_front(m));
-                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?
+                        opt_error = opt_error.and(self.send_info(env, env.base_depth,gs.current_depth,&best_moves).err());
                     }
                 },
                 Err(e) => {
