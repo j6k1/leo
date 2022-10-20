@@ -92,7 +92,7 @@ impl Solver {
             let event_queue = Arc::clone(&ms.event_queue);
             let teban = ms.teban;
             let state = Arc::clone(ms.state);
-            let mc = Arc::clone(&ms.mc);
+            let mc = Arc::clone(ms.mc);
 
             std::thread::spawn(move || {
                 let mut event_dispatcher = search::Root::<L,S>::create_event_dispatcher(&on_error_handler,&stop,&quited);
@@ -159,7 +159,7 @@ impl Solver {
             let event_queue = Arc::clone(&ms.event_queue);
             let teban = ms.teban;
             let state = Arc::clone(ms.state);
-            let mc = Arc::clone(&ms.mc);
+            let mc = Arc::clone(ms.mc);
 
             std::thread::spawn(move || {
                 let mut event_dispatcher = search::Root::<L,S>::create_event_dispatcher(&on_error_handler,&stop,&quited);
@@ -340,8 +340,7 @@ pub mod checkmate {
                                        oute_kyokumen_map:&mut KyokumenMap<u64,()>,
                                        current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                        event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
-                                       event_dispatcher:&mut USIEventDispatcher<UserEventKind,
-                                 UserEvent,Self,L,ApplicationError>,
+                                       event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
                                        teban:Teban, state:&State, mc:&MochigomaCollections)
                                        -> Result<MaybeMate,ApplicationError>
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,

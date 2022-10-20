@@ -99,8 +99,6 @@ fn run() -> Result<(),ApplicationError> {
     opts.optopt("", "maxdepth", "Search-max-depth.", "number of depth");
     opts.optopt("", "timelimit", "USI time limit.", "milli second");
     opts.optopt("t", "time", "Running time.", "s: second, m: minute, h: hour, d: day");
-    opts.optopt("c", "count", "execute game count.", "number of game count");
-    opts.optflag("", "silent", "silent mode.");
     opts.optflag("", "last", "Back a few hands from the end.");
     opts.optopt("", "fromlast", "Number of moves of from the end.", "move count.");
     opts.optopt("", "kifudir", "Directory of game data to be used of learning.", "path string.");

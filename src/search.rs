@@ -239,48 +239,52 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 _ => ()
             }
 
-            if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
-                let ms = GameStateForMate {
-                    checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
-                    unique_kyokumen_map:Arc::clone(&env.unique_kyokumen_map),
-                    current_depth:gs.current_depth,
-                    mhash:gs.mhash,
-                    shash:gs.shash,
-                    oute_kyokumen_map: gs.oute_kyokumen_map,
-                    current_kyokumen_map: gs.current_kyokumen_map,
-                    ignore_kyokumen_map: KyokumenMap::new(),
-                    event_queue:env.event_queue.clone(),
-                    teban:gs.teban,
-                    state:gs.state,
-                    mc:gs.mc
-                };
+            if let Some(m) = gs.m {
+                if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+                    let ms = GameStateForMate {
+                        checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
+                        unique_kyokumen_map: Arc::clone(&env.unique_kyokumen_map),
+                        current_depth: gs.current_depth,
+                        mhash: gs.mhash,
+                        shash: gs.shash,
+                        oute_kyokumen_map: gs.oute_kyokumen_map,
+                        current_kyokumen_map: gs.current_kyokumen_map,
+                        ignore_kyokumen_map: KyokumenMap::new(),
+                        event_queue: env.event_queue.clone(),
+                        teban: gs.teban,
+                        state: gs.state,
+                        mc: gs.mc
+                    };
 
-                let solver = Solver::new();
+                    let solver = Solver::new();
 
-                match solver.checkmate(
-                    false,
-                    env.limit.clone(),
-                    env.max_ply_timelimit.map(|l| Instant::now() + l),
-                    env.network_delay,
-                    env.max_ply_mate.clone(),
-                    env.max_nodes.clone(),
-                    Arc::clone(&env.nodes),
-                    env.info_sender.clone(),
-                    Arc::clone(&env.on_error_handler),
-                    Arc::clone(&env.hasher),
-                    env.base_depth,
-                    Arc::clone(&env.stop),
-                    Arc::clone(&env.quited),
-                    ms
-                )? {
-                    MaybeMate::MateMoves(_, mvs) => {
-                        return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(INFINITE, gs.depth,mvs.into_iter().map(|m| {
+                    match solver.checkmate(
+                        false,
+                        env.limit.clone(),
+                        env.max_ply_timelimit.map(|l| Instant::now() + l),
+                        env.network_delay,
+                        env.max_ply_mate.clone(),
+                        env.max_nodes.clone(),
+                        Arc::clone(&env.nodes),
+                        env.info_sender.clone(),
+                        Arc::clone(&env.on_error_handler),
+                        Arc::clone(&env.hasher),
+                        env.base_depth,
+                        Arc::clone(&env.stop),
+                        Arc::clone(&env.quited),
+                        ms
+                    )? {
+                        MaybeMate::MateMoves(_, mvs) => {
+                            let mut r  = mvs.into_iter().map(|m| {
                                 AppliedMove::from(m)
-                            }).collect::<VecDeque<AppliedMove>>())
-                        ));
-                    },
-                    _ => ()
+                            }).collect::<VecDeque<AppliedMove>>();
+
+                            r.push_front(m);
+
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, gs.depth, r)));
+                        },
+                        _ => ()
+                    }
                 }
             }
         }
@@ -288,6 +292,19 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
         if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
+        }
+
+        if gs.depth == 0 || gs.current_depth == env.max_depth {
+            match gs.m {
+                None => {
+                    return Err(ApplicationError::LogicError(String::from("move is not set.")))?;
+                },
+                Some(m) => {
+                    let (s,r) = mpsc::channel();
+                    evalutor.submit(gs.teban,gs.state.get_banmen(),&gs.mc,m,s)?;
+                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Async(r)));
+                }
+            }
         }
 
         let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
@@ -315,19 +332,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
             mvs
         };
-
-        if gs.depth == 0 || gs.current_depth == env.max_depth {
-            match gs.m {
-                None => {
-                    return Err(ApplicationError::LogicError(String::from("move is not set.")))?;
-                },
-                Some(m) => {
-                    let (s,r) = mpsc::channel();
-                    evalutor.submit(gs.teban,gs.state.get_banmen(),&gs.mc,m,s)?;
-                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Async(r)));
-                }
-            }
-        }
 
         let mvs = mvs.into_iter().map(|m| {
             let ps = Rule::apply_move_to_partial_state_none_check(gs.state,gs.teban,gs.mc,m.to_applied_move());
@@ -618,6 +622,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
+                        gs.m.map(|m| best_moves.push_front(m));
                         self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?
                     }
                 },
@@ -631,8 +636,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
-        if is_timeout && opt_error.is_some() {
+        if is_timeout {
             return Ok(EvaluationResult::Timeout);
+        } else if let Some(e) = opt_error {
+            return e;
         }
 
         for r in await_mvs {
@@ -643,7 +650,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = VecDeque::new();
-                        best_moves.push_front(m);
+                        gs.m.map(|m| best_moves.push_front(m));
                         self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?
                     }
                 },
@@ -747,6 +754,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             if scoreval >= beta {
                                 break;
                             }
+
                             if alpha < scoreval {
                                 alpha = scoreval;
                             }
@@ -797,11 +805,11 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                     if s > scoreval {
                                         scoreval = s;
                                         best_moves = VecDeque::new();
-                                        best_moves.push_front(m);
 
                                         if alpha < scoreval {
                                             alpha = scoreval;
                                         }
+
                                         if scoreval >= beta {
                                             return self.termination(false,await_mvs,threads, env, &mut gs,scoreval,best_moves);
                                         }
@@ -878,15 +886,20 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         let r = self.parallelized(env,gs,event_dispatcher,evalutor);
+        let mut opt_err = None;
 
         env.stop.store(true,atomic::Ordering::Release);
 
         while evalutor.active_threads() > 0 {
-            let _ = self.receiver.recv()?.map_err(|e| ApplicationError::from(e));
-            let _ = evalutor.on_end_thread();
+            opt_err = opt_err.or(self.receiver.recv()?.map_err(|e| ApplicationError::from(e)).err());
+            opt_err = opt_err.or(evalutor.on_end_thread().map(|_| ()).err());
         }
 
         if let Err(e) = r {
+            let _ = env.on_error_handler.lock().map(|h| h.call(&e));
+            let _ = self.send_message(env, format!("{}", &e).as_str());
+            Err(e)
+        } else if let Some(e) = opt_err {
             let _ = env.on_error_handler.lock().map(|h| h.call(&e));
             let _ = self.send_message(env,format!("{}",&e).as_str());
             Err(e)
@@ -957,7 +970,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 if s > scoreval {
                                     scoreval = s;
                                     best_moves = VecDeque::new();
-                                    best_moves.push_front(m.to_applied_move());
+                                    gs.m.map(|m| best_moves.push_front(m));
 
                                     if scoreval >= gs.beta {
                                         return Ok(EvaluationResult::Immediate(scoreval,gs.depth,best_moves));
@@ -1026,6 +1039,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     if -s > scoreval {
                                         scoreval = -s;
                                         best_moves = mvs;
+                                        gs.m.map(|m| best_moves.push_front(m));
 
                                         if scoreval >= gs.beta {
                                             return Ok(EvaluationResult::Immediate(scoreval, gs.depth,best_moves));
