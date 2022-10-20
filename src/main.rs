@@ -6,7 +6,7 @@ extern crate getopts;
 extern crate toml;
 extern crate rayon;
 extern crate concurrent_queue;
-//#[macro_use]
+extern crate chashmap;
 extern crate serde_derive;
 
 extern crate usiagent;

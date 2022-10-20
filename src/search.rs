@@ -5,6 +5,7 @@ use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
+use chashmap::CHashMap;
 use usiagent::command::UsiInfoSubCommand;
 use usiagent::error::EventHandlerError;
 use usiagent::event::{EventDispatcher, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, UserEventQueue, USIEventDispatcher};
@@ -189,30 +190,34 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
-        if let None = env.kyokumen_score_map.get(gs.teban,&gs.mhash,&gs.shash) {
+        if !env.unique_kyokumen_map.contains_key(&(gs.teban,gs.mhash,gs.shash)) {
             env.nodes.fetch_add(1,atomic::Ordering::Release);
         }
 
+        env.unique_kyokumen_map.insert((gs.teban,gs.mhash,gs.shash),());
+
         if let Some(ObtainKind::Ou) = gs.obtained {
-            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new())));
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,gs.depth,VecDeque::new())));
         }
 
         if let Some(m) = gs.m {
             if Rule::is_mate(gs.teban, &*gs.state) {
                 let mut mvs = VecDeque::new();
                 mvs.push_front(m);
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE,mvs)));
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE,gs.depth,mvs)));
             }
         }
 
-        if let Some(&(s, d)) = env.kyokumen_score_map.get(gs.teban, &gs.mhash, &gs.shash) {
+        let r = env.kyokumen_score_map.get(&(gs.teban, gs.mhash, gs.shash)).map(|g| *g);
+
+        if let Some((s,d)) = r {
             match s {
                 Score::INFINITE => {
                     if env.display_evalute_score {
                         self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
                     }
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(INFINITE, VecDeque::new())
+                        EvaluationResult::Immediate(INFINITE, gs.depth,VecDeque::new())
                     ));
                 },
                 Score::NEGINFINITE => {
@@ -220,7 +225,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
                     }
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(NEGINFINITE, VecDeque::new())
+                        EvaluationResult::Immediate(NEGINFINITE, gs.depth,VecDeque::new())
                     ));
                 },
                 Score::Value(s) if d >= gs.depth => {
@@ -228,7 +233,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
                     }
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::Value(s), VecDeque::new())
+                        EvaluationResult::Immediate(Score::Value(s), gs.depth,VecDeque::new())
                     ));
                 },
                 _ => ()
@@ -236,7 +241,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
             if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
-                    already_oute_kyokumen_map: gs.self_already_oute_map,
+                    checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
+                    unique_kyokumen_map:Arc::clone(&env.unique_kyokumen_map),
                     current_depth:gs.current_depth,
                     mhash:gs.mhash,
                     shash:gs.shash,
@@ -258,6 +264,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     env.network_delay,
                     env.max_ply_mate.clone(),
                     env.max_nodes.clone(),
+                    Arc::clone(&env.nodes),
                     env.info_sender.clone(),
                     Arc::clone(&env.on_error_handler),
                     Arc::clone(&env.hasher),
@@ -268,7 +275,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 )? {
                     MaybeMate::MateMoves(_, mvs) => {
                         return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(INFINITE, mvs.into_iter().map(|m| {
+                            EvaluationResult::Immediate(INFINITE, gs.depth,mvs.into_iter().map(|m| {
                                 AppliedMove::from(m)
                             }).collect::<VecDeque<AppliedMove>>())
                         ));
@@ -294,7 +301,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
             if mvs.len() == 0 {
                 return Ok(BeforeSearchResult::Complete(
-                    EvaluationResult::Immediate(NEGINFINITE, VecDeque::new())
+                    EvaluationResult::Immediate(NEGINFINITE, gs.depth,VecDeque::new())
                 ));
             } else {
                 mvs
@@ -365,7 +372,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 }
 #[derive(Debug)]
 pub enum EvaluationResult {
-    Immediate(Score, VecDeque<AppliedMove>),
+    Immediate(Score, u32, VecDeque<AppliedMove>),
     Async(Receiver<(AppliedMove,i32)>),
     Timeout
 }
@@ -419,6 +426,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub info_sender:S,
     pub on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
     pub hasher:Arc<KyokumenHash<u64>>,
+    pub unique_kyokumen_map:Arc<CHashMap<(Teban,u64,u64),()>>,
     pub limit:Option<Instant>,
     pub current_limit:Option<Instant>,
     pub turn_count:u32,
@@ -434,7 +442,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub max_threads:u32,
     pub stop:Arc<AtomicBool>,
     pub quited:Arc<AtomicBool>,
-    pub kyokumen_score_map:KyokumenMap<u64,(Score,u32)>,
+    pub kyokumen_score_map:Arc<CHashMap<(Teban,u64,u64),(Score,u32)>>,
     pub nodes:Arc<AtomicU64>,
     pub think_start_time:Instant
 }
@@ -445,6 +453,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:self.info_sender.clone(),
             on_error_handler:Arc::clone(&self.on_error_handler),
             hasher:Arc::clone(&self.hasher),
+            unique_kyokumen_map:Arc::clone(&self.unique_kyokumen_map),
             limit:self.limit.clone(),
             current_limit:self.current_limit.clone(),
             turn_count:self.turn_count,
@@ -494,6 +503,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:info_sender,
             on_error_handler:on_error_handler,
             hasher:hasher,
+            unique_kyokumen_map:Arc::new(CHashMap::new()),
             think_start_time:think_start_time,
             limit:limit,
             current_limit:current_limit,
@@ -510,7 +520,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             max_threads:max_threads,
             stop:stop,
             quited:quited,
-            kyokumen_score_map:KyokumenMap::new(),
+            kyokumen_score_map:Arc::new(CHashMap::new()),
             nodes:Arc::new(AtomicU64::new(0))
         }
     }
@@ -524,8 +534,8 @@ pub struct GameState<'a> {
     pub mc:&'a Arc<MochigomaCollections>,
     pub obtained:Option<ObtainKind>,
     pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
-    pub self_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
-    pub opponent_already_oute_map:&'a mut Option<KyokumenMap<u64,bool>>,
+    pub self_checkmate_state_map:Arc<CHashMap<(Teban, u64, u64),bool>>,
+    pub opponent_checkmate_state_map:Arc<CHashMap<(Teban, u64, u64),bool>>,
     pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
     pub mhash:u64,
     pub shash:u64,
@@ -604,7 +614,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         for _ in threads..env.max_threads {
             match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,mvs)) if !is_timeout => {
+                Ok(EvaluationResult::Immediate(s,_,mvs)) if !is_timeout => {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
@@ -649,10 +659,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 e
             },
             None if best_moves.len() == 0 => {
-                Ok(EvaluationResult::Immediate(NEGINFINITE, VecDeque::new()))
+                Ok(EvaluationResult::Immediate(NEGINFINITE,gs.depth, VecDeque::new()))
             },
             None => {
-                Ok(EvaluationResult::Immediate(score, best_moves))
+                Ok(EvaluationResult::Immediate(score, gs.depth,best_moves))
             }
         }
     }
@@ -702,21 +712,29 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let nodes = gs.node_count * mvs_count - processed_nodes as u64;
 
                 match r {
-                    EvaluationResult::Immediate(s,mvs) => {
-                        if let Some(&(_,d)) = env.kyokumen_score_map.get(gs.teban.opposite(),&gs.mhash,&gs.shash) {
-                            if d < gs.depth {
-                                env.kyokumen_score_map.insert(gs.teban.opposite(), gs.mhash, gs.shash, (s,gs.depth));
+                    EvaluationResult::Immediate(s,depth,mvs) => {
+                        let depth = depth + 1;
+
+                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),gs.mhash,gs.shash),(s,depth));
+
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),gs.mhash,gs.shash)) {
+                            let (ref mut score,ref mut d) = *g;
+
+                            if *d < depth {
+                                *d = depth;
+                                *score = s;
                             }
-                        } else {
-                            env.kyokumen_score_map.insert(gs.teban.opposite(), gs.mhash, gs.shash, (s,gs.depth));
                         }
 
-                        if let Some(&(_,d)) = env.kyokumen_score_map.get(gs.teban,&gs.mhash,&gs.shash) {
-                            if d < gs.depth {
-                                env.kyokumen_score_map.insert(gs.teban, gs.mhash, gs.shash, (-s,gs.depth));
+                        env.kyokumen_score_map.insert_new((gs.teban,gs.mhash,gs.shash),(-s,depth));
+
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,gs.mhash,gs.shash)) {
+                            let (ref mut score,ref mut d) = *g;
+
+                            if *d < depth {
+                                *d = depth;
+                                *score = -s;
                             }
-                        } else {
-                            env.kyokumen_score_map.insert(gs.teban, gs.mhash, gs.shash, (-s,gs.depth));
                         }
 
                         self.send_info(env, env.base_depth,gs.current_depth,&mvs)?;
@@ -796,8 +814,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                 let mc = Arc::new(mc);
                                 let alpha = alpha;
                                 let beta = beta;
-                                let mut self_already_oute_map = gs.self_already_oute_map.clone();
-                                let mut opponent_already_oute_map = gs.opponent_already_oute_map.clone();
+                                let self_checkmate_state_map = Arc::clone(&gs.self_checkmate_state_map);
+                                let opponent_checkmate_state_map = Arc::clone(&gs.opponent_checkmate_state_map);
                                 let current_depth = gs.current_depth;
                                 let node_count = gs.node_count;
 
@@ -824,8 +842,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         mc: &mc,
                                         obtained:obtained,
                                         current_kyokumen_map:&current_kyokumen_map,
-                                        self_already_oute_map:&mut opponent_already_oute_map,
-                                        opponent_already_oute_map:&mut self_already_oute_map,
+                                        self_checkmate_state_map:opponent_checkmate_state_map,
+                                        opponent_checkmate_state_map:self_checkmate_state_map,
                                         oute_kyokumen_map:&oute_kyokumen_map,
                                         mhash:mhash,
                                         shash:shash,
@@ -942,7 +960,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     best_moves.push_front(m.to_applied_move());
 
                                     if scoreval >= gs.beta {
-                                        return Ok(EvaluationResult::Immediate(scoreval,best_moves));
+                                        return Ok(EvaluationResult::Immediate(scoreval,gs.depth,best_moves));
                                     }
                                 }
 
@@ -964,8 +982,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 mc: &mc,
                                 obtained: obtained,
                                 current_kyokumen_map: &current_kyokumen_map,
-                                self_already_oute_map: gs.opponent_already_oute_map,
-                                opponent_already_oute_map: gs.self_already_oute_map,
+                                self_checkmate_state_map: Arc::clone(&gs.opponent_checkmate_state_map),
+                                opponent_checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
                                 oute_kyokumen_map: &oute_kyokumen_map,
                                 mhash: mhash,
                                 shash: shash,
@@ -980,21 +998,29 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Timeout);
                                 },
-                                EvaluationResult::Immediate(s, mvs) => {
-                                    if let Some(&(_, d)) = env.kyokumen_score_map.get(gs.teban.opposite(), &mhash, &shash) {
-                                        if d < depth {
-                                            env.kyokumen_score_map.insert(gs.teban.opposite(), mhash, shash, (s, depth));
+                                EvaluationResult::Immediate(s,depth, mvs) => {
+                                    let depth = depth + 1;
+
+                                    env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
+
+                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), mhash, shash)) {
+                                        let (ref mut score, ref mut d) = *g;
+
+                                        if *d < depth {
+                                            *d = depth;
+                                            *score = s;
                                         }
-                                    } else {
-                                        env.kyokumen_score_map.insert(gs.teban.opposite(), mhash, shash, (s, depth));
                                     }
 
-                                    if let Some(&(_, d)) = env.kyokumen_score_map.get(gs.teban, &mhash, &shash) {
-                                        if d < depth {
-                                            env.kyokumen_score_map.insert(gs.teban, mhash, shash, (-s, depth));
+                                    env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
+
+                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban, mhash, shash)) {
+                                        let (ref mut score, ref mut d) = *g;
+
+                                        if *d < depth {
+                                            *d = depth;
+                                            *score = -s;
                                         }
-                                    } else {
-                                        env.kyokumen_score_map.insert(gs.teban, mhash, shash, (-s, depth));
                                     }
 
                                     if -s > scoreval {
@@ -1002,7 +1028,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         best_moves = mvs;
 
                                         if scoreval >= gs.beta {
-                                            return Ok(EvaluationResult::Immediate(scoreval, best_moves));
+                                            return Ok(EvaluationResult::Immediate(scoreval, gs.depth,best_moves));
                                         }
                                     }
 
@@ -1022,7 +1048,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
                         return Ok(EvaluationResult::Timeout);
                     } else if self.timeout_expected(env,start_time,gs.current_depth,nodes,processed_nodes) {
-                        return Ok(EvaluationResult::Immediate(scoreval,best_moves));
+                        return Ok(EvaluationResult::Immediate(scoreval,gs.depth,best_moves));
                     }
                 },
                 None => (),
@@ -1055,7 +1081,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         if let Some(e) = opt_error {
             e
         } else {
-            Ok(EvaluationResult::Immediate(scoreval, best_moves))
+            Ok(EvaluationResult::Immediate(scoreval, gs.depth,best_moves))
         }
     }
 }

@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{Ordering};
 use std::time::{Duration, Instant};
+use chashmap::CHashMap;
 use usiagent::command::{BestMove, CheckMate, UsiInfoSubCommand, UsiOptType};
 use usiagent::error::{PlayerError, UsiProtocolError};
 use usiagent::event::{GameEndState, SysEventOption, SysEventOptionKind, UserEvent, UserEventQueue, UsiGoMateTimeLimit, UsiGoTimeLimit};
@@ -410,8 +411,8 @@ impl USIPlayer<ApplicationError> for Leo {
                     mc: &Arc::new(mc.clone()),
                     obtained:None,
                     current_kyokumen_map:&kyokumen_map,
-                    self_already_oute_map:&mut Some(KyokumenMap::new()),
-                    opponent_already_oute_map:&mut Some(KyokumenMap::new()),
+                    self_checkmate_state_map:Arc::new(CHashMap::new()),
+                    opponent_checkmate_state_map:Arc::new(CHashMap::new()),
                     oute_kyokumen_map:&oute_kyokumen_map,
                     mhash:mhash,
                     shash:shash,
@@ -436,10 +437,10 @@ impl USIPlayer<ApplicationError> for Leo {
                         });
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,mvs)) if mvs.len() == 0 => {
+                    Ok(EvaluationResult::Immediate(_,_,mvs)) if mvs.len() == 0 => {
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,mvs)) => {
+                    Ok(EvaluationResult::Immediate(_,_,mvs)) => {
                         BestMove::Move(mvs[0].to_move(),None)
                     }
                 };
@@ -499,7 +500,8 @@ impl USIPlayer<ApplicationError> for Leo {
         );
 
         let ms = GameStateForMate {
-            already_oute_kyokumen_map: &mut Some(KyokumenMap::new()),
+            checkmate_state_map: Arc::new(CHashMap::new()),
+            unique_kyokumen_map: Arc::new(CHashMap::new()),
             current_depth:0,
             mhash:mhash,
             shash:shash,
@@ -521,6 +523,7 @@ impl USIPlayer<ApplicationError> for Leo {
             env.network_delay,
             env.max_ply_mate.clone(),
             env.max_nodes.clone(),
+            Arc::clone(&env.nodes),
             env.info_sender.clone(),
             Arc::clone(&env.on_error_handler),
             Arc::clone(&env.hasher),

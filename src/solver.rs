@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, atomic, mpsc, Mutex};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
+use chashmap::CHashMap;
 
 use usiagent::event::{EventQueue, UserEvent, UserEventKind};
 use usiagent::hash::{KyokumenHash, KyokumenMap};
@@ -26,7 +27,8 @@ pub enum MaybeMate {
 }
 
 pub struct GameStateForMate<'a> {
-    pub already_oute_kyokumen_map:&'a Option<KyokumenMap<u64,bool>>,
+    pub checkmate_state_map:Arc<CHashMap<(Teban, u64, u64),bool>>,
+    pub unique_kyokumen_map:Arc<CHashMap<(Teban, u64, u64),()>>,
     pub current_depth:u32,
     pub mhash:u64,
     pub shash:u64,
@@ -52,6 +54,7 @@ impl Solver {
                      network_delay:u32,
                      max_depth:Option<u32>,
                      max_nodes:Option<i64>,
+                     nodes:Arc<AtomicU64>,
                      info_sender:S,
                      on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                      hasher:Arc<KyokumenHash<u64>>,
@@ -70,6 +73,7 @@ impl Solver {
             let network_delay = network_delay.clone();
             let max_depth = max_depth.clone();
             let max_nodes = max_nodes.clone();
+            let nodes = Arc::clone(&nodes);
             let info_sender = info_sender.clone();
             let on_error_handler = Arc::clone(&on_error_handler);
             let hasher = Arc::clone(&hasher);
@@ -77,7 +81,8 @@ impl Solver {
             let quited = Arc::clone(&quited);
             let aborted = Arc::clone(&aborted);
 
-            let mut already_oute_kyokumen_map = ms.already_oute_kyokumen_map.clone();
+            let checkmate_state_map = Arc::clone(&ms.checkmate_state_map);
+            let unique_kyokumen_map = Arc::clone(&ms.unique_kyokumen_map);
             let current_depth = ms.current_depth;
             let mhash = ms.mhash;
             let shash = ms.shash;
@@ -107,8 +112,11 @@ impl Solver {
                     stop,
                     aborted,
                     current_depth);
-                if let Err(ref e) = s.send(mate_strategy.oute_process(&mut already_oute_kyokumen_map,
+                if let Err(ref e) = s.send(mate_strategy.oute_process(
+                                                                      &checkmate_state_map,
+                                                                      &unique_kyokumen_map,
                                                                       current_depth,
+                                                                      &nodes,
                                                                       mhash,
                                                                       shash,
                                                                       &mut ignore_kyokumen_map,
@@ -132,6 +140,7 @@ impl Solver {
             let network_delay = network_delay.clone();
             let max_depth = max_depth.clone();
             let max_nodes = max_nodes.clone();
+            let nodes = Arc::clone(&nodes);
             let info_sender = info_sender.clone();
             let on_error_handler = Arc::clone(&on_error_handler);
             let hasher = Arc::clone(&hasher);
@@ -139,7 +148,8 @@ impl Solver {
             let quited = Arc::clone(&quited);
             let aborted = Arc::clone(&aborted);
 
-            let mut already_oute_kyokumen_map = ms.already_oute_kyokumen_map.clone();
+            let checkmate_state_map = Arc::clone(&ms.checkmate_state_map);
+            let unique_kyokumen_map = Arc::clone(&ms.unique_kyokumen_map);
             let current_depth = ms.current_depth;
             let mhash = ms.mhash;
             let shash = ms.shash;
@@ -169,8 +179,11 @@ impl Solver {
                     stop,
                     aborted,
                     current_depth);
-                if let Err(ref e) = s.send(nomate_strategy.oute_process(&mut already_oute_kyokumen_map,
+                if let Err(ref e) = s.send(nomate_strategy.oute_process(
+                                                                        &checkmate_state_map,
+                                                                        &unique_kyokumen_map,
                                                                         current_depth,
+                                                                        &nodes,
                                                                         mhash,
                                                                         shash,
                                                                         &mut ignore_kyokumen_map,
@@ -217,9 +230,10 @@ impl Solver {
 pub mod checkmate {
     use std::cmp::Ordering;
     use std::collections::VecDeque;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::{Arc, atomic, Mutex};
     use std::time::{Duration, Instant};
+    use chashmap::CHashMap;
     use usiagent::command::UsiInfoSubCommand;
     use usiagent::event::{EventDispatcher, EventQueue, UserEvent, UserEventKind, USIEventDispatcher};
     use usiagent::hash::{KyokumenHash, KyokumenMap};
@@ -228,7 +242,7 @@ pub mod checkmate {
     use usiagent::rule::{LegalMove, Rule, State};
     use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
     use crate::error::{ApplicationError, SendSelDepthError};
-    use crate::search::TIMELIMIT_MARGIN;
+    use crate::search::{TIMELIMIT_MARGIN};
     use crate::solver::{MaybeMate};
 
     pub trait Comparator<T>: Clone {
@@ -316,24 +330,32 @@ pub mod checkmate {
         }
 
         pub fn oute_process<L: Logger>(&mut self,
-                             already_oute_kyokumen_map:&mut Option<KyokumenMap<u64,bool>>,
-                             current_depth:u32,
-                             mhash:u64,
-                             shash:u64,
-                             ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
-                             oute_kyokumen_map:&mut KyokumenMap<u64,()>,
-                             current_kyokumen_map:&mut KyokumenMap<u64,u32>,
-                             event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
-                             event_dispatcher:&mut USIEventDispatcher<UserEventKind,
+                                       checkmate_state_map:&Arc<CHashMap<(Teban, u64, u64),bool>>,
+                                       unique_kyokumen_map:&Arc<CHashMap<(Teban,u64,u64),()>>,
+                                       current_depth:u32,
+                                       nodes:&Arc<AtomicU64>,
+                                       mhash:u64,
+                                       shash:u64,
+                                       ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
+                                       oute_kyokumen_map:&mut KyokumenMap<u64,()>,
+                                       current_kyokumen_map:&mut KyokumenMap<u64,u32>,
+                                       event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
+                                       event_dispatcher:&mut USIEventDispatcher<UserEventKind,
                                  UserEvent,Self,L,ApplicationError>,
-                             teban:Teban,state:&State,mc:&MochigomaCollections)
-            -> Result<MaybeMate,ApplicationError>
+                                       teban:Teban, state:&State, mc:&MochigomaCollections)
+                                       -> Result<MaybeMate,ApplicationError>
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       S: InfoSender + Send {
             if self.aborted.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
+
+            if !unique_kyokumen_map.contains_key(&(teban,mhash,shash)) {
+                nodes.fetch_add(1,atomic::Ordering::Release);
+            }
+
+            unique_kyokumen_map.insert((teban,mhash,shash),());
 
             self.nodes += 1;
 
@@ -370,7 +392,7 @@ pub mod checkmate {
             mvs.sort_by(|a,b| response_oute_comparator.cmp(a,b));
 
             if mvs.len() == 0 {
-                already_oute_kyokumen_map.as_mut().map(|m| m.insert(teban,mhash,shash,false));
+                checkmate_state_map.insert((teban,mhash,shash),false);
                 Ok(MaybeMate::Nomate)
             } else {
                 for (m,next,nmc,_) in mvs {
@@ -388,18 +410,18 @@ pub mod checkmate {
                                                      state.get_banmen(),
                                                      &mc,m.to_applied_move(),&o);
 
-                    let completed = already_oute_kyokumen_map.as_ref().and_then(|m| {
-                        m.get(teban,&mhash,&shash)
-                    });
+                    let completed = checkmate_state_map.get(&(teban,mhash,shash));
 
-                    if let Some(true) = completed {
-                        if !self.strict_moves {
-                            let mut mvs = VecDeque::new();
-                            mvs.push_front(m);
-                            return Ok(MaybeMate::MateMoves(current_depth,mvs));
+                    if let Some(completed) = completed {
+                        if *completed {
+                            if !self.strict_moves {
+                                let mut mvs = VecDeque::new();
+                                mvs.push_front(m);
+                                return Ok(MaybeMate::MateMoves(current_depth,mvs));
+                            }
+                        } else {
+                            continue;
                         }
-                    } else if let Some(false) = completed {
-                        continue;
                     }
 
                     if let Some(()) = ignore_kyokumen_map.get(teban,&mhash,&shash) {
@@ -426,8 +448,10 @@ pub mod checkmate {
 
                     oute_kyokumen_map.insert(teban, mhash, shash, ());
 
-                    match self.response_oute_process(already_oute_kyokumen_map,
+                    match self.response_oute_process(checkmate_state_map,
+                                                     unique_kyokumen_map,
                                                      current_depth,
+                                                     nodes,
                                                      mhash,
                                                      shash,
                                                      &mut ignore_kyokumen_map,
@@ -454,24 +478,32 @@ pub mod checkmate {
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
-                                      already_oute_kyokumen_map:&mut Option<KyokumenMap<u64,bool>>,
-                                      current_depth:u32,
-                                      mhash:u64,
-                                      shash:u64,
-                                      ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
-                                      oute_kyokumen_map:&mut KyokumenMap<u64,()>,
-                                      current_kyokumen_map:&mut KyokumenMap<u64,u32>,
-                                      event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
-                                      event_dispatcher:&mut USIEventDispatcher<UserEventKind,
+                                                checkmate_state_map:&Arc<CHashMap<(Teban, u64, u64),bool>>,
+                                                unique_kyokumen_map:&Arc<CHashMap<(Teban,u64,u64),()>>,
+                                                current_depth:u32,
+                                                nodes:&Arc<AtomicU64>,
+                                                mhash:u64,
+                                                shash:u64,
+                                                ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
+                                                oute_kyokumen_map:&mut KyokumenMap<u64,()>,
+                                                current_kyokumen_map:&mut KyokumenMap<u64,u32>,
+                                                event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
+                                                event_dispatcher:&mut USIEventDispatcher<UserEventKind,
                                           UserEvent,Self,L,ApplicationError>,
-                                      teban:Teban,state:&State,mc:&MochigomaCollections)
-            -> Result<MaybeMate,ApplicationError>
+                                                teban:Teban, state:&State, mc:&MochigomaCollections)
+                                                -> Result<MaybeMate,ApplicationError>
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       S: InfoSender + Send {
             if self.aborted.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
+
+            if !unique_kyokumen_map.contains_key(&(teban,mhash,shash)) {
+                nodes.fetch_add(1,atomic::Ordering::Release);
+            }
+
+            unique_kyokumen_map.insert((teban,mhash,shash),());
 
             self.nodes += 1;
 
@@ -508,6 +540,7 @@ pub mod checkmate {
             mvs.sort_by(|a,b| oute_comparator.cmp(a,b));
 
             if mvs.len() == 0 {
+                checkmate_state_map.insert((teban,mhash,shash),true);
                 Ok(MaybeMate::MateMoves(current_depth,VecDeque::new()))
             } else {
                 for (m,next,nmc,_) in mvs {
@@ -525,14 +558,14 @@ pub mod checkmate {
                                                      state.get_banmen(),
                                                      &mc,m.to_applied_move(),&o);
 
-                    let completed = already_oute_kyokumen_map.as_ref().and_then(|m| {
-                        m.get(teban,&mhash,&shash)
-                    });
+                    let completed = checkmate_state_map.get(&(teban,mhash,shash));
 
-                    if let Some(true) = completed {
-                        continue;
-                    } else if let Some(false) = completed {
-                        return Ok(MaybeMate::Nomate);
+                    if let Some(completed) = completed {
+                        if *completed {
+                            continue;
+                        } else {
+                            return Ok(MaybeMate::Nomate);
+                        }
                     }
 
                     if let Some(()) = ignore_kyokumen_map.get(teban,&mhash,&shash) {
@@ -553,8 +586,10 @@ pub mod checkmate {
                         }
                     }
 
-                    match self.oute_process(already_oute_kyokumen_map,
+                    match self.oute_process(checkmate_state_map,
+                                            unique_kyokumen_map,
                                             current_depth,
+                                            nodes,
                                             mhash,
                                             shash,
                                             &mut ignore_kyokumen_map,
