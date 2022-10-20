@@ -32,7 +32,7 @@ pub mod search;
 pub mod solver;
 
 const LEAN_SFEN_READ_SIZE:usize = 1000 * 1000 * 10;
-const LEAN_BATCH_SIZE:usize = 256;
+const LEAN_BATCH_SIZE:usize = 1000 * 100;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -49,16 +49,7 @@ pub struct Config {
     adjust_depth:Option<bool>,
     time_limit:Option<u32>,
     time_limit_byoyomi:Option<u32>,
-    uptime:Option<String>,
-    number_of_games:Option<u32>,
-    silent:bool,
-    initial_position:Option<InitialPositionKifu>,
     bias_shake_shake_with_kifu:bool
-}
-#[derive(Debug, Deserialize)]
-pub struct InitialPositionKifu {
-    path:Option<String>,
-    from_last:Option<u32>,
 }
 pub struct ConfigLoader {
     reader:BufReader<File>,
