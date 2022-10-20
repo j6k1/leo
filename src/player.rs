@@ -189,8 +189,8 @@ impl USIPlayer<ApplicationError> for Leo {
                     Some(0) => {
                         None
                     },
-                    Some(depth) => {
-                        Some(depth)
+                    Some(nodes) => {
+                        Some(nodes)
                     },
                     None => None,
                 };
