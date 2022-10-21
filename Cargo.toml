@@ -17,7 +17,8 @@ serde = "1.0"
 serde_derive = "1.0"
 concurrent-queue = "1.2.4"
 chashmap = "2.2.2"
-nncombinator = "0.6.0"
+[dependencies.nncombinator]
+path = "../nncombinator"
 [dependencies.csaparser]
 path = "../CsaParser"
 [dependencies.packedsfen]

@@ -53,11 +53,11 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         } else {
             let nodes = nodes / RATE.pow(current_depth);
 
-            (nodes > u32::MAX as u64) || (current_depth > 1 && env.adjust_depth &&
+            env.adjust_depth && (nodes > u32::MAX as u64 || (current_depth > 1 &&
                 env.current_limit.map(|l| {
                     env.think_start_time + ((Instant::now() - start_time) / processed_nodes) * nodes as u32 > l
                 }).unwrap_or(false)
-            ) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
+            )) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
         }
     }
 
@@ -90,8 +90,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             commands.push(UsiInfoSubCommand::SelDepth(seldepth));
         }
 
-        commands.push(UsiInfoSubCommand::CurrMove(pv[0].to_move()));
-        commands.push(UsiInfoSubCommand::Pv(pv.clone().into_iter().map(|m| m.to_move()).collect()));
+        if pv.len() > 0 {
+            commands.push(UsiInfoSubCommand::CurrMove(pv[0].to_move()));
+            commands.push(UsiInfoSubCommand::Pv(pv.clone().into_iter().map(|m| m.to_move()).collect()));
+        }
         commands.push(UsiInfoSubCommand::Time((Instant::now() - env.think_start_time).as_millis() as u64));
 
         Ok(env.info_sender.send(commands).map_err(|e| SendSelDepthError::from(e))?)
@@ -186,6 +188,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                          event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
                          evalutor: &Evalutor)
         -> Result<BeforeSearchResult, ApplicationError> {
+
         if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
@@ -627,9 +630,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         opt_error = opt_error.and(self.send_info(env, env.base_depth,gs.current_depth,&best_moves).err());
                     }
                 },
-                Ok(EvaluationResult::Timeout) => {
-                    is_timeout = true;
-                }
                 Err(e) => {
                     opt_error = Some(e);
                 },
@@ -640,8 +640,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         if let Some(e) = opt_error {
             return Err(e);
-        } else if is_timeout {
-            return Ok(EvaluationResult::Timeout);
         }
 
         for r in await_mvs {
@@ -697,11 +695,11 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mut await_mvs = vec![];
         let mut is_timeout = false;
 
-        let mut threads = env.max_threads;
+        let mvs_count = mvs.len() as u64;
+
+        let mut threads = env.max_threads.min(mvs_count as u32);
 
         let sender = self.sender.clone();
-
-        let mvs_count = mvs.len() as u64;
 
         let mut it = mvs.into_iter();
         let mut processed_nodes:u32 = 0;

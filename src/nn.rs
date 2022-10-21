@@ -277,7 +277,6 @@ impl Evalutor {
                 }
             });
         }
-
         ready_receiver.recv().map_err(|e| ApplicationError::from(e))??;
 
         Ok(Evalutor {
@@ -339,6 +338,10 @@ impl Evalutor {
 
             while !self.queue.is_empty() {
                 queue.push(self.queue.pop()?);
+            }
+
+            if queue.is_empty() {
+                return Ok(());
             }
 
             let (m, input, s) = queue.into_par_iter().fold(|| (vec![], vec![], vec![]), |mut acc, item| {
