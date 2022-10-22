@@ -670,8 +670,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 },
                 Err(e) => {
                     opt_error = opt_error.and(Some(e));
-                },
-                _ => ()
+                }
             }
         }
 
@@ -880,7 +879,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     },
                     None => (),
                 }
-            } else if evalutor.active_threads() == 0 {
+            } else if evalutor.active_threads() > 0 {
+                threads -= 1;
+            } else {
                 break;
             }
         }
