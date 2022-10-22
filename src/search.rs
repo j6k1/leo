@@ -211,9 +211,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 mvs.push_front(m);
                 return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE,gs.depth,gs.mhash,gs.shash,mvs)));
             }
-        }
 
-        if let Some(m) = gs.m {
             let r = env.kyokumen_score_map.get(&(gs.teban, gs.mhash, gs.shash)).map(|g| *g);
 
             if let Some((s,d)) = r {
@@ -735,8 +733,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                 match r {
                     EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                        let depth = depth + 1;
-
                         env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
 
                         if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
@@ -1029,7 +1025,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     return Ok(EvaluationResult::Timeout);
                                 },
                                 EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                                    let depth = depth + 1;
                                     env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
 
                                     if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), mhash, shash)) {
