@@ -622,7 +622,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 
     pub fn termination<'a,'b>(&self,
-                       is_timeout:bool,
                        await_mvs:Vec<Receiver<(AppliedMove,i32)>>,
                        env:&mut Environment<L,S>,
                        gs: &mut GameState<'a>,
@@ -679,9 +678,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         match opt_error {
             Some(e) => {
                 Err(e)
-            },
-            None if best_moves.len() == 0 => {
-                Ok(EvaluationResult::Immediate(NEGINFINITE,gs.depth, gs.mhash,gs.shash,VecDeque::new()))
             },
             None => {
                 Ok(EvaluationResult::Immediate(score, gs.depth,gs.mhash,gs.shash,best_moves))
@@ -796,18 +792,17 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                             gs,
                                             m,
                                             priority) {
-                    Some((depth,obtained,mhash,shash,
+                    Some((depth, obtained, mhash, shash,
                              oute_kyokumen_map,
                              current_kyokumen_map,
                              is_sennichite)) => {
-
                         let m = m.to_applied_move();
-                        let next = Rule::apply_move_none_check(&gs.state,gs.teban,gs.mc,m);
+                        let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m);
 
                         match next {
-                            (state,mc,_) => {
+                            (state, mc, _) => {
                                 if is_sennichite {
-                                    let s = if Rule::is_mate(gs.teban.opposite(),&state) {
+                                    let s = if Rule::is_mate(gs.teban.opposite(), &state) {
                                         Score::NEGINFINITE
                                     } else {
                                         Score::Value(0)
@@ -822,7 +817,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         }
 
                                         if scoreval >= beta {
-                                            return self.termination(false,await_mvs, env, &mut gs,&evalutor,scoreval,best_moves);
+                                            return self.termination(await_mvs, env, &mut gs, &evalutor, scoreval, best_moves);
                                         }
                                     }
                                     continue;
@@ -850,30 +845,30 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                 evalutor.on_begin_thread();
 
                                 let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
-                                    let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L,S>>(&env.on_error_handler,&env.stop,&env.quited);
+                                    let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L, S>>(&env.on_error_handler, &env.stop, &env.quited);
 
                                     let mut gs = GameState {
                                         teban: teban.opposite(),
                                         state: &state,
                                         alpha: -beta,
                                         beta: -alpha,
-                                        m:Some(m),
+                                        m: Some(m),
                                         mc: &mc,
-                                        obtained:obtained,
-                                        current_kyokumen_map:&current_kyokumen_map,
-                                        self_checkmate_state_map:opponent_checkmate_state_map,
-                                        opponent_checkmate_state_map:self_checkmate_state_map,
-                                        oute_kyokumen_map:&oute_kyokumen_map,
-                                        mhash:mhash,
-                                        shash:shash,
-                                        depth:depth - 1,
-                                        current_depth:current_depth + 1,
-                                        node_count:mvs_count as u128 - processed_nodes as u128
+                                        obtained: obtained,
+                                        current_kyokumen_map: &current_kyokumen_map,
+                                        self_checkmate_state_map: opponent_checkmate_state_map,
+                                        opponent_checkmate_state_map: self_checkmate_state_map,
+                                        oute_kyokumen_map: &oute_kyokumen_map,
+                                        mhash: mhash,
+                                        shash: shash,
+                                        depth: depth - 1,
+                                        current_depth: current_depth + 1,
+                                        node_count: mvs_count as u128 - processed_nodes as u128
                                     };
 
                                     let strategy = Recursive::new();
 
-                                    let r = strategy.search(&mut env,&mut gs, &mut event_dispatcher, &evalutor);
+                                    let r = strategy.search(&mut env, &mut gs, &mut event_dispatcher, &evalutor);
 
                                     let _ = sender.send(r);
                                 });
@@ -884,12 +879,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     },
                     None => (),
                 }
+            } else if threads > 0 {
+                threads -= 1;
             } else {
                 break;
             }
         }
 
-        self.termination(is_timeout,await_mvs,env, &mut gs,evalutor,scoreval,best_moves)
+        self.termination(await_mvs,env, &mut gs,evalutor,scoreval,best_moves)
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
