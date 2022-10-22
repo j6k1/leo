@@ -419,7 +419,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     shash:shash,
                     depth:base_depth,
                     current_depth:1,
-                    node_count:0
+                    node_count:1
                 };
 
                 let strategy  = Root::new();

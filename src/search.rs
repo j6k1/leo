@@ -56,7 +56,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
             env.adjust_depth && (current_depth > 1 &&
                 env.current_limit.map(|l| {
-                    let nanos = ((Instant::now() - start_time) / processed_nodes).as_nanos() * nodes;
+                    let nanos = (Instant::now() - start_time).as_nanos() * nodes;
                     env.think_start_time + Duration::new((nanos / SECOND_NANOS) as u64, (nanos % SECOND_NANOS) as u32) > l
                 }).unwrap_or(false)
             ) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
@@ -781,7 +781,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if self.timeout_expected(env,start_time,gs.current_depth,nodes,processed_nodes) {
+                        if self.timeout_expected(env,start_time,gs.current_depth,gs.node_count,processed_nodes) {
                             is_timeout = true;
                             break;
                         }
@@ -973,6 +973,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         for &(priority,m) in &mvs {
             processed_nodes += 1;
 
+            let parent_nodes = gs.node_count;
             let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
 
             match self.startup_strategy(env,gs,m,priority) {
@@ -1082,7 +1083,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
                                 return Ok(EvaluationResult::Timeout);
-                            } else if self.timeout_expected(env,start_time,gs.current_depth,nodes,processed_nodes) {
+                            } else if self.timeout_expected(env,start_time,gs.current_depth,parent_nodes,processed_nodes) {
                                 return Ok(EvaluationResult::Immediate(scoreval,gs.depth,gs.mhash,gs.shash,best_moves));
                             }
                         }
