@@ -506,8 +506,8 @@ impl USIPlayer<ApplicationError> for Leo {
         );
 
         let ms = GameStateForMate {
-            checkmate_state_map: Arc::new(CHashMap::new()),
-            unique_kyokumen_map: Arc::new(CHashMap::new()),
+            checkmate_state_map: Arc::new(CHashMap::with_capacity(100000000)),
+            unique_kyokumen_map: Arc::new(CHashMap::with_capacity(100000000)),
             current_depth:0,
             mhash:mhash,
             shash:shash,
