@@ -449,7 +449,7 @@ pub mod checkmate {
 
                     match self.response_oute_process(checkmate_state_map,
                                                      unique_kyokumen_map,
-                                                     current_depth,
+                                                     current_depth+1,
                                                      nodes,
                                                      mhash,
                                                      shash,
@@ -487,8 +487,7 @@ pub mod checkmate {
                                                 oute_kyokumen_map:&mut KyokumenMap<u64,()>,
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                                 event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
-                                                event_dispatcher:&mut USIEventDispatcher<UserEventKind,
-                                          UserEvent,Self,L,ApplicationError>,
+                                                event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
                                                 teban:Teban, state:&State, mc:&MochigomaCollections)
                                                 -> Result<MaybeMate,ApplicationError>
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
@@ -587,7 +586,7 @@ pub mod checkmate {
 
                     match self.oute_process(checkmate_state_map,
                                             unique_kyokumen_map,
-                                            current_depth,
+                                            current_depth+1,
                                             nodes,
                                             mhash,
                                             shash,
