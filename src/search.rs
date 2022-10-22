@@ -217,48 +217,48 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
-        let r = env.kyokumen_score_map.get(&(gs.teban, gs.mhash, gs.shash)).map(|g| *g);
-
-        if let Some((s,d)) = r {
-            match s {
-                Score::INFINITE => {
-                    if env.display_evalute_score {
-                        self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
-                    }
-                    let mut mvs = VecDeque::new();
-                    gs.m.map(|m| mvs.push_front(m));
-
-                    return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::INFINITE, gs.depth, gs.mhash, gs.shash, mvs)
-                    ));
-                },
-                Score::NEGINFINITE => {
-                    if env.display_evalute_score {
-                        self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
-                    }
-                    let mut mvs = VecDeque::new();
-                    gs.m.map(|m| mvs.push_front(m));
-
-                    return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::NEGINFINITE, gs.depth, gs.mhash,gs.shash, mvs)
-                    ));
-                },
-                Score::Value(s) if d >= gs.depth => {
-                    if env.display_evalute_score {
-                        self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
-                    }
-                    let mut mvs = VecDeque::new();
-                    gs.m.map(|m| mvs.push_front(m));
-
-                    return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::Value(s), gs.depth, gs.mhash,gs.shash,mvs)
-                    ));
-                },
-                _ => ()
-            }
-        }
-
         if let Some(m) = gs.m {
+            let r = env.kyokumen_score_map.get(&(gs.teban, gs.mhash, gs.shash)).map(|g| *g);
+
+            if let Some((s,d)) = r {
+                match s {
+                    Score::INFINITE => {
+                        if env.display_evalute_score {
+                            self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
+                        }
+                        let mut mvs = VecDeque::new();
+                        mvs.push_front(m);
+
+                        return Ok(BeforeSearchResult::Complete(
+                            EvaluationResult::Immediate(Score::INFINITE, gs.depth, gs.mhash, gs.shash, mvs)
+                        ));
+                    },
+                    Score::NEGINFINITE => {
+                        if env.display_evalute_score {
+                            self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
+                        }
+                        let mut mvs = VecDeque::new();
+                        mvs.push_front(m);
+
+                        return Ok(BeforeSearchResult::Complete(
+                            EvaluationResult::Immediate(Score::NEGINFINITE, gs.depth, gs.mhash, gs.shash, mvs)
+                        ));
+                    },
+                    Score::Value(s) if d >= gs.depth => {
+                        if env.display_evalute_score {
+                            self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
+                        }
+                        let mut mvs = VecDeque::new();
+                        mvs.push_front(m);
+
+                        return Ok(BeforeSearchResult::Complete(
+                            EvaluationResult::Immediate(Score::Value(s), gs.depth, gs.mhash, gs.shash, mvs)
+                        ));
+                    },
+                    _ => ()
+                }
+            }
+
             if (gs.depth <= 1 || gs.current_depth - 1 >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
                     checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
@@ -740,12 +740,12 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
 
                 match r {
-                    EvaluationResult::Immediate(s,depth,_,_,mvs) if mvs.len() > 0 => {
+                    EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
                         let depth = depth + 1;
 
-                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),gs.mhash,gs.shash),(s,depth));
+                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
 
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),gs.mhash,gs.shash)) {
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
                             let (ref mut score,ref mut d) = *g;
 
                             if *d < depth {
@@ -754,9 +754,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        env.kyokumen_score_map.insert_new((gs.teban,gs.mhash,gs.shash),(-s,depth));
+                        env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
 
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,gs.mhash,gs.shash)) {
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,mhash,shash)) {
                             let (ref mut score,ref mut d) = *g;
 
                             if *d < depth {
@@ -785,9 +785,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             is_timeout = true;
                             break;
                         }
-                    },
-                    EvaluationResult::Immediate(_,_,_,_,_) => {
-                        return Err(ApplicationError::LogicError(String::from("MOVES is empty.")));
                     },
                     EvaluationResult::Async(r) => {
                         await_mvs.push(r);
@@ -1038,11 +1035,11 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Timeout);
                                 },
-                                EvaluationResult::Immediate(s,depth, _,_,mvs) => {
+                                EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
                                     let depth = depth + 1;
-                                    env.kyokumen_score_map.insert_new((gs.teban.opposite(),gs.mhash,gs.shash),(s,depth));
+                                    env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
 
-                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), gs.mhash, gs.shash)) {
+                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), mhash, shash)) {
                                         let (ref mut score, ref mut d) = *g;
 
                                         if *d < depth {
@@ -1051,9 +1048,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         }
                                     }
 
-                                    env.kyokumen_score_map.insert_new((gs.teban,gs.mhash,gs.shash),(-s,depth));
+                                    env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
 
-                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban, gs.mhash, gs.shash)) {
+                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban, mhash, shash)) {
                                         let (ref mut score, ref mut d) = *g;
 
                                         if *d < depth {
