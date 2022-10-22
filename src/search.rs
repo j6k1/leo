@@ -191,6 +191,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                          evalutor: &Evalutor)
         -> Result<BeforeSearchResult, ApplicationError> {
 
+        if env.base_depth < gs.current_depth {
+            self.send_seldepth(env,env.base_depth,gs.current_depth)?;
+        }
+
         if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
