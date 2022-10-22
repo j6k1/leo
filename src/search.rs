@@ -778,7 +778,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         }
 
                         if self.timeout_expected(env,start_time,gs.current_depth,gs.node_count,mvs_count as u32,processed_nodes) {
-                            is_timeout = true;
                             break;
                         }
                     },
