@@ -358,8 +358,6 @@ pub mod checkmate {
 
             self.nodes += 1;
 
-            self.send_seldepth(current_depth)?;
-
             if self.max_depth.map(|d| current_depth >= d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
@@ -371,6 +369,8 @@ pub mod checkmate {
             if self.check_timelimit() || self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Timeout);
             }
+
+            self.send_seldepth(current_depth)?;
 
             let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
             let mut current_kyokumen_map = current_kyokumen_map.clone();
@@ -505,8 +505,6 @@ pub mod checkmate {
 
             self.nodes += 1;
 
-            self.send_seldepth(current_depth)?;
-
             if self.max_depth.map(|d| current_depth >= d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
@@ -518,6 +516,8 @@ pub mod checkmate {
             if self.check_timelimit() || self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Timeout);
             }
+
+            self.send_seldepth(current_depth)?;
 
             let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
             let mut current_kyokumen_map = current_kyokumen_map.clone();

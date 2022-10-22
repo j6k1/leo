@@ -255,7 +255,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         if let Some(m) = gs.m {
-            if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+            if (gs.depth <= 1 || gs.current_depth - 1 >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
                     checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
                     unique_kyokumen_map: Arc::clone(&env.unique_kyokumen_map),

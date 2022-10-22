@@ -418,7 +418,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     mhash:mhash,
                     shash:shash,
                     depth:base_depth,
-                    current_depth:0,
+                    current_depth:1,
                     node_count:0
                 };
 
