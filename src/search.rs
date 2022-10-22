@@ -206,14 +206,14 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         env.unique_kyokumen_map.insert((gs.teban,gs.mhash,gs.shash),());
 
         if let Some(ObtainKind::Ou) = gs.obtained {
-            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,gs.depth,VecDeque::new())));
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,gs.depth,gs.mhash,gs.shash,VecDeque::new())));
         }
 
         if let Some(m) = gs.m {
             if Rule::is_mate(gs.teban, &*gs.state) {
                 let mut mvs = VecDeque::new();
                 mvs.push_front(m);
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE,gs.depth,mvs)));
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE,gs.depth,gs.mhash,gs.shash,mvs)));
             }
         }
 
@@ -229,7 +229,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     gs.m.map(|m| mvs.push_front(m));
 
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::INFINITE, gs.depth, mvs)
+                        EvaluationResult::Immediate(Score::INFINITE, gs.depth, gs.mhash, gs.shash, mvs)
                     ));
                 },
                 Score::NEGINFINITE => {
@@ -240,7 +240,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     gs.m.map(|m| mvs.push_front(m));
 
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::NEGINFINITE, gs.depth, mvs)
+                        EvaluationResult::Immediate(Score::NEGINFINITE, gs.depth, gs.mhash,gs.shash, mvs)
                     ));
                 },
                 Score::Value(s) if d >= gs.depth => {
@@ -251,7 +251,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     gs.m.map(|m| mvs.push_front(m));
 
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::Value(s), gs.depth, mvs)
+                        EvaluationResult::Immediate(Score::Value(s), gs.depth, gs.mhash,gs.shash,mvs)
                     ));
                 },
                 _ => ()
@@ -299,7 +299,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         }).collect::<VecDeque<AppliedMove>>();
                         r.push_front(m);
 
-                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, gs.depth, r)));
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, gs.depth, gs.mhash, gs.shash,r)));
                     },
                     _ => ()
                 }
@@ -338,7 +338,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 gs.m.map(|m| mvs.push_front(m));
 
                 return Ok(BeforeSearchResult::Complete(
-                    EvaluationResult::Immediate(NEGINFINITE, gs.depth,mvs)
+                    EvaluationResult::Immediate(NEGINFINITE, gs.depth,gs.mhash,gs.shash,mvs)
                 ));
             } else {
                 mvs
@@ -396,7 +396,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 }
 #[derive(Debug)]
 pub enum EvaluationResult {
-    Immediate(Score, u32, VecDeque<AppliedMove>),
+    Immediate(Score, u32, u64, u64, VecDeque<AppliedMove>),
     Async(Receiver<(AppliedMove,i32)>),
     Timeout
 }
@@ -642,7 +642,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         while evalutor.active_threads() > 0 {
             match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,_,mvs)) if !is_timeout => {
+                Ok(EvaluationResult::Immediate(s,_,_,_,mvs)) => {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
@@ -663,7 +663,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         for r in await_mvs {
             match r.recv().map_err(|e| ApplicationError::from(e)) {
-                Ok((m,s)) if !is_timeout => {
+                Ok((m,s)) => {
                     let s = Score::Value(s);
 
                     opt_error = opt_error.and(self.send_score(env,gs.teban,-s).err());
@@ -686,14 +686,11 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             Some(e) => {
                 Err(e)
             },
-            None if is_timeout => {
-                Ok(EvaluationResult::Timeout)
-            },
             None if best_moves.len() == 0 => {
-                Ok(EvaluationResult::Immediate(NEGINFINITE,gs.depth, VecDeque::new()))
+                Ok(EvaluationResult::Immediate(NEGINFINITE,gs.depth, gs.mhash,gs.shash,VecDeque::new()))
             },
             None => {
-                Ok(EvaluationResult::Immediate(score, gs.depth,best_moves))
+                Ok(EvaluationResult::Immediate(score, gs.depth,gs.mhash,gs.shash,best_moves))
             }
         }
     }
@@ -743,12 +740,12 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
 
                 match r {
-                    EvaluationResult::Immediate(s,depth,mvs) => {
+                    EvaluationResult::Immediate(s,depth,mhash,shash,mvs) if mvs.len() > 0 => {
                         let depth = depth + 1;
 
-                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),gs.mhash,gs.shash),(s,depth));
+                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
 
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),gs.mhash,gs.shash)) {
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
                             let (ref mut score,ref mut d) = *g;
 
                             if *d < depth {
@@ -757,9 +754,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        env.kyokumen_score_map.insert_new((gs.teban,gs.mhash,gs.shash),(-s,depth));
+                        env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
 
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,gs.mhash,gs.shash)) {
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,mhash,shash)) {
                             let (ref mut score,ref mut d) = *g;
 
                             if *d < depth {
@@ -788,6 +785,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             is_timeout = true;
                             break;
                         }
+                    },
+                    EvaluationResult::Immediate(_,_,_,_,_) => {
+                        return Err(ApplicationError::LogicError(String::from("MOVES is empty.")));
                     },
                     EvaluationResult::Async(r) => {
                         await_mvs.push(r);
@@ -1000,7 +1000,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     best_moves.push_front(prev_move);
 
                                     if scoreval >= gs.beta {
-                                        return Ok(EvaluationResult::Immediate(scoreval,gs.depth,best_moves));
+                                        return Ok(EvaluationResult::Immediate(scoreval,gs.depth,gs.mhash,gs.shash,best_moves));
                                     }
                                 }
 
@@ -1038,7 +1038,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Timeout);
                                 },
-                                EvaluationResult::Immediate(s,depth, mvs) => {
+                                EvaluationResult::Immediate(s,depth, mhash,shash,mvs) => {
                                     let depth = depth + 1;
                                     env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
 
@@ -1068,7 +1068,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         best_moves.push_front(prev_move);
 
                                         if scoreval >= gs.beta {
-                                            return Ok(EvaluationResult::Immediate(scoreval, gs.depth,best_moves));
+                                            return Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves));
                                         }
                                     }
 
@@ -1086,7 +1086,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
                                 return Ok(EvaluationResult::Timeout);
                             } else if self.timeout_expected(env,start_time,gs.current_depth,nodes,processed_nodes) {
-                                return Ok(EvaluationResult::Immediate(scoreval,gs.depth,best_moves));
+                                return Ok(EvaluationResult::Immediate(scoreval,gs.depth,gs.mhash,gs.shash,best_moves));
                             }
                         }
                     }
@@ -1124,7 +1124,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         if let Some(e) = opt_error {
             Err(e)
         } else {
-            Ok(EvaluationResult::Immediate(scoreval, gs.depth,best_moves))
+            Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves))
         }
     }
 }

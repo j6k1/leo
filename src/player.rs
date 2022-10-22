@@ -438,10 +438,10 @@ impl USIPlayer<ApplicationError> for Leo {
                         });
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,_,mvs)) if mvs.len() == 0 => {
+                    Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,_,mvs)) => {
+                    Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) => {
                         BestMove::Move(mvs[0].to_move(),None)
                     }
                 };
