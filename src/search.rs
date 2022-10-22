@@ -725,6 +725,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let r = r?.map_err(|e| ApplicationError::from(e))?;
 
                 threads += 1;
+
                 processed_nodes += 1;
 
                 match r {
@@ -879,9 +880,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     },
                     None => (),
                 }
-            } else if threads > 0 {
-                threads -= 1;
-            } else {
+            } else if evalutor.active_threads() == 0 {
                 break;
             }
         }
