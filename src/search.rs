@@ -197,9 +197,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
         if !env.unique_kyokumen_map.contains_key(&(gs.teban,gs.mhash,gs.shash)) {
             env.nodes.fetch_add(1,atomic::Ordering::Release);
+            env.unique_kyokumen_map.insert((gs.teban,gs.mhash,gs.shash),());
         }
-
-        env.unique_kyokumen_map.insert((gs.teban,gs.mhash,gs.shash),());
 
         if let Some(ObtainKind::Ou) = gs.obtained {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,gs.depth,gs.mhash,gs.shash,VecDeque::new())));
@@ -728,7 +727,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                 match r {
                     EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
+                        if !env.kyokumen_score_map.contains_key(&(gs.teban.opposite(),mhash,shash)) {
+                            env.kyokumen_score_map.insert_new((gs.teban.opposite(), mhash, shash), (s, depth));
+                        }
 
                         if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
                             let (ref mut score,ref mut d) = *g;
@@ -739,7 +740,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
+                        if !env.kyokumen_score_map.contains_key(&(gs.teban,mhash,shash)) {
+                            env.kyokumen_score_map.insert_new((gs.teban, mhash, shash), (-s, depth));
+                        }
 
                         if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,mhash,shash)) {
                             let (ref mut score,ref mut d) = *g;
@@ -1018,7 +1021,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     return Ok(EvaluationResult::Timeout);
                                 },
                                 EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                                    env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
+                                    if !env.kyokumen_score_map.contains_key(&(gs.teban.opposite(),mhash,shash)) {
+                                        env.kyokumen_score_map.insert_new((gs.teban.opposite(), mhash, shash), (s, depth));
+                                    }
 
                                     if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), mhash, shash)) {
                                         let (ref mut score, ref mut d) = *g;
@@ -1029,7 +1034,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         }
                                     }
 
-                                    env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
+                                    if !env.kyokumen_score_map.contains_key(&(gs.teban,mhash,shash)) {
+                                        env.kyokumen_score_map.insert_new((gs.teban, mhash, shash), (-s, depth));
+                                    }
 
                                     if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban, mhash, shash)) {
                                         let (ref mut score, ref mut d) = *g;
