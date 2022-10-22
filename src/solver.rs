@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
-use chashmap::CHashMap;
+use concurrent_fixed_hashmap::ConcurrentFixedHashMap;
 
 use usiagent::event::{EventQueue, UserEvent, UserEventKind};
 use usiagent::hash::{KyokumenHash, KyokumenMap};
@@ -27,8 +27,8 @@ pub enum MaybeMate {
 }
 
 pub struct GameStateForMate<'a> {
-    pub checkmate_state_map:Arc<CHashMap<(Teban, u64, u64),bool>>,
-    pub unique_kyokumen_map:Arc<CHashMap<(Teban, u64, u64),()>>,
+    pub checkmate_state_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
+    pub unique_kyokumen_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),()>>,
     pub current_depth:u32,
     pub mhash:u64,
     pub shash:u64,
@@ -233,7 +233,7 @@ pub mod checkmate {
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::{Arc, atomic, Mutex};
     use std::time::{Duration, Instant};
-    use chashmap::CHashMap;
+    use concurrent_fixed_hashmap::ConcurrentFixedHashMap;
     use usiagent::command::UsiInfoSubCommand;
     use usiagent::event::{EventDispatcher, EventQueue, UserEvent, UserEventKind, USIEventDispatcher};
     use usiagent::hash::{KyokumenHash, KyokumenMap};
@@ -330,8 +330,8 @@ pub mod checkmate {
         }
 
         pub fn oute_process<L: Logger>(&mut self,
-                                       checkmate_state_map:&Arc<CHashMap<(Teban, u64, u64),bool>>,
-                                       unique_kyokumen_map:&Arc<CHashMap<(Teban,u64,u64),()>>,
+                                       checkmate_state_map:&Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
+                                       unique_kyokumen_map:&Arc<ConcurrentFixedHashMap<(Teban,u64,u64),()>>,
                                        current_depth:u32,
                                        nodes:&Arc<AtomicU64>,
                                        mhash:u64,
@@ -477,8 +477,8 @@ pub mod checkmate {
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
-                                                checkmate_state_map:&Arc<CHashMap<(Teban, u64, u64),bool>>,
-                                                unique_kyokumen_map:&Arc<CHashMap<(Teban,u64,u64),()>>,
+                                                checkmate_state_map:&Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
+                                                unique_kyokumen_map:&Arc<ConcurrentFixedHashMap<(Teban,u64,u64),()>>,
                                                 current_depth:u32,
                                                 nodes:&Arc<AtomicU64>,
                                                 mhash:u64,

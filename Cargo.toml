@@ -25,4 +25,6 @@ path = "../CsaParser"
 path = "../packedsfen"
 [dependencies.usiagent]
 path = "../USIAgent"
+[dependencies.concurrent-fixed-hashmap]
+path = "../concurrent_fixed_hashmap"
 

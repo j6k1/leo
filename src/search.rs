@@ -5,7 +5,7 @@ use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
-use chashmap::CHashMap;
+use concurrent_fixed_hashmap::ConcurrentFixedHashMap;
 use usiagent::command::UsiInfoSubCommand;
 use usiagent::error::EventHandlerError;
 use usiagent::event::{EventDispatcher, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, UserEventQueue, USIEventDispatcher};
@@ -444,7 +444,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub info_sender:S,
     pub on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
     pub hasher:Arc<KyokumenHash<u64>>,
-    pub unique_kyokumen_map:Arc<CHashMap<(Teban,u64,u64),()>>,
+    pub unique_kyokumen_map:Arc<ConcurrentFixedHashMap<(Teban,u64,u64),()>>,
     pub limit:Option<Instant>,
     pub current_limit:Option<Instant>,
     pub turn_count:u32,
@@ -461,7 +461,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub max_threads:u32,
     pub stop:Arc<AtomicBool>,
     pub quited:Arc<AtomicBool>,
-    pub kyokumen_score_map:Arc<CHashMap<(Teban,u64,u64),(Score,u32)>>,
+    pub kyokumen_score_map:Arc<ConcurrentFixedHashMap<(Teban,u64,u64),(Score,u32)>>,
     pub nodes:Arc<AtomicU64>,
     pub think_start_time:Instant
 }
@@ -524,7 +524,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:info_sender,
             on_error_handler:on_error_handler,
             hasher:hasher,
-            unique_kyokumen_map:Arc::new(CHashMap::with_capacity(100000000)),
+            unique_kyokumen_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
             think_start_time:think_start_time,
             limit:limit,
             current_limit:current_limit,
@@ -542,7 +542,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             max_threads:max_threads,
             stop:stop,
             quited:quited,
-            kyokumen_score_map:Arc::new(CHashMap::with_capacity(100000000)),
+            kyokumen_score_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
             nodes:Arc::new(AtomicU64::new(0))
         }
     }
@@ -556,8 +556,8 @@ pub struct GameState<'a> {
     pub mc:&'a Arc<MochigomaCollections>,
     pub obtained:Option<ObtainKind>,
     pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
-    pub self_checkmate_state_map:Arc<CHashMap<(Teban, u64, u64),bool>>,
-    pub opponent_checkmate_state_map:Arc<CHashMap<(Teban, u64, u64),bool>>,
+    pub self_checkmate_state_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
+    pub opponent_checkmate_state_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
     pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
     pub mhash:u64,
     pub shash:u64,
@@ -703,7 +703,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mut scoreval = Score::NEGINFINITE;
         let mut best_moves = VecDeque::new();
         let mut await_mvs = vec![];
-        let mut is_timeout = false;
 
         let mvs_count = mvs.len() as u64;
 
@@ -775,7 +774,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         await_mvs.push(r);
                     },
                     EvaluationResult::Timeout => {
-                        is_timeout = true;
                         break;
                     }
                 }
@@ -784,7 +782,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 event_dispatcher.dispatch_events(self,&*event_queue)?;
 
                 if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
-                    is_timeout = true;
                     break;
                 }
             } else if let Some((priority,m)) = it.next() {
@@ -831,7 +828,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                 let self_checkmate_state_map = Arc::clone(&gs.self_checkmate_state_map);
                                 let opponent_checkmate_state_map = Arc::clone(&gs.opponent_checkmate_state_map);
                                 let current_depth = gs.current_depth;
-                                let node_count = gs.node_count;
 
                                 let mut env = env.clone();
                                 let evalutor = evalutor.clone();

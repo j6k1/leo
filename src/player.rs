@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{Ordering};
 use std::time::{Duration, Instant};
-use chashmap::CHashMap;
+use concurrent_fixed_hashmap::ConcurrentFixedHashMap;
 use usiagent::command::{BestMove, CheckMate, UsiInfoSubCommand, UsiOptType};
 use usiagent::error::{PlayerError, UsiProtocolError};
 use usiagent::event::{GameEndState, SysEventOption, SysEventOptionKind, UserEvent, UserEventQueue, UsiGoMateTimeLimit, UsiGoTimeLimit};
@@ -412,8 +412,8 @@ impl USIPlayer<ApplicationError> for Leo {
                     mc: &Arc::new(mc.clone()),
                     obtained:None,
                     current_kyokumen_map:&kyokumen_map,
-                    self_checkmate_state_map:Arc::new(CHashMap::new()),
-                    opponent_checkmate_state_map:Arc::new(CHashMap::new()),
+                    self_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
+                    opponent_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
                     oute_kyokumen_map:&oute_kyokumen_map,
                     mhash:mhash,
                     shash:shash,
@@ -431,7 +431,7 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Timeout) => {
-                        strategy.send_message(&mut env,"think timeout!");
+                        strategy.send_message(&mut env,"think timeout!")?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Async(_)) => {
@@ -506,8 +506,8 @@ impl USIPlayer<ApplicationError> for Leo {
         );
 
         let ms = GameStateForMate {
-            checkmate_state_map: Arc::new(CHashMap::with_capacity(100000000)),
-            unique_kyokumen_map: Arc::new(CHashMap::with_capacity(100000000)),
+            checkmate_state_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
+            unique_kyokumen_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
             current_depth:0,
             mhash:mhash,
             shash:shash,
