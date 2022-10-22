@@ -740,12 +740,12 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
 
                 match r {
-                    EvaluationResult::Immediate(s,depth,mhash,shash,mvs) if mvs.len() > 0 => {
+                    EvaluationResult::Immediate(s,depth,_,_,mvs) if mvs.len() > 0 => {
                         let depth = depth + 1;
 
-                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
+                        env.kyokumen_score_map.insert_new((gs.teban.opposite(),gs.mhash,gs.shash),(s,depth));
 
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),gs.mhash,gs.shash)) {
                             let (ref mut score,ref mut d) = *g;
 
                             if *d < depth {
@@ -754,9 +754,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
+                        env.kyokumen_score_map.insert_new((gs.teban,gs.mhash,gs.shash),(-s,depth));
 
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,mhash,shash)) {
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,gs.mhash,gs.shash)) {
                             let (ref mut score,ref mut d) = *g;
 
                             if *d < depth {
@@ -1038,11 +1038,11 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Timeout);
                                 },
-                                EvaluationResult::Immediate(s,depth, mhash,shash,mvs) => {
+                                EvaluationResult::Immediate(s,depth, _,_,mvs) => {
                                     let depth = depth + 1;
-                                    env.kyokumen_score_map.insert_new((gs.teban.opposite(),mhash,shash),(s,depth));
+                                    env.kyokumen_score_map.insert_new((gs.teban.opposite(),gs.mhash,gs.shash),(s,depth));
 
-                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), mhash, shash)) {
+                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), gs.mhash, gs.shash)) {
                                         let (ref mut score, ref mut d) = *g;
 
                                         if *d < depth {
@@ -1051,9 +1051,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         }
                                     }
 
-                                    env.kyokumen_score_map.insert_new((gs.teban,mhash,shash),(-s,depth));
+                                    env.kyokumen_score_map.insert_new((gs.teban,gs.mhash,gs.shash),(-s,depth));
 
-                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban, mhash, shash)) {
+                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban, gs.mhash, gs.shash)) {
                                         let (ref mut score, ref mut d) = *g;
 
                                         if *d < depth {
