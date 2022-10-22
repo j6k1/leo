@@ -658,9 +658,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 Ok((m,s)) if !is_timeout => {
                     let s = Score::Value(s);
 
-                    if env.display_evalute_score {
-                        self.send_score(env,gs.teban,-s);
-                    }
+                    opt_error = opt_error.and(self.send_score(env,gs.teban,-s).err());
 
                     if -s > score {
                         score = -s;
@@ -1100,9 +1098,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 Ok((m,s)) => {
                     let s = Score::Value(s);
 
-                    if env.display_evalute_score {
-                        self.send_score(env,gs.teban,-s);
-                    }
+                    opt_error = opt_error.and(self.send_score(env,gs.teban,-s).err());
 
                     if -s > scoreval {
                         scoreval = -s;
@@ -1112,13 +1108,13 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     }
                 },
                 Err(e) => {
-                    opt_error = Some(Err(e));
+                    opt_error = Some(e);
                 }
             }
         }
 
         if let Some(e) = opt_error {
-            e
+            Err(e)
         } else {
             Ok(EvaluationResult::Immediate(scoreval, gs.depth,best_moves))
         }
