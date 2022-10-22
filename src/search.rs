@@ -52,7 +52,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         if current_depth <= 1 || !env.adjust_depth {
             false
         } else {
-            current_depth > 1 && env.current_limit.map(|l| {
+            env.current_limit.map(|l| {
                 let nanos = ((Instant::now() - start_time) / processed_nodes * nodes).as_nanos() * parent_nodes / D;
                 env.think_start_time + Duration::new((nanos / SECOND_NANOS) as u64, (nanos % SECOND_NANOS) as u32) > l
             }).unwrap_or(false) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
