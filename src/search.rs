@@ -49,15 +49,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         const SECOND_NANOS:u128 = 1000_000_000;
         const D:u128 = 4;
 
-        if current_depth <= 1 {
+        if current_depth <= 1 || !env.adjust_depth {
             false
         } else {
-            env.adjust_depth && (current_depth > 1 &&
-                env.current_limit.map(|l| {
-                    let nanos = ((Instant::now() - start_time) / processed_nodes * nodes).as_nanos() * parent_nodes / D;
-                    env.think_start_time + Duration::new((nanos / SECOND_NANOS) as u64, (nanos % SECOND_NANOS) as u32) > l
-                }).unwrap_or(false)
-            ) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
+            current_depth > 1 && env.current_limit.map(|l| {
+                let nanos = ((Instant::now() - start_time) / processed_nodes * nodes).as_nanos() * parent_nodes / D;
+                env.think_start_time + Duration::new((nanos / SECOND_NANOS) as u64, (nanos % SECOND_NANOS) as u32) > l
+            }).unwrap_or(false) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
         }
     }
 
