@@ -412,8 +412,8 @@ impl USIPlayer<ApplicationError> for Leo {
                     mc: &Arc::new(mc.clone()),
                     obtained:None,
                     current_kyokumen_map:&kyokumen_map,
-                    self_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
-                    opponent_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
+                    self_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
+                    opponent_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
                     oute_kyokumen_map:&oute_kyokumen_map,
                     mhash:mhash,
                     shash:shash,
@@ -506,8 +506,8 @@ impl USIPlayer<ApplicationError> for Leo {
         );
 
         let ms = GameStateForMate {
-            checkmate_state_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
-            unique_kyokumen_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
+            checkmate_state_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
+            unique_kyokumen_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
             current_depth:0,
             mhash:mhash,
             shash:shash,

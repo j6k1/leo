@@ -524,7 +524,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:info_sender,
             on_error_handler:on_error_handler,
             hasher:hasher,
-            unique_kyokumen_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
+            unique_kyokumen_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
             think_start_time:think_start_time,
             limit:limit,
             current_limit:current_limit,
@@ -542,7 +542,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             max_threads:max_threads,
             stop:stop,
             quited:quited,
-            kyokumen_score_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 21)),
+            kyokumen_score_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
             nodes:Arc::new(AtomicU64::new(0))
         }
     }
