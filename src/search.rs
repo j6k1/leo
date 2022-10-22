@@ -44,19 +44,16 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         })
     }
 
-    fn timeout_expected(&self,env:&mut Environment<L,S>,start_time:Instant,
-                             current_depth:u32,nodes:u128,processed_nodes:u32) -> bool {
-        const RATE:u128 = 8;
+    fn timeout_expected(&self, env:&mut Environment<L,S>, start_time:Instant,
+                        current_depth:u32, parent_nodes:u128, nodes:u32, processed_nodes:u32) -> bool {
         const SECOND_NANOS:u128 = 1000_000_000;
 
         if current_depth <= 1 {
             false
         } else {
-            let nodes = nodes / RATE.pow(current_depth);
-
             env.adjust_depth && (current_depth > 1 &&
                 env.current_limit.map(|l| {
-                    let nanos = (Instant::now() - start_time).as_nanos() * nodes;
+                    let nanos = ((Instant::now() - start_time) / processed_nodes * nodes).as_nanos() * parent_nodes;
                     env.think_start_time + Duration::new((nanos / SECOND_NANOS) as u64, (nanos % SECOND_NANOS) as u32) > l
                 }).unwrap_or(false)
             ) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
@@ -781,7 +778,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if self.timeout_expected(env,start_time,gs.current_depth,gs.node_count,processed_nodes) {
+                        if self.timeout_expected(env,start_time,gs.current_depth,gs.node_count,mvs_count as u32,processed_nodes) {
                             is_timeout = true;
                             break;
                         }
@@ -1083,7 +1080,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
                                 return Ok(EvaluationResult::Timeout);
-                            } else if self.timeout_expected(env,start_time,gs.current_depth,parent_nodes,processed_nodes) {
+                            } else if self.timeout_expected(env,start_time,gs.current_depth,parent_nodes,mvs_count as u32, processed_nodes) {
                                 return Ok(EvaluationResult::Immediate(scoreval,gs.depth,gs.mhash,gs.shash,best_moves));
                             }
                         }
