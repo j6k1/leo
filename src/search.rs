@@ -45,19 +45,21 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     }
 
     fn timeout_expected(&self,env:&mut Environment<L,S>,start_time:Instant,
-                             current_depth:u32,nodes:u64,processed_nodes:u32) -> bool {
-        const RATE:u64 = 8;
+                             current_depth:u32,nodes:u128,processed_nodes:u32) -> bool {
+        const RATE:u128 = 8;
+        const SECOND_NANOS:u128 = 1000_000_000;
 
         if current_depth <= 1 {
             false
         } else {
             let nodes = nodes / RATE.pow(current_depth);
 
-            env.adjust_depth && (nodes > u32::MAX as u64 || (current_depth > 1 &&
+            env.adjust_depth && (current_depth > 1 &&
                 env.current_limit.map(|l| {
-                    env.think_start_time + ((Instant::now() - start_time) / processed_nodes) * nodes as u32 > l
+                    let nanos = ((Instant::now() - start_time) / processed_nodes).as_nanos() * nodes;
+                    env.think_start_time + Duration::new((nanos / SECOND_NANOS) as u64, (nanos % SECOND_NANOS) as u32) > l
                 }).unwrap_or(false)
-            )) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
+            ) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
         }
     }
 
@@ -559,7 +561,7 @@ pub struct GameState<'a> {
     pub shash:u64,
     pub depth:u32,
     pub current_depth:u32,
-    pub node_count:u64,
+    pub node_count:u128,
 }
 pub struct Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     l:PhantomData<L>,
@@ -728,7 +730,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 threads += 1;
                 processed_nodes += 1;
 
-                let nodes = gs.node_count * mvs_count - processed_nodes as u64;
+                let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
 
                 match r {
                     EvaluationResult::Immediate(s,depth,mvs) => {
@@ -959,11 +961,12 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         let start_time = Instant::now();
 
         let mut await_mvs = vec![];
+        let mvs_count = mvs.len();
 
         for &(priority,m) in &mvs {
             processed_nodes += 1;
 
-            let nodes = gs.node_count * mvs.len() as u64 - processed_nodes as u64;
+            let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
 
             match self.startup_strategy(env,gs,m,priority) {
                 Some((depth,obtained,mhash,shash,
