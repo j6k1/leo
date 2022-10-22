@@ -658,6 +658,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 Ok((m,s)) if !is_timeout => {
                     let s = Score::Value(s);
 
+                    if env.display_evalute_score {
+                        self.send_score(env,gs.teban,-s);
+                    }
+
                     if -s > score {
                         score = -s;
                         best_moves = VecDeque::new();
@@ -1095,6 +1099,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             match r.recv().map_err(|e| ApplicationError::from(e)) {
                 Ok((m,s)) => {
                     let s = Score::Value(s);
+
+                    if env.display_evalute_score {
+                        self.send_score(env,gs.teban,-s);
+                    }
 
                     if -s > scoreval {
                         scoreval = -s;
