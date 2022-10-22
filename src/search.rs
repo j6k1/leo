@@ -219,24 +219,33 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     if env.display_evalute_score {
                         self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
                     }
+                    let mut mvs = VecDeque::new();
+                    gs.m.map(|m| mvs.push_front(m));
+
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(INFINITE, gs.depth, VecDeque::new())
+                        EvaluationResult::Immediate(Score::INFINITE, gs.depth, mvs)
                     ));
                 },
                 Score::NEGINFINITE => {
                     if env.display_evalute_score {
                         self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
                     }
+                    let mut mvs = VecDeque::new();
+                    gs.m.map(|m| mvs.push_front(m));
+
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(NEGINFINITE, gs.depth, VecDeque::new())
+                        EvaluationResult::Immediate(Score::NEGINFINITE, gs.depth, mvs)
                     ));
                 },
                 Score::Value(s) if d >= gs.depth => {
                     if env.display_evalute_score {
                         self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
                     }
+                    let mut mvs = VecDeque::new();
+                    gs.m.map(|m| mvs.push_front(m));
+
                     return Ok(BeforeSearchResult::Complete(
-                        EvaluationResult::Immediate(Score::Value(s), gs.depth, VecDeque::new())
+                        EvaluationResult::Immediate(Score::Value(s), gs.depth, mvs)
                     ));
                 },
                 _ => ()
@@ -282,7 +291,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         let mut r  = mvs.into_iter().map(|m| {
                             AppliedMove::from(m)
                         }).collect::<VecDeque<AppliedMove>>();
-
                         r.push_front(m);
 
                         return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, gs.depth, r)));
@@ -320,8 +328,11 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             let mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
 
             if mvs.len() == 0 {
+                let mut mvs = VecDeque::new();
+                gs.m.map(|m| mvs.push_front(m));
+
                 return Ok(BeforeSearchResult::Complete(
-                    EvaluationResult::Immediate(NEGINFINITE, gs.depth,VecDeque::new())
+                    EvaluationResult::Immediate(NEGINFINITE, gs.depth,mvs)
                 ));
             } else {
                 mvs
@@ -607,9 +618,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 
     pub fn termination<'a,'b>(&self,
-                       mut is_timeout:bool,
+                       is_timeout:bool,
                        await_mvs:Vec<Receiver<(AppliedMove,i32)>>,
-                       threads:u32,
                        env:&mut Environment<L,S>,
                        gs: &mut GameState<'a>,
                        evalutor: &Evalutor,
@@ -626,7 +636,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
-                        gs.m.map(|m| best_moves.push_front(m));
                         opt_error = opt_error.and(self.send_info(env, env.base_depth,gs.current_depth,&best_moves).err());
                     }
                 },
@@ -650,7 +659,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = VecDeque::new();
-                        gs.m.map(|m| best_moves.push_front(m));
+                        best_moves.push_front(m);
                         opt_error = opt_error.and(self.send_info(env, env.base_depth,gs.current_depth,&best_moves).err());
                     }
                 },
@@ -664,6 +673,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         match opt_error {
             Some(e) => {
                 Err(e)
+            },
+            None if is_timeout => {
+                Ok(EvaluationResult::Timeout)
             },
             None if best_moves.len() == 0 => {
                 Ok(EvaluationResult::Immediate(NEGINFINITE,gs.depth, VecDeque::new()))
@@ -805,13 +817,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                     if s > scoreval {
                                         scoreval = s;
                                         best_moves = VecDeque::new();
+                                        best_moves.push_front(m);
 
                                         if alpha < scoreval {
                                             alpha = scoreval;
                                         }
 
                                         if scoreval >= beta {
-                                            return self.termination(false,await_mvs,threads, env, &mut gs,&evalutor,scoreval,best_moves);
+                                            return self.termination(false,await_mvs, env, &mut gs,&evalutor,scoreval,best_moves);
                                         }
                                     }
                                     continue;
@@ -860,7 +873,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         node_count:node_count
                                     };
 
-                                    let strategy  = Recursive::new(sender.clone());
+                                    let strategy = Recursive::new();
 
                                     let r = strategy.search(&mut env,&mut gs, &mut event_dispatcher, &evalutor);
 
@@ -878,7 +891,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
-        self.termination(is_timeout,await_mvs,threads, env, &mut gs,evalutor,scoreval,best_moves)
+        self.termination(is_timeout,await_mvs,env, &mut gs,evalutor,scoreval,best_moves)
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -911,14 +924,12 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
 pub struct Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
     l:PhantomData<L>,
     s:PhantomData<S>,
-    sender:Sender<Result<EvaluationResult,ApplicationError>>
 }
 impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
-    pub fn new(sender:Sender<Result<EvaluationResult,ApplicationError>>) -> Recursive<L,S> {
+    pub fn new() -> Recursive<L,S> {
         Recursive {
             l:PhantomData::<L>,
             s:PhantomData::<S>,
-            sender:sender
         }
     }
 }
@@ -936,6 +947,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 mvs
             }
         };
+        let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
+            "move is not set."
+        )))?;
+
         let mut alpha = gs.alpha;
         let mut scoreval = Score::NEGINFINITE;
         let mut best_moves = VecDeque::new();
@@ -965,11 +980,11 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 } else {
                                     Score::Value(0)
                                 };
-
                                 if s > scoreval {
                                     scoreval = s;
                                     best_moves = VecDeque::new();
-                                    gs.m.map(|m| best_moves.push_front(m));
+                                    best_moves.push_front(m.to_applied_move());
+                                    best_moves.push_front(prev_move);
 
                                     if scoreval >= gs.beta {
                                         return Ok(EvaluationResult::Immediate(scoreval,gs.depth,best_moves));
@@ -1004,7 +1019,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 node_count: nodes
                             };
 
-                            let strategy = Recursive::new(self.sender.clone());
+                            let strategy = Recursive::new();
 
                             match strategy.search(env, &mut gs, event_dispatcher,evalutor)? {
                                 EvaluationResult::Timeout => {
@@ -1037,7 +1052,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     if -s > scoreval {
                                         scoreval = -s;
                                         best_moves = mvs;
-                                        gs.m.map(|m| best_moves.push_front(m));
+                                        best_moves.push_front(prev_move);
 
                                         if scoreval >= gs.beta {
                                             return Ok(EvaluationResult::Immediate(scoreval, gs.depth,best_moves));
@@ -1082,6 +1097,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                         scoreval = -s;
                         best_moves = VecDeque::new();
                         best_moves.push_front(m);
+                        best_moves.push_front(prev_move);
                     }
                 },
                 Err(e) => {
