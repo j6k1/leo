@@ -427,7 +427,11 @@ impl USIPlayer<ApplicationError> for Leo {
                 let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, evalutor);
 
                 let bestmove = match result {
-                    Err(_) | Ok(EvaluationResult::Timeout) => {
+                    Err(_) => {
+                        BestMove::Resign
+                    },
+                    Ok(EvaluationResult::Timeout) => {
+                        strategy.send_message(&mut env,"think timeout!");
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Async(_)) => {
