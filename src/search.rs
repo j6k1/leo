@@ -735,8 +735,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 threads += 1;
                 processed_nodes += 1;
 
-                let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
-
                 match r {
                     EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
                         let depth = depth + 1;
@@ -877,7 +875,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         shash:shash,
                                         depth:depth - 1,
                                         current_depth:current_depth + 1,
-                                        node_count:node_count
+                                        node_count:mvs_count as u128 - processed_nodes as u128
                                     };
 
                                     let strategy = Recursive::new();
@@ -972,7 +970,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             processed_nodes += 1;
 
             let parent_nodes = gs.node_count;
-            let nodes = gs.node_count as u128 * mvs_count as u128 - processed_nodes as u128;
 
             match self.startup_strategy(env,gs,m,priority) {
                 Some((depth,obtained,mhash,shash,
@@ -1025,7 +1022,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 shash: shash,
                                 depth: depth - 1,
                                 current_depth: gs.current_depth + 1,
-                                node_count: nodes
+                                node_count: mvs_count as u128 - processed_nodes as u128
                             };
 
                             let strategy = Recursive::new();
