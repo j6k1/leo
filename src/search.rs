@@ -47,7 +47,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn timeout_expected(&self, env:&mut Environment<L,S>, start_time:Instant,
                         current_depth:u32, parent_nodes:u128, nodes:u32, processed_nodes:u32) -> bool {
         const SECOND_NANOS:u128 = 1000_000_000;
-        const D:u128 = 4;
+        const D:u128 = 8;
 
         if current_depth <= 1 || !env.adjust_depth {
             false
