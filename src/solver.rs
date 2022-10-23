@@ -341,7 +341,7 @@ pub mod checkmate {
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       S: InfoSender + Send {
-            if self.aborted.load(atomic::Ordering::Acquire) {
+            if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
 
@@ -389,7 +389,7 @@ pub mod checkmate {
                 Ok(MaybeMate::Nomate)
             } else {
                 for (m,next,nmc,_) in mvs {
-                    if self.aborted.load(atomic::Ordering::Acquire) {
+                    if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
                         return Ok(MaybeMate::Aborted)
                     }
 
@@ -491,7 +491,7 @@ pub mod checkmate {
                 where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
                       S: InfoSender + Send {
-            if self.aborted.load(atomic::Ordering::Acquire) {
+            if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
 
@@ -539,7 +539,7 @@ pub mod checkmate {
                 Ok(MaybeMate::MateMoves(current_depth,VecDeque::new()))
             } else {
                 for (m,next,nmc,_) in mvs {
-                    if self.aborted.load(atomic::Ordering::Acquire) {
+                    if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
                         return Ok(MaybeMate::Aborted)
                     }
 
