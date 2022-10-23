@@ -708,24 +708,22 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 processed_nodes += 1;
 
                 match r {
-                    EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                        if !env.kyokumen_score_map.contains_key(&(gs.teban.opposite(),mhash,shash)) {
-                            env.kyokumen_score_map.insert_new((gs.teban.opposite(), mhash, shash), (s, depth));
-                        }
-
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
-                            let (ref mut score,ref mut d) = *g;
-
-                            if *d < depth {
-                                *d = depth;
-                                *score = s;
-                            }
-                        }
-
+                    EvaluationResult::Immediate(s,_,_,_,mvs) => {
                         self.send_info(env, env.base_depth,gs.current_depth,&mvs)?;
 
                         if -s > scoreval {
                             scoreval = -s;
+
+                            if !env.kyokumen_score_map.contains_key(&(gs.teban,gs.mhash,gs.shash)) {
+                                env.kyokumen_score_map.insert_new((gs.teban, gs.mhash, gs.shash), (scoreval, gs.depth));
+                            }
+
+                            if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,gs.mhash,gs.shash)) {
+                                let (ref mut score,ref mut d) = *g;
+
+                                *d = gs.depth;
+                                *score = scoreval;
+                            }
 
                             best_moves = mvs;
 
@@ -910,6 +908,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             "move is not set."
         )))?;
 
+        let dep = gs.depth;
+        let teban = gs.teban;
         let mut alpha = gs.alpha;
         let mut scoreval = Score::NEGINFINITE;
         let mut best_moves = VecDeque::new();
@@ -985,22 +985,21 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Timeout);
                                 },
-                                EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                                    if !env.kyokumen_score_map.contains_key(&(gs.teban.opposite(),mhash,shash)) {
-                                        env.kyokumen_score_map.insert_new((gs.teban.opposite(), mhash, shash), (s, depth));
-                                    }
-
-                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(), mhash, shash)) {
-                                        let (ref mut score, ref mut d) = *g;
-
-                                        if *d < depth {
-                                            *d = depth;
-                                            *score = s;
-                                        }
-                                    }
-
+                                EvaluationResult::Immediate(s,_,_,_,mvs) => {
                                     if -s > scoreval {
                                         scoreval = -s;
+
+                                        if !env.kyokumen_score_map.contains_key(&(teban,mhash,shash)) {
+                                            env.kyokumen_score_map.insert_new((teban, mhash, shash), (scoreval, dep));
+                                        }
+
+                                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(teban, mhash, shash)) {
+                                            let (ref mut score, ref mut d) = *g;
+
+                                            *d = dep;
+                                            *score = scoreval;
+                                        }
+
                                         best_moves = mvs;
                                         best_moves.push_front(prev_move);
 
@@ -1027,7 +1026,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             }
                         }
                     }
-                },
+                }
                 None => (),
             }
         }
