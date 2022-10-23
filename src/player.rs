@@ -80,7 +80,7 @@ pub struct Leo {
     max_threads:u32,
     max_ply:Option<u32>,
     max_ply_mate:Option<u32>,
-    max_ply_timelimit:Option<Duration>,
+    max_ply_timelimit:Option<u64>,
     network_delay:u32,
     turn_count:u32,
     min_turn_count:u32,
@@ -234,7 +234,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     if v == 0 {
                         None
                     } else {
-                        Some(Duration::from_micros(v as u64))
+                        Some(v as u64)
                     }
                 });
             },
@@ -368,7 +368,7 @@ impl USIPlayer<ApplicationError> for Leo {
             self.max_nodes.clone(),
             self.max_ply.clone(),
             self.max_ply_mate.clone(),
-            self.max_ply_timelimit.clone(),
+            self.max_ply_timelimit.map(|l| Duration::from_micros(l)),
             self.adjust_depth,
             self.network_delay,
             self.display_evalute_score,
@@ -501,7 +501,7 @@ impl USIPlayer<ApplicationError> for Leo {
             self.max_nodes.clone(),
             self.max_ply.clone(),
             self.max_ply_mate.clone(),
-            self.max_ply_timelimit.clone(),
+            self.max_ply_timelimit.map(|l| Duration::from_micros(l)),
             self.adjust_depth,
             self.network_delay,
             self.display_evalute_score,
