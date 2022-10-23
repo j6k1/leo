@@ -740,19 +740,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if !env.kyokumen_score_map.contains_key(&(gs.teban,mhash,shash)) {
-                            env.kyokumen_score_map.insert_new((gs.teban, mhash, shash), (-s, depth));
-                        }
-
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,mhash,shash)) {
-                            let (ref mut score,ref mut d) = *g;
-
-                            if *d < depth {
-                                *d = depth;
-                                *score = -s;
-                            }
-                        }
-
                         self.send_info(env, env.base_depth,gs.current_depth,&mvs)?;
 
                         if -s > scoreval {
@@ -1031,19 +1018,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         if *d < depth {
                                             *d = depth;
                                             *score = s;
-                                        }
-                                    }
-
-                                    if !env.kyokumen_score_map.contains_key(&(gs.teban,mhash,shash)) {
-                                        env.kyokumen_score_map.insert_new((gs.teban, mhash, shash), (-s, depth));
-                                    }
-
-                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban, mhash, shash)) {
-                                        let (ref mut score, ref mut d) = *g;
-
-                                        if *d < depth {
-                                            *d = depth;
-                                            *score = -s;
                                         }
                                     }
 
