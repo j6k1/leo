@@ -321,15 +321,17 @@ impl Evalutor {
     pub fn begin_transaction(&self) -> Result<(),ApplicationError> {
         let (s,r) = mpsc::channel();
 
-        self.transaction_sender_queue.push(s)?;
-
         self.wait_threads.fetch_add(1,Ordering::Release);
 
         if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) {
-            self.start_evaluation()?;
-        }
+            self.transaction_sender_queue.push(s)?;
 
-        Ok(r.recv()?)
+            self.start_evaluation()?;
+
+            Ok(r.recv()?)
+        } else {
+            Ok(())
+        }
     }
 
     fn start_evaluation(&self) -> Result<(),ApplicationError> {
