@@ -389,6 +389,10 @@ pub mod checkmate {
                 Ok(MaybeMate::Nomate)
             } else {
                 for (m,next,nmc,_) in mvs {
+                    if self.aborted.load(atomic::Ordering::Acquire) {
+                        return Ok(MaybeMate::Aborted)
+                    }
+
                     let o = match m {
                         LegalMove::To(ref m) => {
                             m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
@@ -535,6 +539,10 @@ pub mod checkmate {
                 Ok(MaybeMate::MateMoves(current_depth,VecDeque::new()))
             } else {
                 for (m,next,nmc,_) in mvs {
+                    if self.aborted.load(atomic::Ordering::Acquire) {
+                        return Ok(MaybeMate::Aborted)
+                    }
+
                     let o = match m {
                         LegalMove::To(ref m) => {
                             m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
