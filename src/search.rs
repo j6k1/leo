@@ -195,11 +195,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
-        if !env.unique_kyokumen_map.contains_key(&(gs.teban,gs.mhash,gs.shash)) {
-            env.nodes.fetch_add(1,atomic::Ordering::Release);
-            env.unique_kyokumen_map.insert((gs.teban,gs.mhash,gs.shash),());
-        }
-
         if let Some(ObtainKind::Ou) = gs.obtained {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,gs.depth,gs.mhash,gs.shash,VecDeque::new())));
         }
@@ -255,7 +250,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
                     checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
-                    unique_kyokumen_map: Arc::clone(&env.unique_kyokumen_map),
                     current_depth: 0,
                     mhash: gs.mhash,
                     shash: gs.shash,
@@ -443,7 +437,6 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub info_sender:S,
     pub on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
     pub hasher:Arc<KyokumenHash<u64>>,
-    pub unique_kyokumen_map:Arc<ConcurrentFixedHashMap<(Teban,u64,u64),()>>,
     pub limit:Option<Instant>,
     pub current_limit:Option<Instant>,
     pub turn_count:u32,
@@ -471,7 +464,6 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:self.info_sender.clone(),
             on_error_handler:Arc::clone(&self.on_error_handler),
             hasher:Arc::clone(&self.hasher),
-            unique_kyokumen_map:Arc::clone(&self.unique_kyokumen_map),
             limit:self.limit.clone(),
             current_limit:self.current_limit.clone(),
             turn_count:self.turn_count,
@@ -523,7 +515,6 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:info_sender,
             on_error_handler:on_error_handler,
             hasher:hasher,
-            unique_kyokumen_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
             think_start_time:think_start_time,
             limit:limit,
             current_limit:current_limit,
@@ -648,6 +639,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         for r in await_mvs {
             match r.recv().map_err(|e| ApplicationError::from(e))? {
                 (m,s) => {
+                    env.nodes.fetch_add(1,atomic::Ordering::Release);
+
                     let s = Score::Value(s);
 
                     self.send_score(env,gs.teban,-s)?;
@@ -1038,6 +1031,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         for r in await_mvs {
             match r.recv().map_err(|e| ApplicationError::from(e))? {
                 (m,s) => {
+                    env.nodes.fetch_add(1,atomic::Ordering::Release);
+
                     let s = Score::Value(s);
 
                     self.send_score(env,gs.teban,-s)?;

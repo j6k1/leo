@@ -28,7 +28,6 @@ pub enum MaybeMate {
 
 pub struct GameStateForMate<'a> {
     pub checkmate_state_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
-    pub unique_kyokumen_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),()>>,
     pub current_depth:u32,
     pub mhash:u64,
     pub shash:u64,
@@ -82,7 +81,6 @@ impl Solver {
             let aborted = Arc::clone(&aborted);
 
             let checkmate_state_map = Arc::clone(&ms.checkmate_state_map);
-            let unique_kyokumen_map = Arc::clone(&ms.unique_kyokumen_map);
             let current_depth = ms.current_depth;
             let mhash = ms.mhash;
             let shash = ms.shash;
@@ -114,7 +112,6 @@ impl Solver {
                     current_depth);
                 if let Err(ref e) = s.send(mate_strategy.oute_process(
                                                                       &checkmate_state_map,
-                                                                      &unique_kyokumen_map,
                                                                       current_depth,
                                                                       &nodes,
                                                                       mhash,
@@ -149,7 +146,6 @@ impl Solver {
             let aborted = Arc::clone(&aborted);
 
             let checkmate_state_map = Arc::clone(&ms.checkmate_state_map);
-            let unique_kyokumen_map = Arc::clone(&ms.unique_kyokumen_map);
             let current_depth = ms.current_depth;
             let mhash = ms.mhash;
             let shash = ms.shash;
@@ -181,7 +177,6 @@ impl Solver {
                     current_depth);
                 if let Err(ref e) = s.send(nomate_strategy.oute_process(
                                                                         &checkmate_state_map,
-                                                                        &unique_kyokumen_map,
                                                                         current_depth,
                                                                         &nodes,
                                                                         mhash,
@@ -326,7 +321,6 @@ pub mod checkmate {
 
         pub fn oute_process<L: Logger>(&mut self,
                                        checkmate_state_map:&Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
-                                       unique_kyokumen_map:&Arc<ConcurrentFixedHashMap<(Teban,u64,u64),()>>,
                                        current_depth:u32,
                                        nodes:&Arc<AtomicU64>,
                                        mhash:u64,
@@ -343,11 +337,6 @@ pub mod checkmate {
                       S: InfoSender + Send {
             if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
-            }
-
-            if !unique_kyokumen_map.contains_key(&(teban,mhash,shash)) {
-                nodes.fetch_add(1,atomic::Ordering::Release);
-                unique_kyokumen_map.insert((teban,mhash,shash),());
             }
 
             self.nodes += 1;
@@ -446,7 +435,6 @@ pub mod checkmate {
                     oute_kyokumen_map.insert(teban, mhash, shash, ());
 
                     match self.response_oute_process(checkmate_state_map,
-                                                     unique_kyokumen_map,
                                                      current_depth+1,
                                                      nodes,
                                                      mhash,
@@ -476,7 +464,6 @@ pub mod checkmate {
 
         pub fn response_oute_process<L: Logger>(&mut self,
                                                 checkmate_state_map:&Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
-                                                unique_kyokumen_map:&Arc<ConcurrentFixedHashMap<(Teban,u64,u64),()>>,
                                                 current_depth:u32,
                                                 nodes:&Arc<AtomicU64>,
                                                 mhash:u64,
@@ -493,11 +480,6 @@ pub mod checkmate {
                       S: InfoSender + Send {
             if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
-            }
-
-            if !unique_kyokumen_map.contains_key(&(teban,mhash,shash)) {
-                nodes.fetch_add(1,atomic::Ordering::Release);
-                unique_kyokumen_map.insert((teban,mhash,shash),());
             }
 
             self.nodes += 1;
@@ -586,7 +568,6 @@ pub mod checkmate {
                     }
 
                     match self.oute_process(checkmate_state_map,
-                                            unique_kyokumen_map,
                                             current_depth+1,
                                             nodes,
                                             mhash,

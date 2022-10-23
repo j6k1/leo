@@ -510,7 +510,6 @@ impl USIPlayer<ApplicationError> for Leo {
 
         let ms = GameStateForMate {
             checkmate_state_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
-            unique_kyokumen_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
             current_depth:0,
             mhash:mhash,
             shash:shash,
