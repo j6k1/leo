@@ -637,7 +637,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         }
 
         for r in await_mvs {
-            match r.recv().map_err(|e| ApplicationError::from(e))? {
+            match r.recv_timeout(Duration::from_secs(1000)).map_err(|e| ApplicationError::from(e))? {
                 (m,s) => {
                     env.nodes.fetch_add(1,atomic::Ordering::Release);
 
@@ -1030,7 +1030,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         }
 
         for r in await_mvs {
-            match r.recv().map_err(|e| ApplicationError::from(e))? {
+            match r.recv_timeout(Duration::from_secs(1000)).map_err(|e| ApplicationError::from(e))? {
                 (m,s) => {
                     env.nodes.fetch_add(1,atomic::Ordering::Release);
 

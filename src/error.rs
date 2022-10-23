@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::Formatter;
 use std::num::{ParseFloatError, ParseIntError};
-use std::sync::mpsc::{Receiver, RecvError, Sender, SendError};
+use std::sync::mpsc::{Receiver, RecvError, RecvTimeoutError, Sender, SendError};
 use std::sync::{MutexGuard, PoisonError};
 use concurrent_queue::{PopError, PushError};
 use csaparser::error::CsaParserError;
@@ -37,6 +37,7 @@ pub enum ApplicationError {
     PersistenceError(PersistenceError),
     CudaError(CudaError),
     RecvError(RecvError),
+    RecvTimeoutError(RecvTimeoutError),
     NNSendError(SendError<Message>),
     ResultSendError(SendError<(AppliedMove,i32)>),
     EvaluationThreadError(EvaluationThreadError),
@@ -72,6 +73,7 @@ impl fmt::Display for ApplicationError {
             ApplicationError::PersistenceError(ref e) => write!(f,"{}",e),
             ApplicationError::CudaError(ref e) => write!(f, "An error occurred in the process of cuda. ({})",e),
             ApplicationError::RecvError(ref e) => write!(f, "{}",e),
+            ApplicationError::RecvTimeoutError(ref e) => write!(f,"{}",e),
             ApplicationError::NNSendError(ref e) => write!(f,"{}",e),
             ApplicationError::ResultSendError(ref e) => write!(f,"{}",e),
             ApplicationError::EvaluationThreadError(ref e) => write!(f,"{}",e),
@@ -109,6 +111,8 @@ impl error::Error for ApplicationError {
             ApplicationError::PersistenceError(_) => "An error occurred when saving model information.",
             ApplicationError::CudaError(_) => "An error occurred in the process of cuda.",
             ApplicationError::RecvError(_) => "An error occurred while receiving the message.",
+            ApplicationError::RecvTimeoutError(RecvTimeoutError::Disconnected) => "Disconnected while waiting for reception.",
+            ApplicationError::RecvTimeoutError(RecvTimeoutError::Timeout) => "Timeout occurred while waiting to receive.",
             ApplicationError::NNSendError(_) => "An error occurred in the communication process with the neural network thread.",
             ApplicationError::ResultSendError(_) => "An error occurred in the process of sending the results of the neural network calculation.",
             ApplicationError::EvaluationThreadError(_) => "An error occurred in the process of sending the all results of the neural network calculation.",
@@ -145,6 +149,7 @@ impl error::Error for ApplicationError {
             ApplicationError::PersistenceError(ref e) => Some(e),
             ApplicationError::CudaError(_) => None,
             ApplicationError::RecvError(ref e) => Some(e),
+            ApplicationError::RecvTimeoutError(ref e) => Some(e),
             ApplicationError::NNSendError(ref e) => Some(e),
             ApplicationError::ResultSendError(ref e) =>  Some(e),
             ApplicationError::EvaluationThreadError(ref e) => Some(e),
@@ -238,6 +243,11 @@ impl From<CudaError> for ApplicationError {
 impl From<RecvError> for ApplicationError {
     fn from(err: RecvError) -> ApplicationError {
         ApplicationError::RecvError(err)
+    }
+}
+impl From<RecvTimeoutError> for ApplicationError {
+    fn from(err: RecvTimeoutError) -> Self {
+        ApplicationError::RecvTimeoutError(err)
     }
 }
 impl From<SendError<Message>> for ApplicationError {
