@@ -341,6 +341,12 @@ impl Evalutor {
             }
 
             if queue.is_empty() {
+                while !self.transaction_sender_queue.is_empty() {
+                    let s = self.transaction_sender_queue.pop()?;
+
+                    s.send(())?;
+                }
+                
                 return Ok(());
             }
 
