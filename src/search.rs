@@ -904,6 +904,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         let dep = gs.depth;
         let teban = gs.teban;
         let mut alpha = gs.alpha;
+        let beta = gs.beta;
         let mut scoreval = Score::NEGINFINITE;
         let mut best_moves = VecDeque::new();
 
@@ -996,7 +997,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         best_moves = mvs;
                                         best_moves.push_front(prev_move);
 
-                                        if scoreval >= gs.beta {
+                                        if scoreval >= beta {
                                             return Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves));
                                         }
                                     }
