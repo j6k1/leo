@@ -777,7 +777,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         }
 
                                         if scoreval >= beta {
-                                            return self.termination(await_mvs, env, &mut gs, &evalutor, scoreval, best_moves);
+                                            break;
                                         }
                                     }
                                     continue;
