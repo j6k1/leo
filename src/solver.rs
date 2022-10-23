@@ -202,7 +202,9 @@ impl Solver {
         let r = receiver.recv();
 
         aborted.store(true,atomic::Ordering::Release);
-        
+
+        let _ = receiver.recv();
+
         match r {
             Ok(Ok(MaybeMate::MateMoves(depth,mvs))) => {
                 Ok(MaybeMate::MateMoves(depth,mvs))
@@ -211,8 +213,6 @@ impl Solver {
                 Ok(MaybeMate::Nomate)
             },
             Ok(r) => {
-                let _ = receiver.recv();
-
                 r
             },
             Err(e) => {
