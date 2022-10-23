@@ -352,9 +352,8 @@ pub mod checkmate {
 
             if !unique_kyokumen_map.contains_key(&(teban,mhash,shash)) {
                 nodes.fetch_add(1,atomic::Ordering::Release);
+                unique_kyokumen_map.insert((teban,mhash,shash),());
             }
-
-            unique_kyokumen_map.insert((teban,mhash,shash),());
 
             self.nodes += 1;
 
@@ -499,9 +498,8 @@ pub mod checkmate {
 
             if !unique_kyokumen_map.contains_key(&(teban,mhash,shash)) {
                 nodes.fetch_add(1,atomic::Ordering::Release);
+                unique_kyokumen_map.insert((teban,mhash,shash),());
             }
-
-            unique_kyokumen_map.insert((teban,mhash,shash),());
 
             self.nodes += 1;
 
