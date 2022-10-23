@@ -630,57 +630,39 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         env.stop.store(true,atomic::Ordering::Release);
 
         let mut score = score;
-        let mut opt_error = None;
 
         while evalutor.active_threads() > 0 {
-            match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,_,_,_,mvs)) => {
+            match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r)? {
+                EvaluationResult::Immediate(s,_,_,_,mvs) => {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
-                        opt_error = opt_error.and(self.send_info(env, env.base_depth,gs.current_depth,&best_moves).err());
+                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?;
                     }
-                },
-                Err(e) => {
-                    opt_error = Some(e);
                 },
                 _ => ()
             }
-            opt_error = opt_error.and(evalutor.on_end_thread().map_err(|e| ApplicationError::from(e)).err());
-        }
-
-        if let Some(e) = opt_error {
-            return Err(e);
+            evalutor.on_end_thread().map_err(|e| ApplicationError::from(e))?;
         }
 
         for r in await_mvs {
-            match r.recv().map_err(|e| ApplicationError::from(e)) {
-                Ok((m,s)) => {
+            match r.recv().map_err(|e| ApplicationError::from(e))? {
+                (m,s) => {
                     let s = Score::Value(s);
 
-                    opt_error = opt_error.and(self.send_score(env,gs.teban,-s).err());
+                    self.send_score(env,gs.teban,-s)?;
 
                     if -s > score {
                         score = -s;
                         best_moves = VecDeque::new();
                         best_moves.push_front(m);
-                        opt_error = opt_error.and(self.send_info(env, env.base_depth,gs.current_depth,&best_moves).err());
+                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?;
                     }
-                },
-                Err(e) => {
-                    opt_error = opt_error.and(Some(e));
                 }
             }
         }
 
-        match opt_error {
-            Some(e) => {
-                Err(e)
-            },
-            None => {
-                Ok(EvaluationResult::Immediate(score, gs.depth,gs.mhash,gs.shash,best_moves))
-            }
-        }
+        Ok(EvaluationResult::Immediate(score, gs.depth,gs.mhash,gs.shash,best_moves))
     }
 
     fn parallelized<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
@@ -880,25 +862,21 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         let r = self.parallelized(env,gs,event_dispatcher,evalutor);
-        let mut opt_err = None;
 
         env.stop.store(true,atomic::Ordering::Release);
 
-        while evalutor.active_threads() > 0 {
-            opt_err = opt_err.or(self.receiver.recv()?.map_err(|e| ApplicationError::from(e)).err());
-            opt_err = opt_err.or(evalutor.on_end_thread().map(|_| ()).err());
-        }
+        match r {
+            Ok(r) => {
+                while evalutor.active_threads() > 0 {
+                    self.receiver.recv()?.map_err(|e| ApplicationError::from(e))?;
+                    evalutor.on_end_thread()?;
+                }
 
-        if let Err(e) = r {
-            let _ = env.on_error_handler.lock().map(|h| h.call(&e));
-            let _ = self.send_message(env, format!("{}", &e).as_str());
-            Err(e)
-        } else if let Some(e) = opt_err {
-            let _ = env.on_error_handler.lock().map(|h| h.call(&e));
-            let _ = self.send_message(env,format!("{}",&e).as_str());
-            Err(e)
-        } else {
-            r
+                Ok(r)
+            },
+            Err(e) => {
+                Err(e)
+            }
         }
     }
 }
@@ -1058,14 +1036,12 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             evalutor.begin_transaction()?;
         }
 
-        let mut opt_error = None;
-
         for r in await_mvs {
-            match r.recv().map_err(|e| ApplicationError::from(e)) {
-                Ok((m,s)) => {
+            match r.recv().map_err(|e| ApplicationError::from(e))? {
+                (m,s) => {
                     let s = Score::Value(s);
 
-                    opt_error = opt_error.and(self.send_score(env,gs.teban,-s).err());
+                    self.send_score(env,gs.teban,-s)?;
 
                     if -s > scoreval {
                         scoreval = -s;
@@ -1073,17 +1049,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                         best_moves.push_front(m);
                         best_moves.push_front(prev_move);
                     }
-                },
-                Err(e) => {
-                    opt_error = Some(e);
                 }
             }
         }
 
-        if let Some(e) = opt_error {
-            Err(e)
-        } else {
-            Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves))
-        }
+        Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves))
     }
 }

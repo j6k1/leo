@@ -427,7 +427,9 @@ impl USIPlayer<ApplicationError> for Leo {
                 let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, evalutor);
 
                 let bestmove = match result {
-                    Err(_) => {
+                    Err(ref e) => {
+                        let _ = env.on_error_handler.lock().map(|h| h.call(e));
+                        strategy.send_message(&mut env,format!("{}",e).as_str())?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Timeout) => {
