@@ -198,16 +198,20 @@ impl Solver {
 
         aborted.store(true,atomic::Ordering::Release);
 
-        let _ = receiver.recv();
-
         match r {
             Ok(Ok(MaybeMate::MateMoves(depth,mvs))) => {
+                let _ = receiver.recv()?;
+
                 Ok(MaybeMate::MateMoves(depth,mvs))
             },
             Ok(Ok(MaybeMate::Nomate)) => {
+                let _ = receiver.recv()?;
+
                 Ok(MaybeMate::Nomate)
             },
             Ok(r) => {
+                let r = receiver.recv()?;
+
                 r
             },
             Err(e) => {
