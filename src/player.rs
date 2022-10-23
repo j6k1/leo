@@ -418,7 +418,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     mhash:mhash,
                     shash:shash,
                     depth:base_depth,
-                    current_depth:1,
+                    current_depth:0,
                     node_count:1
                 };
 
@@ -432,6 +432,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     },
                     Ok(EvaluationResult::Timeout) => {
                         strategy.send_message(&mut env,"think timeout!")?;
+                        //println!("think timeout!");
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Async(_)) => {

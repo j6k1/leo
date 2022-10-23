@@ -252,11 +252,11 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 }
             }
 
-            if (gs.depth <= 1 || gs.current_depth - 1 >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+            if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
                     checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
                     unique_kyokumen_map: Arc::clone(&env.unique_kyokumen_map),
-                    current_depth: gs.current_depth,
+                    current_depth: 0,
                     mhash: gs.mhash,
                     shash: gs.shash,
                     oute_kyokumen_map: gs.oute_kyokumen_map,
@@ -304,7 +304,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
-        if gs.depth == 0 || gs.current_depth == env.max_depth {
+        if gs.depth == 0 || gs.current_depth >= env.max_depth {
             match gs.m {
                 None => {
                     return Err(ApplicationError::LogicError(String::from("move is not set.")))?;
