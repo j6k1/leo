@@ -149,9 +149,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             oute_kyokumen_map.clear(gs.teban);
         }
 
-        let depth = match priority {
-            5 | 10 => gs.depth + 1,
-            _ => gs.depth,
+        let depth = if priority > 1 {
+            gs.depth + 1
+        } else {
+            gs.depth
         };
 
         let is_sennichite = match current_kyokumen_map.get(gs.teban,&mhash,&shash).unwrap_or(&0) {
@@ -329,7 +330,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             mvs
         };
 
-        let mvs = mvs.into_iter().map(|m| {
+        let mut mvs = mvs.into_iter().map(|m| {
             let ps = Rule::apply_move_to_partial_state_none_check(gs.state,gs.teban,gs.mc,m.to_applied_move());
 
             let (x,y,kind) = match m {
@@ -354,18 +355,43 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     (x,y,KomaKind::from((gs.teban,kind)))
                 }
             };
+
+            if let LegalMove::To(ref mv) = m {
+                if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
+                    return (1000,m);
+                }
+            }
+
             if Rule::is_mate_with_partial_state_and_point_and_kind(gs.teban,&ps,x,y,kind) ||
                 Rule::is_mate_with_partial_state_repeat_move_kinds(gs.teban,&ps) {
-                (10,m)
+                (200,m)
             } else {
                 match m {
-                    LegalMove::To(ref mv) if mv.obtained().is_some() => {
-                        (5,m)
+                    LegalMove::To(ref mv) => {
+                        match mv.obtained().as_ref() {
+                            Some(&ObtainKind::Ou) => (1000,m),
+                            Some(&ObtainKind::HishaN) => (100,m),
+                            Some(&ObtainKind::Hisha) => (90,m),
+                            Some(&ObtainKind::KakuN) => (85,m),
+                            Some(&ObtainKind::Kaku) => (75,m),
+                            Some(&ObtainKind::Kin) => (70,m),
+                            Some(&ObtainKind::GinN) => (65,m),
+                            Some(&ObtainKind::Gin) => (60,m),
+                            Some(&ObtainKind::KeiN) => (55,m),
+                            Some(&ObtainKind::Kei) => (50,m),
+                            Some(&ObtainKind::KyouN) => (45,m),
+                            Some(&ObtainKind::Kyou) => (40,m),
+                            Some(&ObtainKind::FuN) => (35,m),
+                            Some(&ObtainKind::Fu) => (30,m),
+                            None => (1,m),
+                        }
                     },
                     _ => (1,m),
                 }
             }
         }).collect::<Vec<(u32,LegalMove)>>();
+
+        mvs.sort_by(|a,b| b.0.cmp(&a.0));
 
         Ok(BeforeSearchResult::Mvs(mvs))
     }
