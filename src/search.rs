@@ -114,7 +114,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
     fn startup_strategy<'a>(&self,env:&mut Environment<L,S>,
                             gs: &mut GameState<'a>,
-                            m:LegalMove, priority:u32)
+                            m:LegalMove, priority:u32,is_oute:bool)
                             -> Option<(u32,Option<ObtainKind>,u64,u64,KyokumenMap<u64,()>,KyokumenMap<u64,u32>,bool)> {
 
         let obtained = match m {
@@ -131,7 +131,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             let mhash = env.hasher.calc_main_hash(gs.mhash,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
             let shash = env.hasher.calc_sub_hash(gs.shash,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-            if priority == 200 {
+            if is_oute {
                 match oute_kyokumen_map.get(gs.teban,&mhash,&shash) {
                     Some(_) => {
                         return None;
@@ -145,7 +145,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             (mhash,shash)
         };
 
-        if priority != 200 {
+        if !is_oute {
             oute_kyokumen_map.clear(gs.teban);
         }
 
@@ -358,38 +358,38 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
             if let LegalMove::To(ref mv) = m {
                 if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
-                    return (1000,m);
+                    return (1000,false,m);
                 }
             }
 
             if Rule::is_mate_with_partial_state_and_point_and_kind(gs.teban,&ps,x,y,kind) ||
                 Rule::is_mate_with_partial_state_repeat_move_kinds(gs.teban,&ps) {
-                (200,m)
+                (200,true,m)
             } else {
                 match m {
                     LegalMove::To(ref mv) => {
                         match mv.obtained().as_ref() {
-                            Some(&ObtainKind::Ou) => (1000,m),
-                            Some(&ObtainKind::HishaN) => (100,m),
-                            Some(&ObtainKind::Hisha) => (95,m),
-                            Some(&ObtainKind::KakuN) => (80,m),
-                            Some(&ObtainKind::Kaku) => (75,m),
-                            Some(&ObtainKind::Kin) => (70,m),
-                            Some(&ObtainKind::GinN) => (65,m),
-                            Some(&ObtainKind::Gin) => (60,m),
-                            Some(&ObtainKind::KeiN) => (55,m),
-                            Some(&ObtainKind::Kei) => (50,m),
-                            Some(&ObtainKind::KyouN) => (45,m),
-                            Some(&ObtainKind::Kyou) => (40,m),
-                            Some(&ObtainKind::FuN) => (35,m),
-                            Some(&ObtainKind::Fu) => (30,m),
-                            None => (1,m),
+                            Some(&ObtainKind::Ou) => (1000,false,m),
+                            Some(&ObtainKind::HishaN) => (100,false,m),
+                            Some(&ObtainKind::Hisha) => (95,false,m),
+                            Some(&ObtainKind::KakuN) => (80,false,m),
+                            Some(&ObtainKind::Kaku) => (75,false,m),
+                            Some(&ObtainKind::Kin) => (70,false,m),
+                            Some(&ObtainKind::GinN) => (65,false,m),
+                            Some(&ObtainKind::Gin) => (60,false,m),
+                            Some(&ObtainKind::KeiN) => (55,false,m),
+                            Some(&ObtainKind::Kei) => (50,false,m),
+                            Some(&ObtainKind::KyouN) => (45,false,m),
+                            Some(&ObtainKind::Kyou) => (40,false,m),
+                            Some(&ObtainKind::FuN) => (35,false,m),
+                            Some(&ObtainKind::Fu) => (30,false,m),
+                            None => (1,false,m),
                         }
                     },
-                    _ => (1,m),
+                    _ => (1,false,m),
                 }
             }
-        }).collect::<Vec<(u32,LegalMove)>>();
+        }).collect::<Vec<(u32,bool,LegalMove)>>();
 
         mvs.sort_by(|a,b| b.0.cmp(&a.0));
 
@@ -405,7 +405,7 @@ pub enum EvaluationResult {
 #[derive(Debug)]
 pub enum BeforeSearchResult {
     Complete(EvaluationResult),
-    Mvs(Vec<(u32,LegalMove)>)
+    Mvs(Vec<(u32,bool,LegalMove)>)
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Score {
@@ -763,11 +763,12 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     is_timeout = true;
                     break;
                 }
-            } else if let Some((priority,m)) = it.next() {
+            } else if let Some((priority,is_oute,m)) = it.next() {
                 match self.startup_strategy(env,
                                             gs,
                                             m,
-                                            priority) {
+                                            priority,
+                                            is_oute) {
                     Some((depth, obtained, mhash, shash,
                              oute_kyokumen_map,
                              current_kyokumen_map,
@@ -925,8 +926,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
         let mut await_mvs = vec![];
 
-        for &(priority,m) in &mvs {
-            match self.startup_strategy(env,gs,m,priority) {
+        for &(priority,is_oute,m) in &mvs {
+            match self.startup_strategy(env,gs,m,priority,is_oute) {
                 Some((depth,obtained,mhash,shash,
                          oute_kyokumen_map,
                          current_kyokumen_map,

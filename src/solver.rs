@@ -209,7 +209,7 @@ impl Solver {
 
                 Ok(MaybeMate::Nomate)
             },
-            Ok(r) => {
+            Ok(_) => {
                 let r = receiver.recv()?;
 
                 r
