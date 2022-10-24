@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 use concurrent_fixed_hashmap::ConcurrentFixedHashMap;
-use usiagent::command::UsiInfoSubCommand;
+use usiagent::command::{UsiInfoSubCommand, UsiScore, UsiScoreMate};
 use usiagent::error::EventHandlerError;
 use usiagent::event::{EventDispatcher, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, UserEventQueue, USIEventDispatcher};
 use usiagent::hash::{KyokumenHash, KyokumenMap};
@@ -67,11 +67,22 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     }
 
     fn send_info(&self, env:&mut Environment<L,S>,
-                      depth:u32, seldepth:u32, pv:&VecDeque<AppliedMove>) -> Result<(),ApplicationError>
+                      depth:u32, seldepth:u32, pv:&VecDeque<AppliedMove>, score:&Score) -> Result<(),ApplicationError>
         where Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
 
         let mut commands: Vec<UsiInfoSubCommand> = Vec::new();
 
+        match score {
+            Score::INFINITE => {
+                commands.push(UsiInfoSubCommand::Score(UsiScore::Mate(UsiScoreMate::Plus)))
+            },
+            Score::NEGINFINITE => {
+                commands.push(UsiInfoSubCommand::Score(UsiScore::Mate(UsiScoreMate::Minus)))
+            },
+            Score::Value(s) => {
+                commands.push(UsiInfoSubCommand::Score(UsiScore::Cp(*s as i64)))
+            }
+        }
         if depth < seldepth {
             commands.push(UsiInfoSubCommand::Depth(depth));
             commands.push(UsiInfoSubCommand::SelDepth(seldepth));
@@ -639,7 +650,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
-                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?;
+                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves,&score)?;
                     }
                 },
                 _ => ()
@@ -660,7 +671,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         score = -s;
                         best_moves = VecDeque::new();
                         best_moves.push_front(m);
-                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves)?;
+                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves,&score)?;
                     }
                 }
             }
@@ -715,10 +726,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                 match r {
                     EvaluationResult::Immediate(s,_,_,_,mvs) => {
-                        self.send_info(env, env.base_depth,gs.current_depth,&mvs)?;
-
                         if -s > scoreval {
                             scoreval = -s;
+
+                            self.send_info(env, env.base_depth,gs.current_depth,&mvs, &scoreval)?;
 
                             if !env.kyokumen_score_map.contains_key(&(gs.teban,gs.mhash,gs.shash)) {
                                 env.kyokumen_score_map.insert_new((gs.teban, gs.mhash, gs.shash), (scoreval, gs.depth));
