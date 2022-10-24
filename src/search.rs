@@ -131,7 +131,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             let mhash = env.hasher.calc_main_hash(gs.mhash,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
             let shash = env.hasher.calc_sub_hash(gs.shash,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-            if priority == 10 {
+            if priority == 200 {
                 match oute_kyokumen_map.get(gs.teban,&mhash,&shash) {
                     Some(_) => {
                         return None;
@@ -145,7 +145,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             (mhash,shash)
         };
 
-        if priority < 10 {
+        if priority != 200 {
             oute_kyokumen_map.clear(gs.teban);
         }
 
@@ -371,8 +371,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         match mv.obtained().as_ref() {
                             Some(&ObtainKind::Ou) => (1000,m),
                             Some(&ObtainKind::HishaN) => (100,m),
-                            Some(&ObtainKind::Hisha) => (90,m),
-                            Some(&ObtainKind::KakuN) => (85,m),
+                            Some(&ObtainKind::Hisha) => (95,m),
+                            Some(&ObtainKind::KakuN) => (80,m),
                             Some(&ObtainKind::Kaku) => (75,m),
                             Some(&ObtainKind::Kin) => (70,m),
                             Some(&ObtainKind::GinN) => (65,m),
