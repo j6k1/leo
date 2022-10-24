@@ -215,6 +215,8 @@ impl Solver {
                 r
             },
             Err(e) => {
+                let _ = receiver.recv()?;
+
                 Err(ApplicationError::from(e))
             }
         }
