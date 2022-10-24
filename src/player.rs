@@ -84,8 +84,7 @@ pub struct Leo {
     network_delay:u32,
     turn_count:u32,
     min_turn_count:u32,
-    display_evalute_score:bool,
-    adjust_depth:bool,
+    display_evalute_score:bool
 }
 impl fmt::Debug for Leo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -119,8 +118,7 @@ impl Leo {
             network_delay:NETWORK_DELAY,
             turn_count:TURN_COUNT,
             min_turn_count:MIN_TURN_COUNT,
-            display_evalute_score:DEFALUT_DISPLAY_EVALUTE_SCORE,
-            adjust_depth:DEFAULT_ADJUST_DEPTH,
+            display_evalute_score:DEFALUT_DISPLAY_EVALUTE_SCORE
         }
     }
 }
@@ -203,9 +201,6 @@ impl USIPlayer<ApplicationError> for Leo {
             },
             "DispEvaluteScore" => {
                 self.display_evalute_score =  bool::from_option(value).unwrap_or(DEFALUT_DISPLAY_EVALUTE_SCORE);
-            },
-            "AdjustDepth" => {
-                self.adjust_depth = bool::from_option(value).unwrap_or(DEFAULT_ADJUST_DEPTH);
             },
             "MAX_PLY" => {
                 self.max_ply = match u32::from_option(value) {
@@ -369,7 +364,6 @@ impl USIPlayer<ApplicationError> for Leo {
             self.max_ply.clone(),
             self.max_ply_mate.clone(),
             self.max_ply_timelimit.map(|l| Duration::from_micros(l)),
-            self.adjust_depth,
             self.network_delay,
             self.display_evalute_score,
             self.max_threads
@@ -418,8 +412,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     mhash:mhash,
                     shash:shash,
                     depth:base_depth,
-                    current_depth:0,
-                    node_count:1
+                    current_depth:0
                 };
 
                 let strategy  = Root::new();
@@ -433,8 +426,8 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Timeout) => {
-                        strategy.send_message(&mut env,"think timeout!")?;
-                        //println!("think timeout!");
+                        //strategy.send_message(&mut env,"think timeout!")?;
+                        println!("info string think timeout!");
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Async(_)) => {
@@ -446,6 +439,7 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
+                        println!("info string moves is empty!");
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) => {
@@ -501,9 +495,7 @@ impl USIPlayer<ApplicationError> for Leo {
             self.max_nodes.clone(),
             self.max_ply.clone(),
             self.max_ply_mate.clone(),
-            self.max_ply_timelimit.map(|l| Duration::from_micros(l)),
-            self.adjust_depth,
-            self.network_delay,
+            self.max_ply_timelimit.map(|l| Duration::from_micros(l)), self.network_delay,
             self.display_evalute_score,
             self.max_threads
         );
@@ -551,9 +543,11 @@ impl USIPlayer<ApplicationError> for Leo {
             }
         }
     }
+    
     fn on_stop(&mut self,_:&UserEvent) -> Result<(), ApplicationError> where ApplicationError: PlayerError {
         Ok(())
     }
+
     fn gameover<L>(&mut self,_:&GameEndState,
                    _:Arc<Mutex<UserEventQueue>>, _:Arc<Mutex<OnErrorHandler<L>>>) -> Result<(),ApplicationError> where L: Logger, Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
         Ok(())

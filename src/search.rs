@@ -44,19 +44,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         })
     }
 
-    fn timeout_expected(&self, env:&mut Environment<L,S>, start_time:Instant,
-                        current_depth:u32, parent_nodes:u128, nodes:u32, processed_nodes:u32) -> bool {
-        const SECOND_NANOS:u128 = 1000_000_000;
-        const D:u128 = 8;
-
-        if current_depth <= 1 || !env.adjust_depth {
-            false
-        } else {
-            env.current_limit.map(|l| {
-                let nanos = ((Instant::now() - start_time) / processed_nodes * nodes).as_nanos() * parent_nodes / D;
-                env.think_start_time + Duration::new((nanos / SECOND_NANOS) as u64, (nanos % SECOND_NANOS) as u32) > l
-            }).unwrap_or(false) || env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
-        }
+    fn timeout_expected(&self, env:&mut Environment<L,S>) -> bool {
+        env.current_limit.map(|l| Instant::now() >= l).unwrap_or(false)
     }
 
     fn send_message(&self, env:&mut Environment<L,S>, message:&str) -> Result<(),ApplicationError>
@@ -447,7 +436,6 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub max_ply:Option<u32>,
     pub max_ply_mate:Option<u32>,
     pub max_ply_timelimit:Option<Duration>,
-    pub adjust_depth:bool,
     pub network_delay:u32,
     pub display_evalute_score:bool,
     pub max_threads:u32,
@@ -474,7 +462,6 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             max_ply:self.max_ply.clone(),
             max_ply_mate:self.max_ply_mate.clone(),
             max_ply_timelimit:self.max_ply_timelimit.clone(),
-            adjust_depth:self.adjust_depth,
             network_delay:self.network_delay,
             display_evalute_score:self.display_evalute_score,
             max_threads:self.max_threads,
@@ -502,7 +489,6 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                max_ply:Option<u32>,
                max_ply_mate:Option<u32>,
                max_ply_timelimit:Option<Duration>,
-               adjust_depth:bool,
                network_delay:u32,
                display_evalute_score:bool,
                max_threads:u32
@@ -526,7 +512,6 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             max_ply:max_ply,
             max_ply_mate:max_ply_mate,
             max_ply_timelimit:max_ply_timelimit,
-            adjust_depth:adjust_depth,
             network_delay:network_delay,
             display_evalute_score:display_evalute_score,
             max_threads:max_threads,
@@ -552,8 +537,7 @@ pub struct GameState<'a> {
     pub mhash:u64,
     pub shash:u64,
     pub depth:u32,
-    pub current_depth:u32,
-    pub node_count:u128,
+    pub current_depth:u32
 }
 pub struct Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     l:PhantomData<L>,
@@ -685,8 +669,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let sender = self.sender.clone();
 
         let mut it = mvs.into_iter();
-        let mut processed_nodes:u32 = 0;
-        let start_time = Instant::now();
 
         loop {
             if threads == 0 {
@@ -697,8 +679,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let r = r?.map_err(|e| ApplicationError::from(e))?;
 
                 threads += 1;
-
-                processed_nodes += 1;
 
                 match r {
                     EvaluationResult::Immediate(s,_,_,_,mvs) => {
@@ -729,7 +709,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if self.timeout_expected(env,start_time,gs.current_depth,gs.node_count,mvs_count as u32,processed_nodes) {
+                        if self.timeout_expected(env) {
                             break;
                         }
                     },
@@ -821,8 +801,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         mhash: mhash,
                                         shash: shash,
                                         depth: depth - 1,
-                                        current_depth: current_depth + 1,
-                                        node_count: mvs_count as u128 - processed_nodes as u128
+                                        current_depth: current_depth + 1
                                     };
 
                                     let strategy = Recursive::new();
@@ -908,17 +887,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         let mut scoreval = Score::NEGINFINITE;
         let mut best_moves = VecDeque::new();
 
-        let mut processed_nodes:u32 = 0;
-        let start_time = Instant::now();
-
         let mut await_mvs = vec![];
-        let mvs_count = mvs.len();
 
         for &(priority,m) in &mvs {
-            processed_nodes += 1;
-
-            let parent_nodes = gs.node_count;
-
             match self.startup_strategy(env,gs,m,priority) {
                 Some((depth,obtained,mhash,shash,
                          oute_kyokumen_map,
@@ -969,8 +940,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 mhash: mhash,
                                 shash: shash,
                                 depth: depth - 1,
-                                current_depth: gs.current_depth + 1,
-                                node_count: mvs_count as u128 - processed_nodes as u128
+                                current_depth: gs.current_depth + 1
                             };
 
                             let strategy = Recursive::new();
@@ -1015,7 +985,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
                                 return Ok(EvaluationResult::Timeout);
-                            } else if self.timeout_expected(env,start_time,gs.current_depth,parent_nodes,mvs_count as u32, processed_nodes) {
+                            } else if self.timeout_expected(env) {
                                 return Ok(EvaluationResult::Immediate(scoreval,gs.depth,gs.mhash,gs.shash,best_moves));
                             }
                         }
