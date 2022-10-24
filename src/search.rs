@@ -180,7 +180,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             self.send_seldepth(env,env.base_depth,gs.current_depth)?;
         }
 
-        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+        if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
@@ -283,7 +283,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
         event_dispatcher.dispatch_events(self,&*env.event_queue).map_err(|e| ApplicationError::from(e))?;
 
-        if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+        if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
@@ -302,7 +302,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
         let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
             if gs.depth == 0 || gs.current_depth == env.max_depth {
-                if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+                if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
                     return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
                 }
             }
@@ -320,7 +320,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 mvs
             }
         } else {
-            if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+            if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
                 return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
             }
 
@@ -601,6 +601,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                        gs: &mut GameState<'a>,
                        evalutor: &Evalutor,
                        score:Score,
+                       is_timeout:bool,
                        mut best_moves:VecDeque<AppliedMove>) -> Result<EvaluationResult,ApplicationError> {
         env.stop.store(true,atomic::Ordering::Release);
 
@@ -639,7 +640,11 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
-        Ok(EvaluationResult::Immediate(score, gs.depth,gs.mhash,gs.shash,best_moves))
+        if is_timeout && best_moves.is_empty() {
+            Ok(EvaluationResult::Timeout)
+        } else {
+            Ok(EvaluationResult::Immediate(score, gs.depth, gs.mhash, gs.shash, best_moves))
+        }
     }
 
     fn parallelized<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
@@ -669,6 +674,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let sender = self.sender.clone();
 
         let mut it = mvs.into_iter();
+
+        let mut is_timeout = false;
 
         loop {
             if threads == 0 {
@@ -709,7 +716,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if self.timeout_expected(env) {
+                        if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                            is_timeout = true;
                             break;
                         }
                     },
@@ -717,6 +725,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         await_mvs.push(r);
                     },
                     EvaluationResult::Timeout => {
+                        is_timeout = true;
                         break;
                     }
                 }
@@ -724,7 +733,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let event_queue = Arc::clone(&env.event_queue);
                 event_dispatcher.dispatch_events(self,&*event_queue)?;
 
-                if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
+                if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                    is_timeout = true;
                     break;
                 }
             } else if let Some((priority,m)) = it.next() {
@@ -824,7 +834,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
-        self.termination(await_mvs,env, &mut gs,evalutor,scoreval,best_moves)
+        self.termination(await_mvs,env, &mut gs,evalutor,scoreval,is_timeout, best_moves)
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -946,8 +956,11 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             let strategy = Recursive::new();
 
                             match strategy.search(env, &mut gs, event_dispatcher,evalutor)? {
-                                EvaluationResult::Timeout => {
+                                EvaluationResult::Timeout if best_moves.is_empty() => {
                                     return Ok(EvaluationResult::Timeout);
+                                },
+                                EvaluationResult::Timeout => {
+                                    return Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves));
                                 },
                                 EvaluationResult::Immediate(s,_,_,_,mvs) => {
                                     if -s > scoreval {
@@ -983,10 +996,12 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             event_dispatcher.dispatch_events(self,&*env.event_queue)?;
 
-                            if self.timelimit_reached(env) || env.stop.load(atomic::Ordering::Acquire) {
-                                return Ok(EvaluationResult::Timeout);
-                            } else if self.timeout_expected(env) {
-                                return Ok(EvaluationResult::Immediate(scoreval,gs.depth,gs.mhash,gs.shash,best_moves));
+                            if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                                if best_moves.is_empty() {
+                                    return Ok(EvaluationResult::Timeout);
+                                } else {
+                                    return Ok(EvaluationResult::Immediate(scoreval, gs.depth, gs.mhash, gs.shash, best_moves));
+                                }
                             }
                         }
                     }
