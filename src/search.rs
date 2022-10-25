@@ -56,6 +56,14 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         Ok(env.info_sender.send(commands).map_err(|e| SendSelDepthError::from(e))?)
     }
 
+    fn send_message_immediate(&self, env:&mut Environment<L,S>, message:&str) -> Result<(),ApplicationError>
+        where Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
+        let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
+        commands.push(UsiInfoSubCommand::Str(String::from(message)));
+
+        Ok(env.info_sender.send_immediate(commands).map_err(|e| SendSelDepthError::from(e))?)
+    }
+
     fn send_seldepth(&self, env:&mut Environment<L,S>,
                             depth:u32, seldepth:u32) -> Result<(),ApplicationError> {
 
@@ -94,7 +102,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
         commands.push(UsiInfoSubCommand::Time((Instant::now() - env.think_start_time).as_millis() as u64));
 
-        Ok(env.info_sender.send(commands).map_err(|e| SendSelDepthError::from(e))?)
+        Ok(env.info_sender.send_immediate(commands).map_err(|e| SendSelDepthError::from(e))?)
     }
 
     fn send_score(&self,env:&mut Environment<L,S>,

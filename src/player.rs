@@ -426,20 +426,21 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Timeout) => {
-                        //strategy.send_message(&mut env,"think timeout!")?;
-                        println!("info string think timeout!");
+                        strategy.send_message_immediate(&mut env,"info string think timeout!")?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Async(_)) => {
+                        let e = ApplicationError::LogicError(String::from("Async was returned from the root node."));
+
+                        strategy.send_message_immediate(&mut env,&format!("{}",&e))?;
+
                         let _ = on_error_handler.lock().map(|h| {
-                            let e = ApplicationError::LogicError(String::from("Async was returned from the root node."));
-                            let _ = strategy.send_message(&mut env,format!("{}",&e).as_str());
                             h.call(&e)
                         });
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
-                        println!("info string moves is empty!");
+                        strategy.send_message_immediate(&mut env,"info string moves is empty!")?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) => {
