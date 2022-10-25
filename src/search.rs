@@ -733,22 +733,24 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 threads += 1;
 
                 match r {
-                    EvaluationResult::Immediate(s,_,_,_,mvs) => {
+                    EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
+                        if !env.kyokumen_score_map.contains_key(&(gs.teban.opposite(),mhash,shash)) {
+                            env.kyokumen_score_map.insert_new((gs.teban.opposite(), mhash, shash), (s, depth));
+                        }
+
+                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
+                            let (ref mut score,ref mut d) = *g;
+
+                            if *d < depth {
+                                *d = depth;
+                                *score = s;
+                            }
+                        }
+
                         if -s > scoreval {
                             scoreval = -s;
 
                             self.send_info(env, env.base_depth,gs.current_depth,&mvs, &scoreval)?;
-
-                            if !env.kyokumen_score_map.contains_key(&(gs.teban,gs.mhash,gs.shash)) {
-                                env.kyokumen_score_map.insert_new((gs.teban, gs.mhash, gs.shash), (scoreval, gs.depth));
-                            }
-
-                            if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban,gs.mhash,gs.shash)) {
-                                let (ref mut score,ref mut d) = *g;
-
-                                *d = gs.depth;
-                                *score = scoreval;
-                            }
 
                             best_moves = mvs;
 
@@ -936,7 +938,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             "move is not set."
         )))?;
 
-        let dep = gs.depth;
         let teban = gs.teban;
         let mut alpha = gs.alpha;
         let beta = gs.beta;
@@ -1008,20 +1009,22 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves));
                                 },
-                                EvaluationResult::Immediate(s,_,_,_,mvs) => {
+                                EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
+                                    if !env.kyokumen_score_map.contains_key(&(teban.opposite(),mhash,shash)) {
+                                        env.kyokumen_score_map.insert_new((teban.opposite(), mhash, shash), (s, depth));
+                                    }
+
+                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(teban.opposite(), mhash, shash)) {
+                                        let (ref mut score, ref mut d) = *g;
+
+                                        if *d < depth {
+                                            *d = depth;
+                                            *score = s;
+                                        }
+                                    }
+
                                     if -s > scoreval {
                                         scoreval = -s;
-
-                                        if !env.kyokumen_score_map.contains_key(&(teban,mhash,shash)) {
-                                            env.kyokumen_score_map.insert_new((teban, mhash, shash), (scoreval, dep));
-                                        }
-
-                                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(teban, mhash, shash)) {
-                                            let (ref mut score, ref mut d) = *g;
-
-                                            *d = dep;
-                                            *score = scoreval;
-                                        }
 
                                         best_moves = mvs;
                                         best_moves.push_front(prev_move);
