@@ -13,8 +13,8 @@ use usiagent::hash::{KyokumenHash, KyokumenMap};
 use usiagent::logger::Logger;
 use usiagent::OnErrorHandler;
 use usiagent::player::InfoSender;
-use usiagent::rule::{AppliedMove, LegalMove, Rule, SquareToPoint, State};
-use usiagent::shogi::{KomaKind, MochigomaCollections, MochigomaKind, ObtainKind, Teban};
+use usiagent::rule::{AppliedMove, LegalMove, Rule, State};
+use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError, SendSelDepthError};
 use crate::nn::Evalutor;
 use crate::search::Score::{INFINITE, NEGINFINITE};
@@ -350,39 +350,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         };
 
         let mut mvs = mvs.into_iter().map(|m| {
-            let ps = Rule::apply_move_to_partial_state_none_check(gs.state,gs.teban,gs.mc,m.to_applied_move());
-
-            let (x,y,kind) = match m {
-                LegalMove::To(ref mv) => {
-                    let banmen = gs.state.get_banmen();
-                    let (sx,sy) = mv.src().square_to_point();
-                    let (x,y) = mv.dst().square_to_point();
-                    let kind = banmen.0[sy as usize][sx as usize];
-
-                    let kind = if mv.is_nari() {
-                        kind.to_nari()
-                    } else {
-                        kind
-                    };
-
-                    (x,y,kind)
-                },
-                LegalMove::Put(ref mv) => {
-                    let (x,y) = mv.dst().square_to_point();
-                    let kind = mv.kind();
-
-                    (x,y,KomaKind::from((gs.teban,kind)))
-                }
-            };
-
             if let LegalMove::To(ref mv) = m {
                 if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
                     return (1000,false,m);
                 }
             }
 
-            if Rule::is_mate_with_partial_state_and_point_and_kind(gs.teban,&ps,x,y,kind) ||
-                Rule::is_mate_with_partial_state_repeat_move_kinds(gs.teban,&ps) {
+            if Rule::is_oute_move(gs.state,gs.teban,m) {
                 (200,true,m)
             } else {
                 match m {

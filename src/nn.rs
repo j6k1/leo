@@ -5,7 +5,6 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::{fs, thread};
-use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use concurrent_queue::ConcurrentQueue;
 use rand::{prelude, Rng, SeedableRng};
@@ -20,7 +19,7 @@ use nncombinator::device::{Device, DeviceGpu};
 use nncombinator::layer::{ActivationLayer, AddLayer, AddLayerTrain, BatchForward, BatchForwardBase, BatchTrain, ForwardAll, InputLayer, LinearLayer, LinearOutputLayer, TryAddLayer};
 use nncombinator::lossfunction::{Mse};
 use nncombinator::ope::UnitValue;
-use nncombinator::optimizer::MomentumSGD;
+use nncombinator::optimizer::{SGD};
 use nncombinator::persistence::{BinFilePersistence, Linear, Persistence, PersistenceType, SaveToFile};
 use packedsfen::hcpe::reader::HcpeReader;
 use packedsfen::traits::Reader;
@@ -225,10 +224,7 @@ impl Evalutor {
                     if save_dir.join(&nna_path).exists() {
                         let mut pa = BinFilePersistence::new(save_dir
                             .join(&nna_path)
-                            .as_os_str()
-                            .to_str().ok_or(EvaluationThreadError::InvalidSettingError(
-                            String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-                        ))?)?;
+                        )?;
 
                         nna.load(&mut pa)?;
                     }
@@ -236,10 +232,7 @@ impl Evalutor {
                     if save_dir.join(&nnb_path).exists() {
                         let mut pb = BinFilePersistence::new(save_dir
                             .join(&nnb_path)
-                            .as_os_str()
-                            .to_str().ok_or(EvaluationThreadError::InvalidSettingError(
-                            String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-                        ))?)?;
+                        )?;
 
                         nnb.load(&mut pb)?;
                     }
@@ -406,7 +399,7 @@ pub struct Trainer<M>
 
     nna:M,
     nnb:M,
-    optimizer:MomentumSGD<f32>,
+    optimizer:SGD<f32>,
     nna_path:String,
     nnb_path:String,
     nnsavedir:String,
@@ -414,11 +407,10 @@ pub struct Trainer<M>
     hcpe_reader:HcpeReader,
     bias_shake_shake:bool,
 }
-pub struct TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
-    m:PhantomData<M>,
+pub struct TrainerCreator {
 }
 
-impl<M> TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
+impl TrainerCreator {
     pub fn create(save_dir:String, nna_path:String, nnb_path:String, enable_shake_shake:bool)
                   -> Result<Trainer<impl BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>>>,ApplicationError> {
 
@@ -496,10 +488,7 @@ impl<M> TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFile
             if save_dir.join(nna_path).exists() {
                 let mut pa = BinFilePersistence::new(save_dir
                     .join(nna_path)
-                    .as_os_str()
-                    .to_str().ok_or(ApplicationError::InvalidSettingError(
-                    String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-                ))?)?;
+                )?;
 
                 nna.load(&mut pa)?;
             }
@@ -509,10 +498,7 @@ impl<M> TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFile
             if save_dir.join(nnb_path).exists() {
                 let mut pb = BinFilePersistence::new(save_dir
                     .join(nnb_path)
-                    .as_os_str()
-                    .to_str().ok_or(ApplicationError::InvalidSettingError(
-                    String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
-                ))?)?;
+                )?;
 
                 nnb.load(&mut pb)?;
             }
@@ -521,7 +507,7 @@ impl<M> TrainerCreator<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFile
         Ok(Trainer {
             nna:nna,
             nnb:nnb,
-            optimizer:MomentumSGD::new(0.0001),
+            optimizer:SGD::new(0.001),
             nna_path: nna_path,
             nnb_path: nnb_path,
             nnsavedir: save_dir,
@@ -569,7 +555,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                                         history:Vec<(Banmen,MochigomaCollections,u64,u64)>,
                                         s:&GameEndState,
                                         _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>)
-                                        -> Result<(f32,f32,f32,f32),ApplicationError> {
+                                        -> Result<(f32,f32),ApplicationError> {
 
         let lossf = Mse::new();
 
@@ -602,43 +588,12 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
             (t,input,a,b)
         }).fold(((Vec::new(),Vec::new()),(Vec::new(),Vec::new())), Self::make_learn_input);
 
-        let msa = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
-        let msb = self.nna.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
-
-        let mut teban = last_teban.opposite();
-
-        let batch = history.iter().rev().map(move |(banmen,mc,_,_)| {
-            let (a, b) = Self::calc_alpha_beta(bias_shake_shake);
-
-            let input = InputCreator::make_input(false, teban, banmen, mc);
-
-            let t = match s {
-                GameEndState::Win if teban == last_teban => {
-                    1f32
-                }
-                GameEndState::Win => {
-                    -1f32
-                },
-                GameEndState::Lose if teban == last_teban => {
-                    -1f32
-                },
-                GameEndState::Lose => {
-                    1f32
-                },
-                _ => 0f32
-            };
-
-            teban = teban.opposite();
-
-            (t,input,a,b)
-        }).fold(((Vec::new(),Vec::new()),(Vec::new(),Vec::new())), Self::make_learn_input);
-
-        let moa = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
-        let mob = self.nna.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
+        let ma = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
+        let mb = self.nna.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
 
         self.save()?;
 
-        Ok((msa,moa,msb,mob))
+        Ok((ma,mb))
     }
 
     pub fn test_by_csa(&mut self,
@@ -658,7 +613,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
     pub fn learning_by_packed_sfens<'a>(&mut self,
                                         packed_sfens:Vec<Vec<u8>>,
                                         _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>)
-                                        -> Result<(f32,f32,f32,f32),ApplicationError> {
+                                        -> Result<(f32,f32),ApplicationError> {
 
         let lossf = Mse::new();
         let bias_shake_shake = self.bias_shake_shake;
@@ -697,40 +652,10 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                 (t,input,a,b)
         }).fold(((Vec::new(),Vec::new()),(Vec::new(),Vec::new())),  Self::make_learn_input);
 
-        let msa = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
-        let msb = self.nnb.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
+        let ma = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
+        let mb = self.nnb.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
 
-        let batch = sfens_with_extended.iter()
-            .map(|(teban,banmen,mc,es)| {
-                let (a,b) = Self::calc_alpha_beta(bias_shake_shake);
-
-                // 非手番側であるため、手番と勝敗を反転
-                let teban = teban.opposite();
-                let es = match es {
-                    GameEndState::Win => GameEndState::Lose,
-                    GameEndState::Lose => GameEndState::Win,
-                    GameEndState::Draw => GameEndState::Draw
-                };
-
-                let input = InputCreator::make_input(false, teban, banmen, mc);
-
-                let t = match es {
-                    GameEndState::Win => {
-                        1f32
-                    }
-                    GameEndState::Lose => {
-                        -1f32
-                    },
-                    _ => 0f32
-                };
-
-                (t,input,a,b)
-            }).fold(((Vec::new(),Vec::new()),(Vec::new(),Vec::new())),  Self::make_learn_input);
-
-        let moa = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
-        let mob = self.nnb.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
-
-        Ok((msa,moa,msb,mob))
+        Ok((ma,mb))
     }
 
     pub fn test_by_packed_sfens(&mut self,
@@ -754,7 +679,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
     pub fn learning_by_hcpe<'a>(&mut self,
                                 hcpes:Vec<Vec<u8>>,
                                 _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>)
-                                -> Result<(f32,f32,f32,f32),ApplicationError> {
+                                -> Result<(f32,f32),ApplicationError> {
 
         let lossf = Mse::new();
         let bias_shake_shake = self.bias_shake_shake;
@@ -804,46 +729,10 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                 (t,input,a,b)
             }).fold(((Vec::new(),Vec::new()),(Vec::new(),Vec::new())), Self::make_learn_input);
 
-        let msa = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
-        let msb = self.nnb.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
+        let ma = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer,&lossf)?;
+        let mb = self.nnb.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer,&lossf)?;
 
-        let batch = sfens_with_extended.iter()
-            .map(|(teban,banmen,mc,es)| {
-                let (a,b) = Self::calc_alpha_beta(bias_shake_shake);
-
-                // 非手番側であるため、手番と勝敗を反転
-                let teban = teban.opposite();
-
-                let input = InputCreator::make_input(false,teban, banmen, mc);
-
-                let es = match (es,teban) {
-                    (GameResult::Draw,_) => GameEndState::Draw,
-                    (GameResult::SenteWin,Teban::Sente) |
-                    (GameResult::GoteWin,Teban::Gote) => {
-                        GameEndState::Win
-                    },
-                    (GameResult::SenteWin,Teban::Gote) |
-                    (GameResult::GoteWin,Teban::Sente) => {
-                        GameEndState::Lose
-                    }
-                };
-
-                let t = match es {
-                    GameEndState::Win => {
-                        1f32
-                    }
-                    GameEndState::Lose => {
-                        -1f32
-                    },
-                    _ => 0f32
-                };
-
-                (t,input,a,b)
-            }).fold(((Vec::new(),Vec::new()),(Vec::new(),Vec::new())), Self::make_learn_input);
-        let moa = self.nna.batch_train((batch.0).0.into(),(batch.0).1.into(),&mut self.optimizer, &lossf)?;
-        let mob = self.nnb.batch_train((batch.1).0.into(),(batch.1).1.into(),&mut self.optimizer, &lossf)?;
-
-        Ok((msa,moa,msb,mob))
+        Ok((ma,mb))
     }
 
     pub fn test_by_packed_hcpe(&mut self,
