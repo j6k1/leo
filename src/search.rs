@@ -289,7 +289,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     Arc::clone(&env.quited),
                     ms
                 )? {
-                    MaybeMate::MateMoves(_, mvs) => {
+                    MaybeMate::Mate(_, mvs) => {
                         let mut r  = mvs.into_iter().map(|m| {
                             AppliedMove::from(m)
                         }).collect::<VecDeque<AppliedMove>>();

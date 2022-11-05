@@ -533,7 +533,7 @@ impl USIPlayer<ApplicationError> for Leo {
             Arc::clone(&env.quited),
             ms
         )? {
-            MaybeMate::MateMoves(_,ref mvs) => {
+            MaybeMate::Mate(_, ref mvs) => {
                 Ok(CheckMate::Moves(mvs.into_iter().map(|m| m.to_move()).collect::<Vec<Move>>()))
             },
             MaybeMate::Nomate => {

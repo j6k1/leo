@@ -13,27 +13,27 @@ use usiagent::rule::{LegalMove, State};
 use usiagent::shogi::*;
 use crate::error::ApplicationError;
 use crate::search;
-use crate::solver::checkmate::{AscComparator, CheckmateStrategy, DescComparator};
+use crate::solver::checkmate::{OrNodeComparator, CheckmateStrategy, AndNodeComparator};
 
 #[derive(Debug,Clone)]
 pub enum MaybeMate {
     Nomate,
-    MateMoves(u32,VecDeque<LegalMove>),
+    MateMoves(VecDeque<LegalMove>),
+    Unknown,
+    Continuation(u32),
     MaxDepth,
+    Skip,
     MaxNodes,
     Timeout,
-    Unknown,
     Aborted
 }
 
 pub struct GameStateForMate<'a> {
-    pub checkmate_state_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
+    pub base_deoth:u32,
     pub current_depth:u32,
     pub mhash:u64,
     pub shash:u64,
-    pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
     pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
-    pub ignore_kyokumen_map:KyokumenMap<u64,()>,
     pub event_queue:Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
     pub teban:Teban,
     pub state:&'a Arc<State>,
@@ -53,179 +53,22 @@ impl Solver {
                      network_delay:u32,
                      max_depth:Option<u32>,
                      max_nodes:Option<i64>,
-                     nodes:Arc<AtomicU64>,
+                     node_count:Arc<AtomicU64>,
                      info_sender:S,
                      on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                      hasher:Arc<KyokumenHash<u64>>,
-                     base_depth:u32,
                      stop:Arc<AtomicBool>,
                      quited:Arc<AtomicBool>,
                      ms: GameStateForMate) -> Result<MaybeMate,ApplicationError> where L: Logger + Send + 'static, S: InfoSender {
-        let (s,receiver) = mpsc::channel();
-        let aborted = Arc::new(AtomicBool::new(false));
-
-        {
-            let s = s.clone();
-
-            let limit = limit.clone();
-            let checkmate_limit = checkmate_limit.clone();
-            let network_delay = network_delay.clone();
-            let max_depth = max_depth.clone();
-            let max_nodes = max_nodes.clone();
-            let nodes = Arc::clone(&nodes);
-            let info_sender = info_sender.clone();
-            let on_error_handler = Arc::clone(&on_error_handler);
-            let hasher = Arc::clone(&hasher);
-            let stop = Arc::clone(&stop);
-            let quited = Arc::clone(&quited);
-            let aborted = Arc::clone(&aborted);
-
-            let checkmate_state_map = Arc::clone(&ms.checkmate_state_map);
-            let current_depth = ms.current_depth;
-            let mhash = ms.mhash;
-            let shash = ms.shash;
-            let mut ignore_kyokumen_map = ms.ignore_kyokumen_map.clone();
-            let mut oute_kyokumen_map = ms.oute_kyokumen_map.clone();
-            let mut current_kyokumen_map = ms.current_kyokumen_map.clone();
-            let event_queue = Arc::clone(&ms.event_queue);
-            let teban = ms.teban;
-            let state = Arc::clone(ms.state);
-            let mc = Arc::clone(ms.mc);
-
-            std::thread::spawn(move || {
-                let mut event_dispatcher = search::Root::<L,S>::create_event_dispatcher(&on_error_handler,&stop,&quited);
-
-                let mut mate_strategy = CheckmateStrategy::new(
-                    DescComparator,
-                    AscComparator,
-                    hasher,
-                    strict_moves,
-                    limit,
-                    checkmate_limit,
-                    network_delay,
-                    max_depth,
-                    max_nodes,
-                    info_sender,
-                    base_depth,
-                    stop,
-                    aborted,
-                    current_depth);
-                if let Err(ref e) = s.send(mate_strategy.oute_process(
-                                                                      &checkmate_state_map,
-                                                                      current_depth,
-                                                                      &nodes,
-                                                                      mhash,
-                                                                      shash,
-                                                                      &mut ignore_kyokumen_map,
-                                                                      &mut oute_kyokumen_map,
-                                                                      &mut current_kyokumen_map,
-                                                                      &event_queue,
-                                                                      &mut event_dispatcher,
-                                                                      teban,
-                                                                      &*state,
-                                                                      &*mc)) {
-                    let _ = on_error_handler.lock().map(|h| h.call(e));
-                }
-            });
-        }
-
-        {
-            let s = s.clone();
-
-            let limit = limit.clone();
-            let checkmate_limit = checkmate_limit.clone();
-            let network_delay = network_delay.clone();
-            let max_depth = max_depth.clone();
-            let max_nodes = max_nodes.clone();
-            let nodes = Arc::clone(&nodes);
-            let info_sender = info_sender.clone();
-            let on_error_handler = Arc::clone(&on_error_handler);
-            let hasher = Arc::clone(&hasher);
-            let stop = Arc::clone(&stop);
-            let quited = Arc::clone(&quited);
-            let aborted = Arc::clone(&aborted);
-
-            let checkmate_state_map = Arc::clone(&ms.checkmate_state_map);
-            let current_depth = ms.current_depth;
-            let mhash = ms.mhash;
-            let shash = ms.shash;
-            let mut ignore_kyokumen_map = ms.ignore_kyokumen_map.clone();
-            let mut oute_kyokumen_map = ms.oute_kyokumen_map.clone();
-            let mut current_kyokumen_map = ms.current_kyokumen_map.clone();
-            let event_queue = Arc::clone(&ms.event_queue);
-            let teban = ms.teban;
-            let state = Arc::clone(ms.state);
-            let mc = Arc::clone(ms.mc);
-
-            std::thread::spawn(move || {
-                let mut event_dispatcher = search::Root::<L,S>::create_event_dispatcher(&on_error_handler,&stop,&quited);
-
-                let mut nomate_strategy = CheckmateStrategy::new(
-                    AscComparator,
-                    DescComparator,
-                    hasher,
-                    strict_moves,
-                    limit,
-                    checkmate_limit,
-                    network_delay,
-                    max_depth,
-                    max_nodes,
-                    info_sender,
-                    base_depth,
-                    stop,
-                    aborted,
-                    current_depth);
-                if let Err(ref e) = s.send(nomate_strategy.oute_process(
-                                                                        &checkmate_state_map,
-                                                                        current_depth,
-                                                                        &nodes,
-                                                                        mhash,
-                                                                        shash,
-                                                                        &mut ignore_kyokumen_map,
-                                                                        &mut oute_kyokumen_map,
-                                                                        &mut current_kyokumen_map,
-                                                                        &event_queue,
-                                                                        &mut event_dispatcher,
-                                                                        teban,
-                                                                        &*state,
-                                                                        &*mc)) {
-                    let _ = on_error_handler.lock().map(|h| h.call(e));
-                }
-            });
-        }
-
-        let r = receiver.recv();
-
-        aborted.store(true,atomic::Ordering::Release);
-
-        match r {
-            Ok(Ok(MaybeMate::MateMoves(depth,mvs))) => {
-                let _ = receiver.recv()?;
-
-                Ok(MaybeMate::MateMoves(depth,mvs))
-            },
-            Ok(Ok(MaybeMate::Nomate)) => {
-                let _ = receiver.recv()?;
-
-                Ok(MaybeMate::Nomate)
-            },
-            Ok(_) => {
-                let r = receiver.recv()?;
-
-                r
-            },
-            Err(e) => {
-                let _ = receiver.recv()?;
-
-                Err(ApplicationError::from(e))
-            }
-        }
     }
 }
 
 pub mod checkmate {
+    use std::borrow::Borrow;
+    use std::cell::RefCell;
     use std::cmp::Ordering;
-    use std::collections::VecDeque;
+    use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+    use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::{Arc, atomic, Mutex};
     use std::time::{Duration, Instant};
@@ -241,35 +84,86 @@ pub mod checkmate {
     use crate::search::{TIMELIMIT_MARGIN};
     use crate::solver::{MaybeMate};
 
-    pub trait Comparator<T>: Clone {
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    pub enum Number {
+        Value(u64),
+        INFINITE
+    }
+
+    pub struct Node {
+        id:u64,
+        pn:Number,
+        dn:Number,
+        max_depth:u32,
+        ignore:bool,
+        ref_nodes:HashSet<u64>,
+        update_nodes:HashSet<u64>,
+        m:LegalMove,
+        children:BTreeSet<Rc<RefCell<Node>>>,
+        comparator:Box<dyn Comparator<Node>>
+    }
+
+    impl Node {
+        pub fn new_or_node(last_id:&mut u64,depth:u32,m:LegalMove) -> Node {
+            *last_id += 1;
+
+            Node {
+                id: *last_id,
+                pn: Number::Value(1),
+                dn: Number::Value(1),
+                max_depth: depth,
+                ignore:false,
+                ref_nodes:HashSet::new(),
+                update_nodes:HashSet::new(),
+                m:m,
+                children:BTreeSet::new(),
+                comparator:Box::new(OrNodeComparator)
+            }
+        }
+
+        pub fn new_and_node(last_id:&mut u64,depth:u32,m:LegalMove) -> Node {
+            *last_id += 1;
+
+            Node {
+                id: *last_id,
+                pn: Number::Value(1),
+                dn: Number::Value(1),
+                max_depth: depth,
+                ignore:false,
+                ref_nodes:HashSet::new(),
+                update_nodes:HashSet::new(),
+                m:m,
+                children:BTreeSet::new(),
+                comparator:Box::new(AndNodeComparator)
+            }
+        }
+    }
+
+    pub trait Comparator<T> {
         fn cmp(&mut self,l:&T,r:&T) -> Ordering;
     }
-    #[derive(Clone)]
-    pub struct AscComparator;
 
-    impl Comparator<(LegalMove,State,MochigomaCollections,usize)> for AscComparator {
+    #[derive(Clone)]
+    pub struct OrNodeComparator;
+
+    impl Comparator<Node> for OrNodeComparator {
         #[inline]
-        fn cmp(&mut self,l:&(LegalMove,State,MochigomaCollections,usize),r:&(LegalMove,State,MochigomaCollections,usize)) -> Ordering {
-            l.3.cmp(&r.3)
+        fn cmp(&mut self,l:&Node,r:&Node) -> Ordering {
+            l.borrow().pn.cmp(&r.borrow().pn).then(l.borrow().max_depth.cmp(&r.borrow().max_depth))
         }
     }
 
     #[derive(Clone)]
-    pub struct DescComparator;
+    pub struct AndNodeComparator;
 
-    impl Comparator<(LegalMove,State,MochigomaCollections,usize)> for DescComparator {
+    impl Comparator<(LegalMove,State,MochigomaCollections,usize)> for AndNodeComparator {
         #[inline]
-        fn cmp(&mut self,l:&(LegalMove,State,MochigomaCollections,usize),r:&(LegalMove,State,MochigomaCollections,usize)) -> Ordering {
-            r.3.cmp(&l.3)
+        fn cmp(&mut self,l:&Node,r:&Node) -> Ordering {
+            l.borrow().dn.cmp(&r.borrow().dn).then(l.borrow().max_depth.cmp(&r.borrow().max_depth))
         }
     }
 
-    pub struct CheckmateStrategy<O,R,S>
-        where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-              R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-              S: InfoSender {
-        oute_comparator: O,
-        response_oute_comparator:R,
+    pub struct CheckmateStrategy<S> where S: InfoSender {
         hasher:Arc<KyokumenHash<u64>>,
         strict_moves:bool,
         limit:Option<Instant>,
@@ -280,20 +174,12 @@ pub mod checkmate {
         info_sender:S,
         base_depth:u32,
         stop:Arc<AtomicBool>,
-        aborted:Arc<AtomicBool>,
         current_depth:u32,
-        nodes:i64,
+        node_count:i64,
     }
 
-    pub type MateStrategy<S> = CheckmateStrategy<DescComparator,AscComparator,S>;
-    pub type NomateStrategy<S> = CheckmateStrategy<AscComparator,DescComparator,S>;
-
-    impl<O,R,S> CheckmateStrategy<O,R,S>
-        where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-              R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-              S: InfoSender {
-        pub fn new(oute_comparator: O, response_oute_comparator: R,
-               hasher:Arc<KyokumenHash<u64>>,
+    impl<S> CheckmateStrategy<S> where S: InfoSender {
+        pub fn new(hasher:Arc<KyokumenHash<u64>>,
                strict_moves:bool,
                limit:Option<Instant>,
                checkmate_limit:Option<Instant>,
@@ -303,12 +189,9 @@ pub mod checkmate {
                info_sender:S,
                base_depth:u32,
                stop:Arc<AtomicBool>,
-               aborted:Arc<AtomicBool>,
                current_depth:u32,
-       ) -> CheckmateStrategy<O,R,S> {
+       ) -> CheckmateStrategy<S> {
             CheckmateStrategy {
-                oute_comparator: oute_comparator,
-                response_oute_comparator: response_oute_comparator,
                 hasher:hasher,
                 strict_moves:strict_moves,
                 limit:limit,
@@ -319,39 +202,72 @@ pub mod checkmate {
                 info_sender:info_sender,
                 base_depth:base_depth,
                 stop:stop,
-                aborted:aborted,
                 current_depth:current_depth,
-                nodes:0,
+                node_count:0,
             }
         }
 
+        pub fn update_nodes(&mut self, depth:u32, current_nodes:&VecDeque<Rc<RefCell<Node>>>,) -> Result<(),ApplicationError>{
+            for (i,n) in (0..=depth).rev().zip(current_nodes.iter().rev()) {
+                if i % 2 == 0 {
+                    let mut pn = Number::INFINITE;
+                    let mut dn = 0;
+
+                    for child in n.try_borrow()?.children.iter() {
+                        pn = child.try_borrow()?.pn.min(pn);
+                        dn += child.try_borrow()?.dn;
+                    }
+
+                    n.try_borrow_mut()?.pn = pn;
+                    n.try_borrow_mut()?.dn = Number::Value(dn);
+                } else {
+                    let mut pn = 0;
+                    let mut dn = Number::INFINITE;
+
+                    for child in n.try_borrow()?.children.iter() {
+                        pn += child.try_borrow()?.pn;
+                        dn = child.try_borrow()?.dn.min(dn);
+                    }
+
+                    n.try_borrow_mut()?.pn = Number::Value(pn);
+                    n.try_borrow_mut()?.dn = dn;
+                }
+            }
+
+            Ok(())
+        }
+
         pub fn oute_process<L: Logger>(&mut self,
-                                       checkmate_state_map:&Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
-                                       current_depth:u32,
-                                       nodes:&Arc<AtomicU64>,
+                                       depth:u32,
                                        mhash:u64,
                                        shash:u64,
                                        ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
-                                       oute_kyokumen_map:&mut KyokumenMap<u64,()>,
                                        current_kyokumen_map:&mut KyokumenMap<u64,u32>,
+                                       last_id:&mut u64,
+                                       current_nodes:&mut VecDeque<Rc<RefCell<Node>>>,
+                                       node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
+                                       current_moves:&mut VecDeque<LegalMove>,
                                        event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
                                        event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
                                        teban:Teban, state:&State, mc:&MochigomaCollections)
-                                       -> Result<MaybeMate,ApplicationError>
-                where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-                      R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-                      S: InfoSender + Send {
-            if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
+                                       -> Result<MaybeMate,ApplicationError> where S: InfoSender + Send {
+            if self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
 
-            self.nodes += 1;
+            self.node_count += 1;
 
-            if self.max_depth.map(|d| current_depth >= d).unwrap_or(false) {
+            if self.max_depth.map(|d| depth >= d).unwrap_or(false) {
+                let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                    "Current node is not set."
+                )))?.try_borrow_mut()?;
+
+                n.ignore = true;
+
                 return Ok(MaybeMate::MaxDepth);
             }
 
-            if self.max_nodes.map(|n| self.nodes >= n).unwrap_or(false) {
+            if self.max_nodes.map(|n| self.node_count >= n).unwrap_or(false) {
                 return Ok(MaybeMate::MaxNodes);
             }
 
@@ -359,142 +275,195 @@ pub mod checkmate {
                 return Ok(MaybeMate::Timeout);
             }
 
-            self.send_seldepth(current_depth)?;
-
-            let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
-            let mut current_kyokumen_map = current_kyokumen_map.clone();
-            let mut oute_kyokumen_map = oute_kyokumen_map.clone();
+            self.send_seldepth(depth)?;
 
             let mvs = Rule::oute_only_moves_all(teban,state,mc);
 
-            let mut mvs = mvs.into_iter().map(|m| {
-                let (next,nmc,_) = Rule::apply_move_none_check(state,teban,mc,m.to_applied_move());
-                let len = Rule::respond_oute_only_moves_all(teban.opposite(),&next,&nmc).len();
-                (m,next,nmc,len)
-            }).collect::<Vec<(LegalMove,State,MochigomaCollections,usize)>>();
+            let mut nodes = mvs.into_iter().map(|m| {
+                Rc::new(RefCell::new(Node::new_or_node(last_id,depth,m)))
+            }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
             let _ = event_dispatcher.dispatch_events(self,&*event_queue);
 
-            let mut response_oute_comparator = self.response_oute_comparator.clone();
+            if nodes.len() == 0 {
+                {
+                    let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                        "Current node is not set."
+                    )))?.try_borrow_mut()?;
 
-            mvs.sort_by(|a,b| response_oute_comparator.cmp(a,b));
+                    n.pn = Number::INFINITE;
+                    n.dn = Number::Value(0);
+                }
 
-            if mvs.len() == 0 {
-                checkmate_state_map.insert((teban,mhash,shash),false);
-                Ok(MaybeMate::Nomate)
+                current_nodes.pop_back();
+                current_moves.pop_back();
+
+                self.update_nodes(depth-1, current_nodes)?;
+
+                let mut d = 0;
+
+                for (n,&m) in current_nodes.iter().zip(current_moves.iter()) {
+                    if n.try_borrow()?.m != m {
+                        break;
+                    }
+                    d += 1;
+                }
+
+                Ok(MaybeMate::Continuation(depth - d))
             } else {
-                for (m,next,nmc,_) in mvs {
-                    if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
-                        return Ok(MaybeMate::Aborted)
-                    }
+                {
+                    let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                        "Current node is not set."
+                    )))?.try_borrow_mut()?;
 
-                    let o = match m {
-                        LegalMove::To(ref m) => {
-                            m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
-                        },
-                        _ => None,
-                    };
-
-                    let mhash = self.hasher.calc_main_hash(mhash,teban,
-                                                      state.get_banmen(),
-                                                      &mc,m.to_applied_move(),&o);
-                    let shash = self.hasher.calc_sub_hash(shash,teban,
-                                                     state.get_banmen(),
-                                                     &mc,m.to_applied_move(),&o);
-
-                    let completed = checkmate_state_map.get(&(teban,mhash,shash));
-
-                    if let Some(completed) = completed {
-                        if *completed {
-                            if !self.strict_moves {
-                                let mut mvs = VecDeque::new();
-                                mvs.push_front(m);
-                                return Ok(MaybeMate::MateMoves(current_depth,mvs));
-                            }
-                        } else {
-                            continue;
-                        }
-                    }
-
-                    if let Some(()) = ignore_kyokumen_map.get(teban,&mhash,&shash) {
-                        continue;
-                    }
-
-                    if let Some(&c) = current_kyokumen_map.get(teban,&mhash,&shash) {
-                        if c >= 3 {
-                            continue;
-                        }
-                    }
-
-                    if let Some(()) = oute_kyokumen_map.get(teban,&mhash,&shash) {
-                        continue;
-                    }
-
-                    ignore_kyokumen_map.insert(teban,mhash,shash,());
-
-                    match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
-                        &c => {
-                            current_kyokumen_map.insert(teban, mhash, shash, c+1);
-                        }
-                    }
-
-                    oute_kyokumen_map.insert(teban, mhash, shash, ());
-
-                    match self.response_oute_process(checkmate_state_map,
-                                                     current_depth+1,
-                                                     nodes,
-                                                     mhash,
-                                                     shash,
-                                                     &mut ignore_kyokumen_map,
-                                                     &mut oute_kyokumen_map,
-                                                     &mut current_kyokumen_map,
-                                                     event_queue,
-                                                     event_dispatcher,
-                                                     teban,
-                                                     &next,
-                                                     &nmc)? {
-                        MaybeMate::MateMoves(depth,mut mvs) => {
-                            mvs.push_front(m);
-                            return Ok(MaybeMate::MateMoves(depth,mvs))
-                        },
-                        r @ MaybeMate::MaxNodes | r @ MaybeMate::MaxDepth | r @ MaybeMate::Timeout | r @ MaybeMate::Aborted => {
-                            return Ok(r);
-                        },
-                        MaybeMate::Nomate | MaybeMate::Unknown => ()
+                    for child in nodes.iter() {
+                        n.children.insert(Rc::clone(child));
                     }
                 }
 
-                Ok(MaybeMate::Unknown)
+                self.update_nodes(depth,current_nodes)?;
+
+                let mut d = 0;
+
+                for (n,&m) in current_nodes.iter().zip(current_moves.iter()) {
+                    if n.try_borrow()?.m != m {
+                        break;
+                    }
+                    d += 1;
+                }
+
+                if d == depth {
+                    loop {
+                        let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
+                        let mut current_kyokumen_map = current_kyokumen_map.clone();
+
+                        let mut update = false;
+
+                        for n in nodes.iter() {
+                            if n.try_borrow()?.ignore {
+                                continue;
+                            }
+
+                            let m = n.try_borrow()?.m;
+
+                            if self.stop.load(atomic::Ordering::Acquire) {
+                                return Ok(MaybeMate::Aborted)
+                            }
+
+                            let o = match m {
+                                LegalMove::To(ref m) => {
+                                    m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
+                                },
+                                _ => None,
+                            };
+
+                            let mhash = self.hasher.calc_main_hash(mhash,teban,
+                                                                   state.get_banmen(),
+                                                                   &mc,m.to_applied_move(),&o);
+                            let shash = self.hasher.calc_sub_hash(shash,teban,
+                                                                  state.get_banmen(),
+                                                                  &mc,m.to_applied_move(),&o);
+
+                            if let Some(()) = ignore_kyokumen_map.get(teban,&mhash,&shash) {
+                                n.try_borrow()?.ignore = true;
+                                continue;
+                            }
+
+                            if let Some(&c) = current_kyokumen_map.get(teban,&mhash,&shash) {
+                                if c >= 3 {
+                                    n.try_borrow_mut()?.pn = Number::INFINITE;
+                                    n.try_borrow_mut()?.dn = Number::Value(0);
+
+                                    continue;
+                                }
+                            }
+
+                            ignore_kyokumen_map.insert(teban,mhash,shash,());
+
+                            match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
+                                &c => {
+                                    current_kyokumen_map.insert(teban, mhash, shash, c+1);
+                                }
+                            }
+
+                            current_moves.push_back(m);
+                            current_nodes.push_back(Rc::clone(n));
+
+                            let next = Rule::apply_move_none_check(state,teban,mc,m.to_applied_move());
+
+                            match next {
+                                (state,mc,_) => {
+                                    match self.response_oute_process(depth + 1,
+                                                                     mhash,
+                                                                     shash,
+                                                                     &mut ignore_kyokumen_map,
+                                                                     &mut current_kyokumen_map,
+                                                                     last_id,
+                                                                     current_nodes,
+                                                                     node_map,
+                                                                     current_moves,
+                                                                     event_queue,
+                                                                     event_dispatcher,
+                                                                     teban.opposite(),
+                                                                     &state,
+                                                                     &mc
+                                    )? {
+                                        MaybeMate::Continuation(0) => {
+                                            update = true;
+                                            break;
+                                        },
+                                        MaybeMate::Continuation(depth) => {
+                                            Ok(MaybeMate::Continuation(depth - 1))
+                                        },
+                                        r @ MaybeMate::MateMoves(_) | MaybeMate::Nomate | MaybeMate::Unknown |
+                                        MaybeMate::MaxNodes | MaybeMate::Timeout | MaybeMate::Aborted => {
+                                            Ok(r)
+                                        },
+                                        MaybeMate::Skip | MaybeMate::MaxDepth => {
+
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if !update {
+                            break;s
+                        }
+                    }
+
+                    Ok(MaybeMate::Skip)
+                } else {
+                    Ok(MaybeMate::Continuation(depth - d))
+                }
             }
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
-                                                checkmate_state_map:&Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
-                                                current_depth:u32,
-                                                nodes:&Arc<AtomicU64>,
+                                                depth:u32,
                                                 mhash:u64,
                                                 shash:u64,
                                                 ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
-                                                oute_kyokumen_map:&mut KyokumenMap<u64,()>,
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
+                                                last_id:&mut u64,
+                                                current_nodes:&mut VecDeque<Rc<RefCell<Node>>>,
+                                                node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
+                                                current_moves:&mut VecDeque<LegalMove>,
                                                 event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
                                                 event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
                                                 teban:Teban, state:&State, mc:&MochigomaCollections)
-                                                -> Result<MaybeMate,ApplicationError>
-                where O: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-                      R: Comparator<(LegalMove,State,MochigomaCollections,usize)>,
-                      S: InfoSender + Send {
-            if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
+                                                -> Result<MaybeMate,ApplicationError> where S: InfoSender + Send {
+            if self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Aborted)
             }
 
-            self.nodes += 1;
+            self.node_count += 1;
 
             if self.max_depth.map(|d| current_depth >= d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
 
-            if self.max_nodes.map(|n| self.nodes >= n).unwrap_or(false) {
+            if self.max_nodes.map(|n| self.node_count >= n).unwrap_or(false) {
                 return Ok(MaybeMate::MaxNodes);
             }
 
@@ -502,101 +471,162 @@ pub mod checkmate {
                 return Ok(MaybeMate::Timeout);
             }
 
-            self.send_seldepth(current_depth)?;
+            self.send_seldepth(depth)?;
 
             let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
             let mut current_kyokumen_map = current_kyokumen_map.clone();
-            let mut oute_kyokumen_map = oute_kyokumen_map.clone();
 
             let mvs = Rule::respond_oute_only_moves_all(teban,state,mc);
 
-            let mut mvs = mvs.into_iter().map(|m| {
-                let (next,nmc,_) = Rule::apply_move_none_check(state,teban,mc,m.to_applied_move());
-                let len = Rule::oute_only_moves_all(teban.opposite(),&next,&nmc).len();
-                (m,next,nmc,len)
-            }).collect::<Vec<(LegalMove,State,MochigomaCollections,usize)>>();
+            let mut nodes = mvs.into_iter().map(|m| {
+                Rc::new(RefCell::new(Node::new_or_node(last_id,depth,m)))
+            }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
             let _ = event_dispatcher.dispatch_events(self,&*event_queue);
 
-            let mut oute_comparator = self.oute_comparator.clone();
+            if nodes.len() == 0 {
+                {
+                    let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                        "Current node is not set."
+                    )))?.try_borrow_mut()?;
 
-            mvs.sort_by(|a,b| oute_comparator.cmp(a,b));
+                    n.pn = Number::Value(0);
+                    n.dn = Number::INFINITE;
+                }
 
-            if mvs.len() == 0 {
-                checkmate_state_map.insert((teban,mhash,shash),true);
-                Ok(MaybeMate::MateMoves(current_depth,VecDeque::new()))
+                current_nodes.pop_back();
+                current_moves.pop_back();
+
+                self.update_nodes(depth-1, current_nodes)?;
+
+                let mut d = 0;
+
+                for (n,&m) in current_nodes.iter().zip(current_moves.iter()) {
+                    if n.try_borrow()?.m != m {
+                        break;
+                    }
+                    d += 1;
+                }
+
+                Ok(MaybeMate::Continuation(depth - d))
             } else {
-                for (m,next,nmc,_) in mvs {
-                    if self.aborted.load(atomic::Ordering::Acquire) || self.stop.load(atomic::Ordering::Acquire) {
-                        return Ok(MaybeMate::Aborted)
-                    }
+                {
+                    let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                        "Current node is not set."
+                    )))?.try_borrow_mut()?;
 
-                    let o = match m {
-                        LegalMove::To(ref m) => {
-                            m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
-                        },
-                        _ => None,
-                    };
-
-                    let mhash = self.hasher.calc_main_hash(mhash,teban,
-                                                      state.get_banmen(),
-                                                      &mc,m.to_applied_move(),&o);
-                    let shash = self.hasher.calc_sub_hash(shash,teban,
-                                                     state.get_banmen(),
-                                                     &mc,m.to_applied_move(),&o);
-
-                    let completed = checkmate_state_map.get(&(teban,mhash,shash));
-
-                    if let Some(completed) = completed {
-                        if *completed {
-                            continue;
-                        } else {
-                            return Ok(MaybeMate::Nomate);
-                        }
-                    }
-
-                    if let Some(()) = ignore_kyokumen_map.get(teban,&mhash,&shash) {
-                        continue;
-                    }
-
-                    if let Some(&c) = current_kyokumen_map.get(teban,&mhash,&shash) {
-                        if c >= 3 {
-                            continue;
-                        }
-                    }
-
-                    ignore_kyokumen_map.insert(teban,mhash,shash,());
-
-                    match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
-                        &c => {
-                            current_kyokumen_map.insert(teban, mhash, shash, c+1);
-                        }
-                    }
-
-                    match self.oute_process(checkmate_state_map,
-                                            current_depth+1,
-                                            nodes,
-                                            mhash,
-                                            shash,
-                                            &mut ignore_kyokumen_map,
-                                            &mut oute_kyokumen_map,
-                                            &mut current_kyokumen_map,
-                                            event_queue,
-                                            event_dispatcher,
-                                            teban,
-                                            &next,
-                                            &nmc)? {
-                        MaybeMate::Nomate => {
-                            return Ok(MaybeMate::Nomate)
-                        },
-                        r @ MaybeMate::MaxNodes | r @ MaybeMate::MaxDepth | r @ MaybeMate::Timeout | r @ MaybeMate::Aborted => {
-                            return Ok(r)
-                        },
-                        MaybeMate::MateMoves(_,_) | MaybeMate::Unknown => ()
+                    for child in nodes.iter() {
+                        n.children.insert(Rc::clone(child));
                     }
                 }
 
-                Ok(MaybeMate::Unknown)
+                self.update_nodes(depth,current_nodes)?;
+
+                let mut d = 0;
+
+                for (n,&m) in current_nodes.iter().zip(current_moves.iter()) {
+                    if n.try_borrow()?.m != m {
+                        break;
+                    }
+                    d += 1;
+                }
+
+                if d == depth {
+                    loop {
+                        let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
+                        let mut current_kyokumen_map = current_kyokumen_map.clone();
+
+                        let mut update = false;
+
+                        for n in nodes.iter() {
+                            if n.try_borrow()?.ignore {
+                                continue;
+                            }
+
+                            let m = n.try_borrow()?.m;
+
+                            let o = match m {
+                                LegalMove::To(ref m) => {
+                                    m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
+                                },
+                                _ => None,
+                            };
+
+                            let mhash = self.hasher.calc_main_hash(mhash, teban,
+                                                                   state.get_banmen(),
+                                                                   &mc, m.to_applied_move(), &o);
+                            let shash = self.hasher.calc_sub_hash(shash, teban,
+                                                                  state.get_banmen(),
+                                                                  &mc, m.to_applied_move(), &o);
+
+                            if let Some(()) = ignore_kyokumen_map.get(teban, &mhash, &shash) {
+                                n.try_borrow_mut()?.ignore = true;
+
+                                continue;
+                            }
+
+                            if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
+                                if c >= 3 {
+                                    n.try_borrow_mut()?.pn = Number::INFINITE;
+                                    n.try_borrow_mut()?.dn = Number::Value(0);
+
+                                    continue;
+                                }
+                            }
+
+                            ignore_kyokumen_map.insert(teban, mhash, shash, ());
+
+                            match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
+                                &c => {
+                                    current_kyokumen_map.insert(teban, mhash, shash, c + 1);
+                                }
+                            }
+
+                            let next = Rule::apply_move_none_check(state,mc,m.to_applied_move());
+
+                            match next {
+                                (state,mc,_) => {
+                                    match self.oute_process(depth + 1,
+                                                            mhash,
+                                                            shash,
+                                                            &mut ignore_kyokumen_map,
+                                                            &mut current_kyokumen_map,
+                                                            last_id,
+                                                            current_nodes,
+                                                            node_map,
+                                                            current_moves,
+                                                            event_queue,
+                                                            event_dispatcher,
+                                                            teban.opposite(),
+                                                            &state,
+                                                            &mc
+                                    )? {
+                                        MaybeMate::Continuation(0) => {
+                                            update = true;
+
+                                            break;
+                                        },
+                                        MaybeMate::Continuation(depth) => {
+                                            Ok(MaybeMate::Continuation(depth-1))
+                                        },
+                                        r @ MaybeMate::MateMoves(_) | MaybeMate::Nomate | MaybeMate::Unknown |
+                                        MaybeMate::MaxNodes | MaybeMate::Timeout | MaybeMate::Aborted => {
+                                            Ok(r)
+                                        },
+                                        MaybeMate::Skip | MaybeMate::MaxDepth => {
+
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if !update {
+                            break;
+                        }
+                    }
+                    Ok(MaybeMate::Skip)
+                }
             }
         }
 
