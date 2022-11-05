@@ -256,29 +256,41 @@ pub mod checkmate {
             let mut d = depth;
 
             Ok(if let Some(n) = node_map.get(teban,&mhash,&shash) {
-                current_nodes.push_back(Rc::clone(n));
+                if depth > 0 {
+                    let id = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                        "Current node is not set."
+                    )))?.try_borrow()?.id;
 
-                self.update_nodes(depth, current_nodes)?;
+                    current_nodes.push_back(Rc::clone(n));
 
-                d = 0;
+                    let update = n.try_borrow()?.update_nodes.contains(&id);
 
-                for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
-                    if n.try_borrow()?.m != m {
-                        break;
+                    if update {
+                        self.update_nodes(depth, current_nodes)?;
+
+                        n.try_borrow_mut()?.update_nodes.remove(&id);
+
+                        d = 0;
+
+                        for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
+                            if n.try_borrow()?.m != m {
+                                break;
+                            }
+                            d += 1;
+                        }
                     }
-                    d += 1;
+                } else {
+                    current_nodes.push_back(Rc::clone(n));
                 }
 
                 let len = n.try_borrow()?.children.len();
 
-                (d,len)
+                (d, len)
             } else {
-                current_nodes.push_back(current_node);
-
                 {
-                    let n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
-                        "Current node is not set."
-                    )))?;
+                    let n = current_node;
+
+                    current_nodes.push_back(Rc::clone(&n));
 
                     let len = n.try_borrow()?.children.len();
 
@@ -297,7 +309,7 @@ pub mod checkmate {
                             }
                         }
 
-                        node_map.insert(teban, mhash, shash, Rc::clone(n));
+                        node_map.insert(teban, mhash, shash, Rc::clone(&n));
 
                         self.update_nodes(depth, current_nodes)?;
 
