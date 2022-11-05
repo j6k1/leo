@@ -68,6 +68,7 @@ pub mod checkmate {
     use std::cell::RefCell;
     use std::cmp::Ordering;
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+    use std::ops::{Add, AddAssign};
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::{Arc, atomic, Mutex};
@@ -90,6 +91,30 @@ pub mod checkmate {
         INFINITE
     }
 
+    impl Add for Number {
+        type Output = Number;
+
+        fn add(self, rhs: Self) -> Self::Output {
+            match (self,rhs) {
+                (Number::INFINITE,_) | (_,Number::INFINITE) => Number::INFINITE,
+                (Number::Value(l),Number::Value(r)) => Number::Value(l+r)
+            }
+        }
+    }
+  
+    impl AddAssign for Number {
+        fn add_assign(&mut self, rhs: Self) {
+            match (&mut self,rhs) {
+                (Number::INFINITE,_) | (_,Number::INFINITE) => {
+                    *self = Number::INFINITE
+                },
+                (Number::Value(l),Number::Value(r)) => {
+                    *self = Number::Value(l+r)
+                }
+            }
+        }    
+    }
+    
     pub struct Node {
         id:u64,
         pn:Number,
@@ -238,6 +263,20 @@ pub mod checkmate {
                 }
             }
 
+            let mut parent_id = None;
+
+            for n in current_nodes.iter().rev().skip(1) {
+                let ref_nodes = n.try_borrow()?.ref_nodes.clone();
+                n.try_borrow_mut()?.update_nodes = ref_nodes;
+            }
+
+            for n in current_nodes.iter() {
+                if let Some(id) = parent_id {
+                    n.try_borrow_mut()?.update_nodes.remove(id);
+                }
+                parent_id = Some(&n.try_borrow()?.id);
+            }
+
             Ok(())
         }
 
@@ -255,50 +294,56 @@ pub mod checkmate {
                                      teban:Teban) -> Result<(u32,usize),ApplicationError> {
             let mut d = depth;
 
-            Ok(if let Some(n) = node_map.get(teban,&mhash,&shash) {
-                if depth > 0 {
-                    let id = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
-                        "Current node is not set."
-                    )))?.try_borrow()?.id;
+            let len = current_node.try_borrow()?.children.len();
 
-                    current_nodes.push_back(Rc::clone(n));
+            if len == 0 {
+                Ok(if let Some(n) = node_map.get(teban,&mhash,&shash) {
+                    if depth > 0 {
+                        let id = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                            "Current node is not set."
+                        )))?.try_borrow()?.id;
 
-                    let update = n.try_borrow()?.update_nodes.contains(&id);
+                        current_nodes.push_back(Rc::clone(n));
 
-                    if update {
-                        self.update_nodes(depth, current_nodes)?;
+                        let update = n.try_borrow()?.update_nodes.contains(&id);
 
-                        n.try_borrow_mut()?.update_nodes.remove(&id);
+                        if update {
+                            self.update_nodes(depth, current_nodes)?;
 
-                        d = 0;
+                            d = 0;
 
-                        for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
-                            if n.try_borrow()?.m != m {
-                                break;
+                            for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
+                                if n.try_borrow()?.m != m {
+                                    break;
+                                }
+                                d += 1;
                             }
-                            d += 1;
                         }
+
+                        let _ = event_dispatcher.dispatch_events(self, &*event_queue);
+                    } else {
+                        return Err(ApplicationError::LogicError(String::from(
+                            "Root node is registered in node map."
+                        )));
                     }
-                } else {
-                    current_nodes.push_back(Rc::clone(n));
-                }
-
-                let len = n.try_borrow()?.children.len();
-
-                (d, len)
-            } else {
-                {
-                    let n = current_node;
-
-                    current_nodes.push_back(Rc::clone(&n));
 
                     let len = n.try_borrow()?.children.len();
 
-                    if len == 0 {
+                    (d, len)
+                } else {
+                    let mut len = 0;
+
+                    {
+                        let n = current_node;
+
+                        current_nodes.push_back(Rc::clone(&n));
+
+                        len = n.try_borrow()?.children.len();
+
                         let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
                         let mut nodes = mvs.into_iter().map(|m| {
-                            Rc::new(RefCell::new(Node::new_or_node(last_id, depth, m, n.try_borrow()?.id)))
+                            Rc::new(RefCell::new(Node::new_or_node(last_id, depth + 1, m, n.try_borrow()?.id)))
                         }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                         {
@@ -309,7 +354,9 @@ pub mod checkmate {
                             }
                         }
 
-                        node_map.insert(teban, mhash, shash, Rc::clone(&n));
+                        if depth > 0 {
+                            node_map.insert(teban, mhash, shash, Rc::clone(&n));
+                        }
 
                         self.update_nodes(depth, current_nodes)?;
 
@@ -321,12 +368,18 @@ pub mod checkmate {
                             }
                             d += 1;
                         }
-                    }
 
-                    let _ = event_dispatcher.dispatch_events(self, &*event_queue);
-                }
-                (d,len)
-            })
+                        let _ = event_dispatcher.dispatch_events(self, &*event_queue);
+                    }
+                    (d, len)
+                })
+            } else {
+                let n = current_node;
+
+                current_nodes.push_back(Rc::clone(&n));
+
+                Ok((d, len))
+            }
         }
 
         pub fn oute_process<L: Logger>(&mut self,
@@ -383,43 +436,45 @@ pub mod checkmate {
                                           teban)?;
 
             if len == 0 {
-                {
-                    let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
-                        "Current node is not set."
-                    )))?.try_borrow_mut()?;
+                if current_nodes.len() == 0 {
+                    Ok(MaybeMate::Nomate)
+                } else {
+                    {
+                        let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
+                            "Current node is not set."
+                        )))?.try_borrow_mut()?;
 
-                    n.pn = Number::INFINITE;
-                    n.dn = Number::Value(0);
-                    n.ignore = true;
-                }
-
-                current_nodes.pop_back();
-                current_moves.pop_back();
-
-                self.update_nodes(depth-1, current_nodes)?;
-
-                let mut d = 0;
-
-                for (n,&m) in current_nodes.iter().zip(current_moves.iter()) {
-                    if n.try_borrow()?.m != m {
-                        break;
+                        n.pn = Number::INFINITE;
+                        n.dn = Number::Value(0);
+                        n.ignore = true;
                     }
-                    d += 1;
-                }
 
-                Ok(MaybeMate::Continuation(depth - d))
+                    current_nodes.pop_back();
+                    current_moves.pop_back();
+
+                    self.update_nodes(depth - 1, current_nodes)?;
+
+                    let mut d = 0;
+
+                    for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
+                        if n.try_borrow()?.m != m {
+                            break;
+                        }
+                        d += 1;
+                    }
+
+                    Ok(MaybeMate::Continuation(depth - d))
+                }
             } else {
                 if d == depth {
                     loop {
                         let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
                         let mut current_kyokumen_map = current_kyokumen_map.clone();
 
-                        let mut update = false;
+                        let mut cont = false;
 
                         {
-                            let nodes = &current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
-                                "Current node is not set."
-                            )))?.try_borrow()?.children;
+                            let nodes = &current_node.try_borrow()?.children;
 
                             for n in nodes.iter() {
                                 if n.try_borrow()?.ignore {
@@ -447,15 +502,11 @@ pub mod checkmate {
                                                                       &mc, m.to_applied_move(), &o);
 
                                 if let Some(()) = ignore_kyokumen_map.get(teban, &mhash, &shash) {
-                                    n.try_borrow()?.ignore = true;
                                     continue;
                                 }
 
                                 if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
                                     if c >= 3 {
-                                        n.try_borrow_mut()?.pn = Number::INFINITE;
-                                        n.try_borrow_mut()?.dn = Number::Value(0);
-
                                         continue;
                                     }
                                 }
@@ -491,8 +542,23 @@ pub mod checkmate {
                                                                          &mc
                                         )? {
                                             MaybeMate::Continuation(0) => {
-                                                update = true;
-                                                break;
+                                                if !self.strict_moves &&
+                                                    n.try_borrow()?.pn == Number::Value(0) && n.try_borrow()?.dn == Number::INFINITE {
+                                                    let mut mvs = VecDeque::new();
+                                                    let mut n = Some(n);
+
+                                                    while let Some(c) = n {
+                                                        mvs.push_back(c.try_borrow()?.m);
+                                                        n = c.try_borrow()?.children.iter().next();
+                                                    }
+
+                                                    return Ok(MaybeMate::MateMoves(mvs));
+                                                } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn == Number::Value(0) {
+                                                    return Ok(MaybeMate::Nomate);
+                                                } else {
+                                                    cont = true;
+                                                    break;
+                                                }
                                             },
                                             MaybeMate::Continuation(depth) => {
                                                 Ok(MaybeMate::Continuation(depth - 1))
@@ -508,20 +574,29 @@ pub mod checkmate {
                             }
                         }
 
-                        if !update {
+                        if !cont {
                             break;
-                        } else {
-                            let n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
-                                "Current node is not set."
-                            )))?;
-
-                            let update_nodes = n.try_borrow()?.ref_nodes.clone();
-
-                            n.try_borrow_mut()?.update_nodes = update_nodes;
                         }
                     }
 
-                    Ok(MaybeMate::Skip)
+                    if depth == 0 &&
+                        current_node.try_borrow()?.pn == Number::Value(0) &&
+                        current_node.try_borrow()?.dn == Number::INFINITE {
+
+                        let mut mvs = VecDeque::new();
+                        let mut n = current_node.try_borrow()?.children.iter().next();
+
+                        while let Some(c) = n {
+                            mvs.push_back(c.try_borrow()?.m);
+                            n = c.try_borrow()?.children.iter().next();
+                        }
+
+                        Ok(MaybeMate::MateMoves(mvs))
+                    } else if depth == 0 {
+                        Ok(MaybeMate::Unknown)
+                    } else {
+                        Ok(MaybeMate::Skip)
+                    }
                 } else {
                     Ok(MaybeMate::Continuation(depth - d))
                 }
@@ -606,7 +681,7 @@ pub mod checkmate {
                         let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
                         let mut current_kyokumen_map = current_kyokumen_map.clone();
 
-                        let mut update = false;
+                        let mut cont = false;
 
                         {
                             let nodes = &current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
@@ -635,16 +710,11 @@ pub mod checkmate {
                                                                       &mc, m.to_applied_move(), &o);
 
                                 if let Some(()) = ignore_kyokumen_map.get(teban, &mhash, &shash) {
-                                    n.try_borrow_mut()?.ignore = true;
-
                                     continue;
                                 }
 
                                 if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
                                     if c >= 3 {
-                                        n.try_borrow_mut()?.pn = Number::INFINITE;
-                                        n.try_borrow_mut()?.dn = Number::Value(0);
-
                                         continue;
                                     }
                                 }
@@ -680,8 +750,7 @@ pub mod checkmate {
                                                                 &mc
                                         )? {
                                             MaybeMate::Continuation(0) => {
-                                                update = true;
-
+                                                cont = true;
                                                 break;
                                             },
                                             MaybeMate::Continuation(depth) => {
@@ -698,16 +767,8 @@ pub mod checkmate {
                             }
                         }
 
-                        if !update {
+                        if !cont {
                             break;
-                        } else {
-                            let n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
-                                "Current node is not set."
-                            )))?;
-
-                            let update_nodes = n.try_borrow()?.ref_nodes.clone();
-
-                            n.try_borrow_mut()?.update_nodes = update_nodes;
                         }
                     }
                     Ok(MaybeMate::Skip)
