@@ -1,4 +1,5 @@
 use std::{error, fmt, io};
+use std::cell::{BorrowError, BorrowMutError};
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::Formatter;
@@ -47,7 +48,9 @@ pub enum ApplicationError {
     BatchItemPushError(PushError<BatchItem>),
     ConcurrentQueuePopError(PopError),
     SendSelDepthError(SendSelDepthError),
-    UsiProtocolError(UsiProtocolError)
+    UsiProtocolError(UsiProtocolError),
+    BorrowError(BorrowError),
+    BorrowMutError(BorrowMutError)
 }
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -84,6 +87,8 @@ impl fmt::Display for ApplicationError {
             ApplicationError::ConcurrentQueuePopError(ref e) => write!(f,"{}",e),
             ApplicationError::SendSelDepthError(ref e) => write!(f,"{}",e),
             ApplicationError::UsiProtocolError(ref e) => write!(f,"{}",e),
+            ApplicationError::BorrowError(ref e) => write!(f,"{}",e),
+            ApplicationError::BorrowMutError(ref e) => write!(f,"{}",e),
         }
     }
 }
@@ -123,6 +128,8 @@ impl error::Error for ApplicationError {
             ApplicationError::ConcurrentQueuePopError(_) => "Error retrieving element from concurrent queue.",
             ApplicationError::SendSelDepthError(_) => "An error occurred when sending the seldepth of the info command.",
             ApplicationError::UsiProtocolError(_) => "An error occurred in the parsing or string generation process of string processing according to the USI protocol.",
+            ApplicationError::BorrowError(_) => "already borrowed.",
+            ApplicationError::BorrowMutError(_) => "already mutably borrowed.",
         }
     }
 
@@ -160,6 +167,8 @@ impl error::Error for ApplicationError {
             ApplicationError::ConcurrentQueuePopError(ref e) => Some(e),
             ApplicationError::SendSelDepthError(ref e) => Some(e),
             ApplicationError::UsiProtocolError(ref e) => Some(e),
+            ApplicationError::BorrowError(ref e) => Some(e),
+            ApplicationError::BorrowMutError(ref e) => Some(e),
         }
     }
 }
@@ -303,6 +312,16 @@ impl From<SendSelDepthError> for ApplicationError {
 impl From<UsiProtocolError> for ApplicationError {
     fn from(err: UsiProtocolError) -> ApplicationError {
         ApplicationError::UsiProtocolError(err)
+    }
+}
+impl From<BorrowError> for ApplicationError {
+    fn from(err: BorrowError) -> ApplicationError {
+        ApplicationError::BorrowError(err)
+    }
+}
+impl From<BorrowMutError> for ApplicationError {
+    fn from(err: BorrowMutError) -> ApplicationError {
+        ApplicationError::BorrowMutError(err)
     }
 }
 #[derive(Debug)]

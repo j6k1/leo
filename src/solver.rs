@@ -1,4 +1,6 @@
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
@@ -13,7 +15,7 @@ use usiagent::rule::{LegalMove, State};
 use usiagent::shogi::*;
 use crate::error::ApplicationError;
 use crate::search;
-use crate::solver::checkmate::{OrNodeComparator, CheckmateStrategy, AndNodeComparator};
+use crate::solver::checkmate::{OrNodeComparator, CheckmateStrategy, AndNodeComparator, Node};
 
 #[derive(Debug,Clone)]
 pub enum MaybeMate {
@@ -29,7 +31,7 @@ pub enum MaybeMate {
 }
 
 pub struct GameStateForMate<'a> {
-    pub base_deoth:u32,
+    pub base_depth:u32,
     pub current_depth:u32,
     pub mhash:u64,
     pub shash:u64,
@@ -37,7 +39,8 @@ pub struct GameStateForMate<'a> {
     pub event_queue:Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
     pub teban:Teban,
     pub state:&'a Arc<State>,
-    pub mc:&'a Arc<MochigomaCollections>
+    pub mc:&'a Arc<MochigomaCollections>,
+    pub m:LegalMove
 }
 pub struct Solver {
 }
@@ -53,13 +56,40 @@ impl Solver {
                      network_delay:u32,
                      max_depth:Option<u32>,
                      max_nodes:Option<i64>,
-                     node_count:Arc<AtomicU64>,
                      info_sender:S,
-                     on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                      hasher:Arc<KyokumenHash<u64>>,
                      stop:Arc<AtomicBool>,
                      quited:Arc<AtomicBool>,
                      ms: GameStateForMate) -> Result<MaybeMate,ApplicationError> where L: Logger + Send + 'static, S: InfoSender {
+        let mut strategy = CheckmateStrategy::new(hasher,
+                                                  strict_moves,
+                                                  limit,
+                                                  checkmate_limit,
+                                                  network_delay,
+                                                  max_depth,
+                                                  max_nodes,
+                                                  info_sender,
+                                                  stop,
+                                                  quited,ms.current_depth);
+        let mut last_id = 1;
+
+        let root = Rc::new(RefCell::new(Node::new_or_node(&mut last_id,0,ms.m,0))),
+
+        strategy.oute_process(0,
+                              mhash,
+                              shash,
+                              &mut KyokumenMap::new(),
+                              &mut KyokumenMap::new(),
+                              &mut last_id,
+                              root,
+                              &mut VecDeque::new(),
+                              &mut HashMap::new(),
+                              &mut VecDeque::new(),
+                              &ms.event_queue,
+                              &mut ms.event_dispatcher,
+                              ms.teban,
+                              &ms.state,
+                              &ms.mc)
     }
 }
 
@@ -201,8 +231,8 @@ pub mod checkmate {
         max_depth:Option<u32>,
         max_nodes:Option<i64>,
         info_sender:S,
-        base_depth:u32,
         stop:Arc<AtomicBool>,
+        quited:Arc<AtomicBool>,
         current_depth:u32,
         node_count:i64,
     }
@@ -216,8 +246,8 @@ pub mod checkmate {
                max_depth:Option<u32>,
                max_nodes:Option<i64>,
                info_sender:S,
-               base_depth:u32,
                stop:Arc<AtomicBool>,
+               quited:Arc<AtomicBool>,
                current_depth:u32,
        ) -> CheckmateStrategy<S> {
             CheckmateStrategy {
@@ -229,8 +259,8 @@ pub mod checkmate {
                 max_depth:max_depth,
                 max_nodes:max_nodes,
                 info_sender:info_sender,
-                base_depth:base_depth,
                 stop:stop,
+                quited:quited,
                 current_depth:current_depth,
                 node_count:0,
             }

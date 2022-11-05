@@ -258,17 +258,16 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
             if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
-                    checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
+                    base_depth: env.base_depth,
                     current_depth: 0,
                     mhash: gs.mhash,
                     shash: gs.shash,
-                    oute_kyokumen_map: gs.oute_kyokumen_map,
                     current_kyokumen_map: gs.current_kyokumen_map,
-                    ignore_kyokumen_map: KyokumenMap::new(),
                     event_queue: env.event_queue.clone(),
                     teban: gs.teban,
                     state: gs.state,
-                    mc: gs.mc
+                    mc: gs.mc,
+                    m
                 };
 
                 let solver = Solver::new();
@@ -280,11 +279,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     env.network_delay,
                     env.max_ply.clone(),
                     env.max_nodes.clone(),
-                    Arc::clone(&env.nodes),
                     env.info_sender.clone(),
-                    Arc::clone(&env.on_error_handler),
                     Arc::clone(&env.hasher),
-                    env.base_depth,
                     Arc::clone(&env.stop),
                     Arc::clone(&env.quited),
                     ms
