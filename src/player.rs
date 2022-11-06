@@ -542,8 +542,20 @@ impl USIPlayer<ApplicationError> for Leo {
             Ok(MaybeMate::Nomate) => {
                 Ok(CheckMate::Nomate)
             },
-            Ok(_) => {
+            Ok(MaybeMate::Timeout) => {
                 Ok(CheckMate::Timeout)
+            },
+            Ok(r) => {
+                let msg = format!("Unexpected type {:?}",&r);
+
+                self.send_message_immediate(&mut env,&msg)?;
+
+                let e = ApplicationError::LogicError(msg);
+
+                let _ = on_error_handler.lock().map(|h| {
+                    h.call(&e)
+                });
+                Ok(CheckMate::Nomate)
             },
             Err(e) => {
                 self.send_message_immediate(&mut env,&format!("{}",&e))?;
