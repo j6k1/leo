@@ -502,38 +502,34 @@ impl USIPlayer<ApplicationError> for Leo {
         );
 
         let ms = GameStateForMate {
-            checkmate_state_map: Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
+            base_depth: self.base_depth,
             current_depth:0,
             mhash:mhash,
             shash:shash,
-            oute_kyokumen_map: &mut KyokumenMap::new(),
             current_kyokumen_map: &mut KyokumenMap::new(),
-            ignore_kyokumen_map: KyokumenMap::new(),
             event_queue:env.event_queue.clone(),
             teban:teban,
             state:&Arc::new(state.clone()),
-            mc:&Arc::new(mc.clone())
+            mc:&Arc::new(mc.clone()),
         };
 
         let solver = Solver::new();
 
-        match solver.checkmate(
-            false,
+        match solver.checkmate::<L,S>(
+            true,
             env.limit.clone(),
             env.max_ply_timelimit.map(|l| Instant::now() + l),
             env.network_delay,
             env.max_ply_mate.clone(),
             env.max_nodes.clone(),
-            Arc::clone(&env.nodes),
             env.info_sender.clone(),
-            Arc::clone(&env.on_error_handler),
+            &env.on_error_handler,
             Arc::clone(&env.hasher),
-            env.base_depth,
             Arc::clone(&env.stop),
             Arc::clone(&env.quited),
             ms
         )? {
-            MaybeMate::Mate(_, ref mvs) => {
+            MaybeMate::MateMoves(ref mvs) => {
                 Ok(CheckMate::Moves(mvs.into_iter().map(|m| m.to_move()).collect::<Vec<Move>>()))
             },
             MaybeMate::Nomate => {

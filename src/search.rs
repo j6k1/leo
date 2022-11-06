@@ -13,7 +13,7 @@ use usiagent::hash::{KyokumenHash, KyokumenMap};
 use usiagent::logger::Logger;
 use usiagent::OnErrorHandler;
 use usiagent::player::InfoSender;
-use usiagent::rule::{AppliedMove, LegalMove, Rule, State};
+use usiagent::rule::{LegalMove, Rule, State};
 use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError, SendSelDepthError};
 use crate::nn::Evalutor;
@@ -75,7 +75,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     }
 
     fn send_info(&self, env:&mut Environment<L,S>,
-                      depth:u32, seldepth:u32, pv:&VecDeque<AppliedMove>, score:&Score) -> Result<(),ApplicationError>
+                      depth:u32, seldepth:u32, pv:&VecDeque<LegalMove>, score:&Score) -> Result<(),ApplicationError>
         where Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
 
         let mut commands: Vec<UsiInfoSubCommand> = Vec::new();
@@ -266,8 +266,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     event_queue: env.event_queue.clone(),
                     teban: gs.teban,
                     state: gs.state,
-                    mc: gs.mc,
-                    m
+                    mc: gs.mc
                 };
 
                 let solver = Solver::new();
@@ -280,15 +279,14 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     env.max_ply.clone(),
                     env.max_nodes.clone(),
                     env.info_sender.clone(),
+                    &env.on_error_handler,
                     Arc::clone(&env.hasher),
                     Arc::clone(&env.stop),
                     Arc::clone(&env.quited),
                     ms
                 )? {
-                    MaybeMate::Mate(_, mvs) => {
-                        let mut r  = mvs.into_iter().map(|m| {
-                            AppliedMove::from(m)
-                        }).collect::<VecDeque<AppliedMove>>();
+                    MaybeMate::MateMoves(mvs) => {
+                        let mut r = mvs;
                         r.push_front(m);
 
                         return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, gs.depth, gs.mhash, gs.shash,r)));
@@ -387,8 +385,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 }
 #[derive(Debug)]
 pub enum EvaluationResult {
-    Immediate(Score, u32, u64, u64, VecDeque<AppliedMove>),
-    Async(Receiver<(AppliedMove,i32)>),
+    Immediate(Score, u32, u64, u64, VecDeque<LegalMove>),
+    Async(Receiver<(LegalMove,i32)>),
     Timeout
 }
 #[derive(Debug)]
@@ -542,7 +540,7 @@ pub struct GameState<'a> {
     pub state:&'a Arc<State>,
     pub alpha:Score,
     pub beta:Score,
-    pub m:Option<AppliedMove>,
+    pub m:Option<LegalMove>,
     pub mc:&'a Arc<MochigomaCollections>,
     pub obtained:Option<ObtainKind>,
     pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
@@ -611,13 +609,13 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     }
 
     pub fn termination<'a,'b>(&self,
-                       await_mvs:Vec<Receiver<(AppliedMove,i32)>>,
+                       await_mvs:Vec<Receiver<(LegalMove,i32)>>,
                        env:&mut Environment<L,S>,
                        gs: &mut GameState<'a>,
                        evalutor: &Evalutor,
                        score:Score,
                        is_timeout:bool,
-                       mut best_moves:VecDeque<AppliedMove>) -> Result<EvaluationResult,ApplicationError> {
+                       mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
         env.stop.store(true,atomic::Ordering::Release);
 
         let mut score = score;
@@ -764,8 +762,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                              oute_kyokumen_map,
                              current_kyokumen_map,
                              is_sennichite)) => {
-                        let m = m.to_applied_move();
-                        let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m);
+                        let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
                         match next {
                             (state, mc, _) => {
@@ -935,7 +932,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 if s > scoreval {
                                     scoreval = s;
                                     best_moves = VecDeque::new();
-                                    best_moves.push_front(m.to_applied_move());
+                                    best_moves.push_front(m);
                                     best_moves.push_front(prev_move);
 
                                     if scoreval >= gs.beta {
@@ -957,7 +954,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 state: &state,
                                 alpha: -gs.beta,
                                 beta: -alpha,
-                                m: Some(m.to_applied_move()),
+                                m: Some(m),
                                 mc: &mc,
                                 obtained: obtained,
                                 current_kyokumen_map: &current_kyokumen_map,

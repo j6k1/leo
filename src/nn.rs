@@ -28,7 +28,7 @@ use packedsfen::hcpe::haffman_code::GameResult;
 use packedsfen::yaneuraou::reader::PackedSfenReader;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use usiagent::event::{EventQueue, GameEndState, UserEvent, UserEventKind};
-use usiagent::rule::{AppliedMove};
+use usiagent::rule::{LegalMove};
 use usiagent::shogi::{Banmen, KomaKind, Mochigoma, MOCHIGOMA_KINDS, MochigomaCollections, Teban};
 use crate::error::{ApplicationError, EvaluationThreadError};
 
@@ -103,9 +103,9 @@ const OPPONENT_INDEX_MAP:[usize; 7] = [
 const SCALE:f32 = 1.;
 #[derive(Debug)]
 pub struct BatchItem {
-    m:AppliedMove,
+    m:LegalMove,
     input:Arr<f32,2517>,
-    sender:Sender<(AppliedMove,i32)>
+    sender:Sender<(LegalMove,i32)>
 }
 #[derive(Debug)]
 pub enum Message {
@@ -282,7 +282,7 @@ impl Evalutor {
         })
     }
 
-    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:AppliedMove,sender:Sender<(AppliedMove,i32)>)
+    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>)
         -> Result<(),ApplicationError> {
         let input = InputCreator::make_input(true,t,b,mc);
 
