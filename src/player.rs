@@ -3,7 +3,6 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{Ordering};
 use std::time::{Duration, Instant};
-use concurrent_fixed_hashmap::ConcurrentFixedHashMap;
 use usiagent::command::{BestMove, CheckMate, UsiInfoSubCommand, UsiOptType};
 use usiagent::error::{PlayerError, UsiProtocolError};
 use usiagent::event::{GameEndState, SysEventOption, SysEventOptionKind, UserEvent, UserEventQueue, UsiGoMateTimeLimit, UsiGoTimeLimit};
@@ -406,8 +405,6 @@ impl USIPlayer<ApplicationError> for Leo {
                     mc: &Arc::new(mc.clone()),
                     obtained:None,
                     current_kyokumen_map:&kyokumen_map,
-                    self_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
-                    opponent_checkmate_state_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
                     oute_kyokumen_map:&oute_kyokumen_map,
                     mhash:mhash,
                     shash:shash,

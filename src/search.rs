@@ -544,8 +544,6 @@ pub struct GameState<'a> {
     pub mc:&'a Arc<MochigomaCollections>,
     pub obtained:Option<ObtainKind>,
     pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
-    pub self_checkmate_state_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
-    pub opponent_checkmate_state_map:Arc<ConcurrentFixedHashMap<(Teban, u64, u64),bool>>,
     pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
     pub mhash:u64,
     pub shash:u64,
@@ -793,8 +791,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                 let mc = Arc::new(mc);
                                 let alpha = alpha;
                                 let beta = beta;
-                                let self_checkmate_state_map = Arc::clone(&gs.self_checkmate_state_map);
-                                let opponent_checkmate_state_map = Arc::clone(&gs.opponent_checkmate_state_map);
                                 let current_depth = gs.current_depth;
 
                                 let mut env = env.clone();
@@ -820,8 +816,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         mc: &mc,
                                         obtained: obtained,
                                         current_kyokumen_map: &current_kyokumen_map,
-                                        self_checkmate_state_map: opponent_checkmate_state_map,
-                                        opponent_checkmate_state_map: self_checkmate_state_map,
                                         oute_kyokumen_map: &oute_kyokumen_map,
                                         mhash: mhash,
                                         shash: shash,
@@ -958,8 +952,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 mc: &mc,
                                 obtained: obtained,
                                 current_kyokumen_map: &current_kyokumen_map,
-                                self_checkmate_state_map: Arc::clone(&gs.opponent_checkmate_state_map),
-                                opponent_checkmate_state_map: Arc::clone(&gs.self_checkmate_state_map),
                                 oute_kyokumen_map: &oute_kyokumen_map,
                                 mhash: mhash,
                                 shash: shash,
