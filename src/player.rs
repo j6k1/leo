@@ -13,7 +13,7 @@ use usiagent::output::USIOutputWriter;
 use usiagent::player::{InfoSender, OnKeepAlive, PeriodicallyInfo, USIPlayer};
 use usiagent::rule::{AppliedMove, Kyokumen, Rule, State};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, Move, Teban};
-use crate::error::ApplicationError;
+use crate::error::{ApplicationError, SendSelDepthError};
 use crate::nn::Evalutor;
 use crate::search::{BASE_DEPTH,
                     DEFALUT_DISPLAY_EVALUTE_SCORE,
@@ -119,6 +119,16 @@ impl Leo {
             min_turn_count:MIN_TURN_COUNT,
             display_evalute_score:DEFALUT_DISPLAY_EVALUTE_SCORE
         }
+    }
+
+    fn send_message_immediate<L,S>(&self, env:&mut Environment<L,S>, message:&str) -> Result<(),ApplicationError>
+        where  L: Logger + Send + 'static,
+               S: InfoSender,
+               Arc<Mutex<OnErrorHandler<L>>>: Send + 'static {
+        let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
+        commands.push(UsiInfoSubCommand::Str(String::from(message)));
+
+        Ok(env.info_sender.send_immediate(commands).map_err(|e| SendSelDepthError::from(e))?)
     }
 }
 impl USIPlayer<ApplicationError> for Leo {
@@ -423,13 +433,13 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Timeout) => {
-                        strategy.send_message_immediate(&mut env,"info string think timeout!")?;
+                        self.send_message_immediate(&mut env,"info string think timeout!")?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Async(_)) => {
                         let e = ApplicationError::LogicError(String::from("Async was returned from the root node."));
 
-                        strategy.send_message_immediate(&mut env,&format!("{}",&e))?;
+                        self.send_message_immediate(&mut env,&format!("{}",&e))?;
 
                         let _ = on_error_handler.lock().map(|h| {
                             h.call(&e)
@@ -437,7 +447,7 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
-                        strategy.send_message_immediate(&mut env,"info string moves is empty!")?;
+                        self.send_message_immediate(&mut env,"info string moves is empty!")?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) => {
@@ -478,7 +488,7 @@ impl USIPlayer<ApplicationError> for Leo {
 
         let limit = limit.to_instant(Instant::now());
 
-        let env = Environment::new(
+        let mut env = Environment::new(
             Arc::clone(&event_queue),
             info_sender.clone(),
             Arc::clone(&on_error_handler),
@@ -525,15 +535,23 @@ impl USIPlayer<ApplicationError> for Leo {
             Arc::clone(&env.stop),
             Arc::clone(&env.quited),
             ms
-        )? {
-            MaybeMate::MateMoves(ref mvs) => {
+        ) {
+            Ok(MaybeMate::MateMoves(ref mvs)) => {
                 Ok(CheckMate::Moves(mvs.into_iter().map(|m| m.to_move()).collect::<Vec<Move>>()))
             },
-            MaybeMate::Nomate => {
+            Ok(MaybeMate::Nomate) => {
                 Ok(CheckMate::Nomate)
             },
-            _ => {
+            Ok(_) => {
                 Ok(CheckMate::Timeout)
+            },
+            Err(e) => {
+                self.send_message_immediate(&mut env,&format!("{}",&e))?;
+
+                let _ = on_error_handler.lock().map(|h| {
+                    h.call(&e)
+                });
+                Ok(CheckMate::Nomate)
             }
         }
     }
