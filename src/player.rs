@@ -523,7 +523,7 @@ impl USIPlayer<ApplicationError> for Leo {
         let solver = Solver::new();
 
         match solver.checkmate::<L,S>(
-            true,
+            false,
             env.limit.clone(),
             env.max_ply_timelimit.map(|l| Instant::now() + l),
             env.network_delay,

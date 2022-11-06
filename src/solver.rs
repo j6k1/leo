@@ -20,6 +20,7 @@ pub enum MaybeMate {
     MateMoves(VecDeque<LegalMove>),
     Unknown,
     Continuation(u32),
+    Mate,
     MaxDepth,
     Skip,
     MaxNodes,
@@ -391,36 +392,42 @@ pub mod checkmate {
 
                             current_nodes.push_back(Rc::clone(&n));
 
-                            let mvs = Rule::oute_only_moves_all(teban, state, mc);
+                            let mvs = if depth % 2 == 0 {
+                                Rule::oute_only_moves_all(teban, state, mc)
+                            } else {
+                                Rule::respond_oute_only_moves_all(teban,state,mc)
+                            };
 
-                            let nodes = mvs.into_iter().map(|m| {
-                                Ok(Rc::new(RefCell::new(Node::new_or_node(last_id, depth + 1, m, n.try_borrow()?.id))))
-                            }).collect::<Result<VecDeque<Rc<RefCell<Node>>>,ApplicationError>>()?;
+                            if mvs.len() > 0 {
+                                let nodes = mvs.into_iter().map(|m| {
+                                    Ok(Rc::new(RefCell::new(Node::new_or_node(last_id, depth + 1, m, n.try_borrow()?.id))))
+                                }).collect::<Result<VecDeque<Rc<RefCell<Node>>>, ApplicationError>>()?;
 
-                            {
-                                let n = n.try_borrow_mut()?;
+                                {
+                                    let n = n.try_borrow_mut()?;
 
-                                for child in nodes.iter() {
-                                    n.children.try_borrow_mut()?.insert(Rc::clone(child));
+                                    for child in nodes.iter() {
+                                        n.children.try_borrow_mut()?.insert(Rc::clone(child));
+                                    }
                                 }
+
+                                self.update_nodes(depth, current_nodes)?;
+
+                                d = 0;
+
+                                for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
+                                    if n.try_borrow()?.m != m {
+                                        break;
+                                    }
+                                    d += 1;
+                                }
+
+                                let _ = event_dispatcher.dispatch_events(self, &*event_queue);
                             }
 
                             if depth > 0 {
                                 node_map.insert(teban, mhash, shash, Rc::clone(&n));
                             }
-
-                            self.update_nodes(depth, current_nodes)?;
-
-                            d = 0;
-
-                            for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
-                                if n.try_borrow()?.m != m {
-                                    break;
-                                }
-                                d += 1;
-                            }
-
-                            let _ = event_dispatcher.dispatch_events(self, &*event_queue);
 
                             let children = Rc::clone(&n.try_borrow()?.children);
 
@@ -437,7 +444,11 @@ pub mod checkmate {
                     }
                 },
                 None => {
-                    let mvs = Rule::oute_only_moves_all(teban, state, mc);
+                    let mvs = if depth % 2 == 0 {
+                        Rule::oute_only_moves_all(teban, state, mc)
+                    } else {
+                        Rule::respond_oute_only_moves_all(teban,state,mc)
+                    };
 
                     let nodes = mvs.into_iter().map(|m| {
                         Rc::new(RefCell::new(Node::new_or_node(last_id, depth + 1, m, 0)))
@@ -452,6 +463,75 @@ pub mod checkmate {
                     Ok((0,children))
                 }
             }
+        }
+
+        pub fn on_mate(&mut self,
+                       depth:u32,
+                       current_node:&Option<Rc<RefCell<Node>>>,
+                       current_nodes:&mut VecDeque<Rc<RefCell<Node>>>,
+                       current_moves:&mut VecDeque<LegalMove>) -> Result<MaybeMate,ApplicationError> {
+
+            {
+                let mut n = current_node.as_ref().ok_or(ApplicationError::LogicError(String::from(
+                    "Current node is not set."
+                )))?.try_borrow_mut()?;
+
+                n.pn = Number::Value(0);
+                n.dn = Number::INFINITE;
+            }
+
+            current_nodes.pop_back();
+            current_moves.pop_back();
+
+            self.update_nodes(depth-1, current_nodes)?;
+
+            let mut d = 0;
+
+            for (n,&m) in current_nodes.iter().zip(current_moves.iter()) {
+                if n.try_borrow()?.m != m {
+                    break;
+                }
+                d += 1;
+            }
+
+            if depth == 1 {
+                Ok(MaybeMate::Mate)
+            } else {
+                Ok(MaybeMate::Continuation(depth - d))
+            }
+        }
+
+        pub fn on_nomate(&mut self,
+                       depth:u32,
+                       current_node:&Option<Rc<RefCell<Node>>>,
+                       current_nodes:&mut VecDeque<Rc<RefCell<Node>>>,
+                       current_moves:&mut VecDeque<LegalMove>) -> Result<MaybeMate,ApplicationError> {
+
+            {
+                let mut n = current_node.as_ref().ok_or(ApplicationError::LogicError(String::from(
+                    "Current node is not set."
+                )))?.try_borrow_mut()?;
+
+                n.pn = Number::INFINITE;
+                n.dn = Number::Value(0);
+                n.ignore = true;
+            }
+
+            current_nodes.pop_back();
+            current_moves.pop_back();
+
+            self.update_nodes(depth - 1, current_nodes)?;
+
+            let mut d = 0;
+
+            for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
+                if n.try_borrow()?.m != m {
+                    break;
+                }
+                d += 1;
+            }
+
+            Ok(MaybeMate::Continuation(depth - d))
         }
 
         pub fn oute_process<L: Logger>(&mut self,
@@ -509,34 +589,10 @@ pub mod checkmate {
                                           mc)?;
 
             if children.try_borrow()?.len() == 0 {
-                if current_nodes.len() == 0 {
+                if depth == 0 {
                     Ok(MaybeMate::Nomate)
                 } else {
-                    {
-                        let mut n = current_node.as_ref().ok_or(ApplicationError::LogicError(String::from(
-                            "Current node is not set."
-                        )))?.try_borrow_mut()?;
-
-                        n.pn = Number::INFINITE;
-                        n.dn = Number::Value(0);
-                        n.ignore = true;
-                    }
-
-                    current_nodes.pop_back();
-                    current_moves.pop_back();
-
-                    self.update_nodes(depth - 1, current_nodes)?;
-
-                    let mut d = 0;
-
-                    for (n, &m) in current_nodes.iter().zip(current_moves.iter()) {
-                        if n.try_borrow()?.m != m {
-                            break;
-                        }
-                        d += 1;
-                    }
-
-                    Ok(MaybeMate::Continuation(depth - d))
+                    self.on_nomate(depth,&current_node,current_nodes,current_moves)
                 }
             } else {
                 if d == depth {
@@ -612,7 +668,7 @@ pub mod checkmate {
                                                                          &state,
                                                                          &mc
                                         )? {
-                                            MaybeMate::Continuation(0) => {
+                                            MaybeMate::Continuation(0) | MaybeMate::Mate => {
                                                 if !self.strict_moves &&
                                                     n.try_borrow()?.pn == Number::Value(0) && n.try_borrow()?.dn == Number::INFINITE {
                                                     let mut mvs = VecDeque::new();
@@ -742,32 +798,8 @@ pub mod checkmate {
                                           teban,
                                           state,
                                           mc)?;
-
             if children.try_borrow()?.len() == 0 {
-                {
-                    let mut n = current_nodes.back().ok_or(ApplicationError::LogicError(String::from(
-                        "Current node is not set."
-                    )))?.try_borrow_mut()?;
-
-                    n.pn = Number::Value(0);
-                    n.dn = Number::INFINITE;
-                }
-
-                current_nodes.pop_back();
-                current_moves.pop_back();
-
-                self.update_nodes(depth-1, current_nodes)?;
-
-                let mut d = 0;
-
-                for (n,&m) in current_nodes.iter().zip(current_moves.iter()) {
-                    if n.try_borrow()?.m != m {
-                        break;
-                    }
-                    d += 1;
-                }
-
-                Ok(MaybeMate::Continuation(depth - d))
+                self.on_mate(depth,&current_node,current_nodes,current_moves)
             } else {
                 if d == depth {
                     loop {
