@@ -302,7 +302,6 @@ pub mod checkmate {
                     break;
                 }
 
-                println!("info string update nodes depth {}",i);
                 if i % 2 == 0 {
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
@@ -381,40 +380,52 @@ pub mod checkmate {
             Ok(d)
         }
 
+        pub fn next_depth_with_iter<'a,I>(&mut self, depth:u32, next_depth:u32, mut n:Option<Rc<RefCell<Node>>>, mut it:I)
+            -> Result<u32,ApplicationError> where I: Iterator<Item=&'a LegalMove> {
+            if next_depth == depth {
+                Ok(next_depth)
+            } else {
+                let mut d = next_depth;
+
+                while let (Some(c), Some(m)) = (n, it.next()) {
+                    if c.try_borrow()?.m != *m {
+                        break;
+                    }
+                    n = c.try_borrow()?.children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
+                    d += 1;
+
+                    if d == depth {
+                        break;
+                    }
+                }
+                Ok(d)
+            }
+        }
+
         pub fn next_depth(&mut self,
                           depth:u32,
+                          next_depth:u32,
                           root_children:&Rc<RefCell<BTreeSet<Rc<RefCell<Node>>>>>,
                           current_nodes:&mut VecDeque<Rc<RefCell<Node>>>,
                           current_moves:&mut VecDeque<LegalMove>) -> Result<u32,ApplicationError> {
+            if depth == 0 {
+                let n = root_children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
+                let it = current_moves.iter();
 
-            let mut d = depth;
+                self.next_depth_with_iter(depth, next_depth, n, it)
+            } else if depth == 1 {
+                let n = current_nodes.get(depth as usize - 1).map(|n| Rc::clone(n));
+                let it = current_moves.iter();
 
-            if d == 0 {
-                let mut n = root_children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
-                let mut it = current_moves.iter();
-
-                while let (Some(c),Some(m)) = (n,it.next()) {
-                    if c.try_borrow()?.m != *m {
-                        break;
-                    }
-                    n = c.try_borrow()?.children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
-                    d += 1;
-                }
+                self.next_depth_with_iter(depth, next_depth, n, it)
             } else {
-                let mut n = current_nodes.get(d as usize - 1).map(|n| Rc::clone(n));
-                let mut it = current_moves.iter().skip(d as usize - 1);
+                let n = current_nodes.get(depth as usize - 1).map(|n| Rc::clone(n));
+                let it = current_moves.iter().skip(depth as usize - 1);
 
-                while let (Some(c),Some(m)) = (n,it.next()) {
-                    if c.try_borrow()?.m != *m {
-                        break;
-                    }
-                    n = c.try_borrow()?.children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
-                    d += 1;
-                }
+                self.next_depth_with_iter(depth, next_depth, n, it)
             }
-
-            Ok(d)
         }
+
         pub fn preprocess<L: Logger>(&mut self,
                                      depth:u32,
                                      mhash:u64,
@@ -459,7 +470,7 @@ pub mod checkmate {
                                 if update {
                                     let dep = self.update_nodes(depth, current_nodes)?;
 
-                                    d = self.next_depth(dep,root_children,current_nodes,current_moves)?;
+                                    d = self.next_depth(depth, dep,root_children,current_nodes,current_moves)?;
                                 }
 
                                 let _ = event_dispatcher.dispatch_events(self, &*event_queue);
@@ -496,7 +507,7 @@ pub mod checkmate {
 
                                 let dep = self.update_nodes(depth, current_nodes)?;
 
-                                d = self.next_depth(dep,root_children,current_nodes,current_moves)?;
+                                d = self.next_depth(depth, dep,root_children,current_nodes,current_moves)?;
 
                                 let _ = event_dispatcher.dispatch_events(self, &*event_queue);
                             }
@@ -559,16 +570,11 @@ pub mod checkmate {
 
             let d = self.update_nodes(depth, current_nodes)?;
 
-            if let Some(n) = current_node.as_ref() {
-                println!("info string mate depth {}, pn {:?}, dn {:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
-            }
-
-            let d = self.next_depth(d,root_children,current_nodes,current_moves)?;
+            let d = self.next_depth(depth, d,root_children,current_nodes,current_moves)?;
 
             if depth == d {
                 Ok(MaybeMate::Continuation(0))
             } else {
-                println!("info string mate {},{}",depth,d);
                 Ok(MaybeMate::Continuation(depth - d - 1))
             }
         }
@@ -586,9 +592,7 @@ pub mod checkmate {
 
             let d = self.update_nodes(depth, current_nodes)?;
 
-            let d = self.next_depth(d,root_children,current_nodes,current_moves)?;
-
-            println!("info string no_mate Continuation {} {}",depth,d);
+            let d = self.next_depth(depth, d,root_children,current_nodes,current_moves)?;
 
             if depth == d {
                 Ok(MaybeMate::Continuation(1))
@@ -714,8 +718,6 @@ pub mod checkmate {
                 return Ok(MaybeMate::Timeout);
             }
 
-            println!("info string send_seldepth {}",depth);
-
             self.send_seldepth(depth)?;
 
             let (d,children) = self.preprocess(depth,
@@ -737,7 +739,6 @@ pub mod checkmate {
                 if depth == 0 {
                     Ok(MaybeMate::Nomate)
                 } else {
-                    println!("info string on_nomate.");
                     self.on_nomate(depth,root_children,&current_node,current_nodes,current_moves)
                 }
             } else {
@@ -747,12 +748,8 @@ pub mod checkmate {
                         let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                         {
-                            println!("info string {}, {}",depth,children.try_borrow()?.len());
-
                             for n in children.try_borrow()?.iter() {
                                 let m = n.try_borrow()?.m;
-
-                                println!("info string {:?}",m.to_move());
 
                                 if self.stop.load(atomic::Ordering::Acquire) {
                                     return Ok(MaybeMate::Aborted)
@@ -815,10 +812,6 @@ pub mod checkmate {
                                                                          &mc
                                         )? {
                                             MaybeMate::Continuation(0) => {
-                                                println!("info string Continuation 0");
-
-                                                println!("info string {},{:?},{:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
-
                                                 if depth == 0 && !self.strict_moves &&
                                                     n.try_borrow()?.pn == Number::Value(0) && n.try_borrow()?.dn == Number::INFINITE {
                                                     let mvs = self.build_moves(current_moves,n)?;
@@ -836,12 +829,10 @@ pub mod checkmate {
                                                 } else if depth == 0 && n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn == Number::Value(0) {
                                                     return Ok(MaybeMate::Nomate);
                                                 } else if n.try_borrow()?.pn != Number::INFINITE || n.try_borrow()?.dn != Number::Value(0) {
-                                                    println!("info string continue 'outer");
                                                     continue 'outer;
                                                 }
                                             },
                                             MaybeMate::Continuation(depth) => {
-                                                println!("info string Continuation {}",depth);
                                                 return Ok(MaybeMate::Continuation(depth - 1));
                                             },
                                             r @ MaybeMate::MaxNodes => {
@@ -927,8 +918,6 @@ pub mod checkmate {
                 return Ok(MaybeMate::Timeout);
             }
 
-            println!("info string send_seldepth {}",depth);
-
             self.send_seldepth(depth)?;
 
             let (d,children) = self.preprocess(depth,
@@ -946,7 +935,6 @@ pub mod checkmate {
                                           state,
                                           mc)?;
             if children.try_borrow()?.len() == 0 {
-                println!("info string on_mate.");
                 self.on_mate(depth,root_children,&current_node,current_nodes,current_moves)
             } else {
                 if d == depth {
@@ -957,8 +945,6 @@ pub mod checkmate {
                         {
                             for n in children.try_borrow()?.iter() {
                                 let m = n.try_borrow()?.m;
-
-                                println!("info string {:?} respond.",m.to_move());
 
                                 let o = match m {
                                     LegalMove::To(ref m) => {
@@ -1026,7 +1012,6 @@ pub mod checkmate {
                                                 }
                                             },
                                             MaybeMate::Continuation(depth) => {
-                                                println!("info string respond Continuation {}",depth);
                                                 return Ok(MaybeMate::Continuation(depth - 1));
                                             },
                                             r @ MaybeMate::MaxNodes => {
@@ -1061,7 +1046,6 @@ pub mod checkmate {
                         Ok(MaybeMate::Skip)
                     }
                 } else {
-                    println!("info string nomate Continuation {}",depth - d);
                     Ok(MaybeMate::Continuation(depth - 1 - d))
                 }
             }
