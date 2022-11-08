@@ -291,25 +291,43 @@ pub mod checkmate {
             }
         }
 
-        pub fn update_nodes(&mut self, depth:u32, current_nodes:&VecDeque<Rc<RefCell<Node>>>,) -> Result<(),ApplicationError>{
+        pub fn update_nodes(&mut self, depth:u32, current_nodes:&VecDeque<Rc<RefCell<Node>>>,) -> Result<u32,ApplicationError> {
+            let mut is_mate = false;
+
+            let mut d = depth;
+            let mut update_pn_dn = true;
+
             for (i,n) in (0..=depth).rev().zip(current_nodes.iter().rev()) {
+                if !is_mate && !update_pn_dn {
+                    break;
+                }
+
+                println!("info string update nodes depth {}",i);
                 if i % 2 == 0 {
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
                         n.try_borrow_mut()?.pn = Number::INFINITE;
                         n.try_borrow_mut()?.dn = Number::Value(0);
+                        d -= 1;
                     } else {
-                        let mut pn = Number::INFINITE;
-                        let mut dn = Number::Value(0);
+                        if update_pn_dn {
+                            let mut pn = Number::INFINITE;
+                            let mut dn = Number::Value(0);
 
-                        for child in n.try_borrow()?.children.try_borrow()?.iter() {
-                            pn = child.try_borrow()?.pn.min(pn);
-                            dn += child.try_borrow()?.dn;
+                            for child in n.try_borrow()?.children.try_borrow()?.iter() {
+                                pn = child.try_borrow()?.pn.min(pn);
+                                dn += child.try_borrow()?.dn;
+                            }
+
+                            if n.try_borrow()?.pn != pn || n.try_borrow()?.dn != dn {
+                                n.try_borrow_mut()?.pn = pn;
+                                n.try_borrow_mut()?.dn = dn;
+                                d -= 1;
+                            } else {
+                                update_pn_dn = false;
+                            }
                         }
-
-                        n.try_borrow_mut()?.pn = pn;
-                        n.try_borrow_mut()?.dn = dn;
                     }
                 } else {
                     let len = n.try_borrow()?.children.try_borrow()?.len();
@@ -317,17 +335,31 @@ pub mod checkmate {
                     if len == 0 {
                         n.try_borrow_mut()?.pn = Number::Value(0);
                         n.try_borrow_mut()?.dn = Number::INFINITE;
+                        n.try_borrow_mut()?.max_depth = depth;
+                        d -= 1;
+                        is_mate = true;
                     } else {
-                        let mut pn = Number::Value(0);
-                        let mut dn = Number::INFINITE;
+                        if update_pn_dn {
+                            let mut pn = Number::Value(0);
+                            let mut dn = Number::INFINITE;
 
-                        for child in n.try_borrow()?.children.try_borrow()?.iter() {
-                            pn += child.try_borrow()?.pn;
-                            dn = child.try_borrow()?.dn.min(dn);
+                            for child in n.try_borrow()?.children.try_borrow()?.iter() {
+                                pn += child.try_borrow()?.pn;
+                                dn = child.try_borrow()?.dn.min(dn);
+                            }
+
+                            if n.try_borrow()?.pn != pn || n.try_borrow()?.dn != dn {
+                                n.try_borrow_mut()?.pn = pn;
+                                n.try_borrow_mut()?.dn = dn;
+                                d -= 1;
+                            } else {
+                                update_pn_dn = false;
+                            }
                         }
 
-                        n.try_borrow_mut()?.pn = pn;
-                        n.try_borrow_mut()?.dn = dn;
+                        if is_mate {
+                            n.try_borrow_mut()?.max_depth = depth;
+                        }
                     }
                 }
             }
@@ -346,7 +378,7 @@ pub mod checkmate {
                 parent_id = Some(n.try_borrow()?.id);
             }
 
-            Ok(())
+            Ok(d)
         }
 
         pub fn next_depth(&mut self,
@@ -357,33 +389,26 @@ pub mod checkmate {
 
             let mut d = depth;
 
-            for (n,&m) in current_nodes.iter().rev().zip(current_moves.iter().rev()) {
-                if n.try_borrow()?.m != m {
-                    break;
-                }
-                d -= 1;
-            }
-
             if d == 0 {
-                let mut n = root_children.try_borrow()?.iter().next();
-                let mut it = current_nodes.iter();
+                let mut n = root_children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
+                let mut it = current_moves.iter();
 
                 while let (Some(c),Some(m)) = (n,it.next()) {
-                    if c.try_borrow()?.m != m.try_borrow()?.m {
+                    if c.try_borrow()?.m != *m {
                         break;
                     }
-                    n = c.try_borrow()?.children.try_borrow()?.iter().next();
+                    n = c.try_borrow()?.children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
                     d += 1;
                 }
             } else {
-                let mut n = current_nodes.get(d as usize - 1);
-                let mut it = current_nodes.iter().skip(d as usize - 1);
+                let mut n = current_nodes.get(d as usize - 1).map(|n| Rc::clone(n));
+                let mut it = current_moves.iter().skip(d as usize - 1);
 
                 while let (Some(c),Some(m)) = (n,it.next()) {
-                    if c.try_borrow()?.m != m.try_borrow()?.m {
+                    if c.try_borrow()?.m != *m {
                         break;
                     }
-                    n = c.try_borrow()?.children.try_borrow()?.iter().next();
+                    n = c.try_borrow()?.children.try_borrow()?.iter().next().map(|n| Rc::clone(n));
                     d += 1;
                 }
             }
@@ -432,9 +457,9 @@ pub mod checkmate {
                                 let update = n.try_borrow()?.update_nodes.contains(&id);
 
                                 if update {
-                                    self.update_nodes(depth, current_nodes)?;
+                                    let dep = self.update_nodes(depth, current_nodes)?;
 
-                                    d = self.next_depth(depth,root_children,current_nodes,current_moves)?;
+                                    d = self.next_depth(dep,root_children,current_nodes,current_moves)?;
                                 }
 
                                 let _ = event_dispatcher.dispatch_events(self, &*event_queue);
@@ -469,9 +494,9 @@ pub mod checkmate {
                                     }
                                 }
 
-                                self.update_nodes(depth, current_nodes)?;
+                                let dep = self.update_nodes(depth, current_nodes)?;
 
-                                d = self.next_depth(depth,root_children,current_nodes,current_moves)?;
+                                d = self.next_depth(dep,root_children,current_nodes,current_moves)?;
 
                                 let _ = event_dispatcher.dispatch_events(self, &*event_queue);
                             }
@@ -532,13 +557,18 @@ pub mod checkmate {
                 "Current node is not set."
             )))?));
 
-            self.update_nodes(depth, current_nodes)?;
+            let d = self.update_nodes(depth, current_nodes)?;
 
-            let d = self.next_depth(depth,root_children,current_nodes,current_moves)?;
+            if let Some(n) = current_node.as_ref() {
+                println!("info string mate depth {}, pn {:?}, dn {:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
+            }
+
+            let d = self.next_depth(d,root_children,current_nodes,current_moves)?;
 
             if depth == d {
                 Ok(MaybeMate::Continuation(0))
             } else {
+                println!("info string mate {},{}",depth,d);
                 Ok(MaybeMate::Continuation(depth - d - 1))
             }
         }
@@ -554,9 +584,9 @@ pub mod checkmate {
                 "Current node is not set."
             )))?));
 
-            self.update_nodes(depth, current_nodes)?;
+            let d = self.update_nodes(depth, current_nodes)?;
 
-            let d = self.next_depth(depth,root_children,current_nodes,current_moves)?;
+            let d = self.next_depth(d,root_children,current_nodes,current_moves)?;
 
             println!("info string no_mate Continuation {} {}",depth,d);
 
@@ -684,6 +714,8 @@ pub mod checkmate {
                 return Ok(MaybeMate::Timeout);
             }
 
+            println!("info string send_seldepth {}",depth);
+
             self.send_seldepth(depth)?;
 
             let (d,children) = self.preprocess(depth,
@@ -785,6 +817,8 @@ pub mod checkmate {
                                             MaybeMate::Continuation(0) => {
                                                 println!("info string Continuation 0");
 
+                                                println!("info string {},{:?},{:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
+
                                                 if depth == 0 && !self.strict_moves &&
                                                     n.try_borrow()?.pn == Number::Value(0) && n.try_borrow()?.dn == Number::INFINITE {
                                                     let mvs = self.build_moves(current_moves,n)?;
@@ -794,16 +828,14 @@ pub mod checkmate {
 
                                                     if depth == 0 && mvs.len() == 1 {
                                                         return Ok(MaybeMate::MateMoves(mvs));
+                                                    } else if !self.strict_moves {
+                                                        return Ok(MaybeMate::Continuation(0));
                                                     } else if depth == 0 {
                                                         *mate_depth = Some(mvs.len() as u32);
-                                                        println!("info string mate_depth {}",mvs.len());
-                                                    } else {
-                                                        *mate_depth = Some(mvs.len() as u32);
-                                                        return Ok(MaybeMate::Continuation(0));
                                                     }
                                                 } else if depth == 0 && n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn == Number::Value(0) {
                                                     return Ok(MaybeMate::Nomate);
-                                                } else {
+                                                } else if n.try_borrow()?.pn != Number::INFINITE || n.try_borrow()?.dn != Number::Value(0) {
                                                     println!("info string continue 'outer");
                                                     continue 'outer;
                                                 }
@@ -880,7 +912,7 @@ pub mod checkmate {
             self.node_count += 1;
 
             if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
-                return Ok(MaybeMate::Continuation(1));
+                return Ok(MaybeMate::Skip);
             }
 
             if self.max_depth.map(|d| depth >= d).unwrap_or(false) {
@@ -894,6 +926,8 @@ pub mod checkmate {
             if self.check_timelimit() || self.stop.load(atomic::Ordering::Acquire) {
                 return Ok(MaybeMate::Timeout);
             }
+
+            println!("info string send_seldepth {}",depth);
 
             self.send_seldepth(depth)?;
 
@@ -923,6 +957,8 @@ pub mod checkmate {
                         {
                             for n in children.try_borrow()?.iter() {
                                 let m = n.try_borrow()?.m;
+
+                                println!("info string {:?} respond.",m.to_move());
 
                                 let o = match m {
                                     LegalMove::To(ref m) => {
@@ -984,8 +1020,10 @@ pub mod checkmate {
                                                 if n.try_borrow()?.pn == Number::INFINITE &&
                                                    n.try_borrow()?.dn == Number::Value(0) {
                                                     return Ok(Continuation(0));
+                                                } else if n.try_borrow()?.pn != Number::Value(0) ||
+                                                          n.try_borrow()?.dn != Number::INFINITE {
+                                                    continue 'outer;
                                                 }
-                                                continue 'outer;
                                             },
                                             MaybeMate::Continuation(depth) => {
                                                 println!("info string respond Continuation {}",depth);
@@ -1034,7 +1072,8 @@ pub mod checkmate {
             commands.push(UsiInfoSubCommand::Depth(self.base_depth));
             commands.push(UsiInfoSubCommand::SelDepth(self.current_depth + depth));
 
-            Ok(self.info_sender.send(commands)?)
+//            Ok(self.info_sender.send(commands)?)
+            Ok(self.info_sender.send_immediate(commands)?)
         }
 
         fn check_timelimit(&self) -> bool {
