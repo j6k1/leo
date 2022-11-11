@@ -505,7 +505,7 @@ pub mod checkmate {
 
                 let ref_nodes = n.try_borrow()?.ref_nodes.clone();
 
-                let mut n = Node::new_and_node(last_id,m,parent_id);
+                let mut n = Node::new_or_node(last_id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
@@ -525,7 +525,7 @@ pub mod checkmate {
 
                 let ref_nodes = n.try_borrow()?.ref_nodes.clone();
 
-                let mut n = Node::new_or_node(last_id,m,parent_id);
+                let mut n = Node::new_and_node(last_id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
