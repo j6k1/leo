@@ -380,6 +380,16 @@ pub mod checkmate {
 
             n.try_borrow_mut()?.expanded = true;
 
+            let len = n.try_borrow()?.children.try_borrow()?.len();
+
+            if depth % 2 == 0 {
+                n.try_borrow_mut()?.pn = Number::Value(1);
+                n.try_borrow_mut()?.dn = Number::Value(len as u64);
+            } else {
+                n.try_borrow_mut()?.pn = Number::Value(len as u64);
+                n.try_borrow_mut()?.dn = Number::Value(1);
+            }
+
             let update_nodes = n.try_borrow()?.ref_nodes.clone();
             n.try_borrow_mut()?.update_nodes = update_nodes;
 
@@ -421,6 +431,7 @@ pub mod checkmate {
                                                 event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
                                                 teban:Teban, state:&State, mc:&MochigomaCollections)
                                                 -> Result<MaybeMate,ApplicationError> where S: InfoSender + Send {
+            println!("info string depth {}",depth);
             let r = if depth % 2 == 0 {
                 match self.oute_process(depth,
                                         mhash,
@@ -574,6 +585,8 @@ pub mod checkmate {
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
+                    println!("info string len{}",len);
+
                     if len == 0 {
                         println!("info string no_mate.");
 
@@ -606,6 +619,7 @@ pub mod checkmate {
                     for n in children.try_borrow()?.iter() {
                         let m = n.try_borrow()?.m;
 
+                        println!("info string move {:?}",m.to_move());
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -812,6 +826,8 @@ pub mod checkmate {
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
+                    println!("info string response len{}",len);
+
                     if len == 0 {
                         println!("info string mate.");
 
@@ -845,6 +861,7 @@ pub mod checkmate {
                 {
                     for n in children.try_borrow()?.iter() {
                         let m = n.try_borrow()?.m;
+                        println!("info string move response {:?}",m.to_move());
 
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
