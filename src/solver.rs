@@ -353,20 +353,20 @@ pub mod checkmate {
                 let mut children = n.children.try_borrow_mut()?;
 
                 if depth % 2 == 0 {
-                    let mvs = Rule::respond_oute_only_moves_all(teban, state, mc);
+                    let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
-                        Rc::new(RefCell::new(Node::new_and_node(last_id, m, parent_id)))
+                        Rc::new(RefCell::new(Node::new_or_node(last_id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
                         children.insert(Rc::clone(child));
                     }
                 } else {
-                    let mvs = Rule::oute_only_moves_all(teban, state, mc);
+                    let mvs = Rule::respond_oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
-                        Rc::new(RefCell::new(Node::new_or_node(last_id, m, parent_id)))
+                        Rc::new(RefCell::new(Node::new_and_node(last_id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
@@ -481,25 +481,26 @@ pub mod checkmate {
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
                     pn = pn.min(n.try_borrow()?.pn);
-                    dn += dn;
+                    dn += n.try_borrow()?.dn;
                 }
 
-                let mut n = Node::new_or_node(last_id,m,parent_id);
+                let mut n = Node::new_and_node(last_id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
 
                 Ok(n)
             } else {
-                let mut pn = Number::INFINITE;
-                let mut dn = Number::Value(0);
+                let mut pn = Number::Value(0);
+                let mut dn = Number::INFINITE;
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
-                    pn = pn.min(n.try_borrow()?.pn);
-                    dn += dn;
+                    println!("info string update_node pn{:?},dn{:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
+                    pn += n.try_borrow()?.pn;
+                    dn = dn.min(n.try_borrow()?.dn);
                 }
 
-                let mut n = Node::new_and_node(last_id,m,parent_id);
+                let mut n = Node::new_or_node(last_id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
@@ -562,7 +563,7 @@ pub mod checkmate {
                     if children.try_borrow()?.len() == 0 {
                         println!("info string no_mate.");
 
-                        let mut n = Node::new_or_node(last_id,n.try_borrow()?.m,parent_id);
+                        let mut n = Node::new_and_node(last_id,n.try_borrow()?.m,parent_id);
 
                         n.pn = Number::INFINITE;
                         n.dn = Number::Value(0);
@@ -642,7 +643,8 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u) => {
-                                        println!("info string {},{},{:?},{:?}", 0, depth, n.try_borrow()?.pn, n.try_borrow()?.dn);
+                                        println!("info string {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
+                                        println!("info string {:?}",n.try_borrow()?.m.to_move());
                                         let ref_nodes = u.try_borrow()?.ref_nodes.clone();
                                         u.try_borrow_mut()?.update_nodes = ref_nodes;
                                         update_nodes = Some((Rc::clone(n), u));
@@ -673,16 +675,18 @@ pub mod checkmate {
                     }
                 }
 
-                if let Some((n, u)) = update_nodes {
-                    let pn = u.try_borrow()?.pn;
-                    let dn = u.try_borrow()?.dn;
+                if let Some((n, u)) = update_nodes.take() {
                     let mate_depth = u.try_borrow()?.mate_depth;
 
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
                     if let Some(n) = current_node.as_ref() {
+                        let pn = n.try_borrow()?.pn;
+                        let dn = n.try_borrow()?.dn;
                         let mut u = self.update_node(depth, last_id, n)?;
+
+                        println!("info string oute,pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
 
                         if u.pn == Number::Value(0) && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
@@ -691,7 +695,19 @@ pub mod checkmate {
                             return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
                         }
                     } else if !self.strict_moves && u.try_borrow()?.pn == Number::Value(0) && u.try_borrow()?.dn == Number::INFINITE {
-                        return Ok(MaybeMate::MateMoves(self.build_moves(&u)?))
+                        return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
+                    } else {
+                        let mut pn = Number::INFINITE;
+                        let mut dn = Number::Value(0);
+
+                        for n in children.try_borrow()?.iter() {
+                            pn = pn.min(n.try_borrow()?.pn);
+                            dn += n.try_borrow()?.dn;
+                        }
+
+                        if pn == Number::Value(0) && dn == Number::INFINITE {
+                            return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
+                        }
                     }
                 } else {
                     break;
@@ -863,7 +879,8 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u) => {
-                                        println!("info string respond {},{},{:?},{:?}", 0, depth, n.try_borrow()?.pn, n.try_borrow()?.dn);
+                                        println!("info string respond {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
+                                        println!("info string {:?}",n.try_borrow()?.m.to_move());
                                         let ref_nodes = u.try_borrow()?.ref_nodes.clone();
                                         u.try_borrow_mut()?.update_nodes = ref_nodes;
                                         update_nodes = Some((Rc::clone(n), u));
@@ -894,18 +911,19 @@ pub mod checkmate {
                     }
                 }
 
-                if let Some((n, u)) = update_nodes {
-                    let pn = u.try_borrow()?.pn;
-                    let dn = u.try_borrow()?.dn;
-
+                if let Some((n, u)) = update_nodes.take() {
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
-                    let u = current_node.as_ref().map(|n| Rc::clone(n))
+                    let n = current_node.as_ref().map(|n| Rc::clone(n))
                                                          .ok_or(ApplicationError::LogicError(String::from(
                                                             "current node is not set."
                                                          )))?;
-                    let u = self.update_node(depth, last_id, &u)?;
+                    let pn = n.try_borrow()?.pn;
+                    let dn = n.try_borrow()?.dn;
+                    let u = self.update_node(depth, last_id, &n)?;
+
+                    println!("info string pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
 
                     if u.pn == Number::INFINITE && u.dn == Number::Value(0) {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
