@@ -209,7 +209,7 @@ pub mod checkmate {
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
-                comparator:Box::new(OrNodeComparator)
+                comparator:Box::new(AndNodeComparator)
             }
         }
 
@@ -228,7 +228,7 @@ pub mod checkmate {
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
-                comparator:Box::new(AndNodeComparator)
+                comparator:Box::new(OrNodeComparator)
             }
         }
     }
@@ -359,7 +359,7 @@ pub mod checkmate {
                     let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
-                        Rc::new(RefCell::new(Node::new_or_node(last_id, m, parent_id)))
+                        Rc::new(RefCell::new(Node::new_and_node(last_id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
@@ -369,7 +369,7 @@ pub mod checkmate {
                     let mvs = Rule::respond_oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
-                        Rc::new(RefCell::new(Node::new_and_node(last_id, m, parent_id)))
+                        Rc::new(RefCell::new(Node::new_or_node(last_id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
@@ -590,7 +590,7 @@ pub mod checkmate {
                     if len == 0 {
                         println!("info string no_mate.");
 
-                        let mut u = Node::new_and_node(last_id,n.try_borrow()?.m,parent_id);
+                        let mut u = Node::new_or_node(last_id,n.try_borrow()?.m,parent_id);
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(0);
@@ -718,7 +718,7 @@ pub mod checkmate {
 
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
-                        let mut u = self.update_node(depth, last_id, n)?;
+                        let mut u = self.update_node(depth + 1, last_id, n)?;
 
                         println!("info string oute,pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
 
@@ -831,7 +831,7 @@ pub mod checkmate {
                     if len == 0 {
                         println!("info string mate.");
 
-                        let mut u = Node::new_or_node(last_id,n.try_borrow()?.m,parent_id);
+                        let mut u = Node::new_and_node(last_id,n.try_borrow()?.m,parent_id);
 
                         u.pn = Number::Value(0);
                         u.dn = Number::INFINITE;
@@ -962,7 +962,7 @@ pub mod checkmate {
 
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
-                    let u = self.update_node(depth, last_id, &n)?;
+                    let u = self.update_node(depth + 1, last_id, &n)?;
 
                     println!("info string pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
 
