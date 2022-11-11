@@ -665,7 +665,6 @@ pub mod checkmate {
                                     MaybeMate::Continuation(u) => {
                                         println!("info string {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
                                         println!("info string {:?}",n.try_borrow()?.m.to_move());
-                                        u.try_borrow_mut()?.update_nodes.remove(&n.try_borrow()?.id);
                                         update_nodes = Some((Rc::clone(n), u));
 
                                         break;
@@ -701,6 +700,8 @@ pub mod checkmate {
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
                     if let Some(n) = current_node.as_ref() {
+                        u.try_borrow_mut()?.update_nodes.remove(&n.try_borrow()?.id);
+
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
                         let mut u = self.update_node(depth, last_id, n)?;
@@ -904,7 +905,6 @@ pub mod checkmate {
                                     MaybeMate::Continuation(u) => {
                                         println!("info string respond {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
                                         println!("info string {:?}",n.try_borrow()?.m.to_move());
-                                        u.try_borrow_mut()?.update_nodes.remove(&n.try_borrow()?.id);
                                         update_nodes = Some((Rc::clone(n), u));
 
                                         break;
@@ -941,6 +941,8 @@ pub mod checkmate {
                                                          .ok_or(ApplicationError::LogicError(String::from(
                                                             "current node is not set."
                                                          )))?;
+                    u.try_borrow_mut()?.update_nodes.remove(&n.try_borrow()?.id);
+
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
                     let u = self.update_node(depth, last_id, &n)?;
