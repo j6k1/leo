@@ -404,7 +404,7 @@ pub mod checkmate {
             let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
             let nodes = mvs.into_iter().map(|m| {
-                Rc::new(RefCell::new(Node::new_or_node(last_id, m, 0)))
+                Rc::new(RefCell::new(Node::new_and_node(last_id, m, 0)))
             }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
             let children = Rc::new(RefCell::new(BTreeSet::new()));
@@ -620,6 +620,8 @@ pub mod checkmate {
                         let m = n.try_borrow()?.m;
 
                         println!("info string move {:?}",m.to_move());
+                        println!("info string pn{:?}",n.try_borrow()?.pn);
+
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -718,7 +720,7 @@ pub mod checkmate {
 
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
-                        let mut u = self.update_node(depth + 1, last_id, n)?;
+                        let mut u = self.update_node(depth, last_id, n)?;
 
                         println!("info string oute,pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
 
@@ -862,7 +864,7 @@ pub mod checkmate {
                     for n in children.try_borrow()?.iter() {
                         let m = n.try_borrow()?.m;
                         println!("info string move response {:?}",m.to_move());
-
+                        println!("info string dn{:?}",n.try_borrow()?.dn);
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -962,7 +964,7 @@ pub mod checkmate {
 
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
-                    let u = self.update_node(depth + 1, last_id, &n)?;
+                    let u = self.update_node(depth, last_id, &n)?;
 
                     println!("info string pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
 
