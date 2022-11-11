@@ -334,11 +334,11 @@ pub mod checkmate {
                              node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
             -> Result<(Rc<RefCell<Node>>,bool),ApplicationError> {
 
-            if let Some(n) = node_map.get(teban,&mhash,&shash) {
-                Ok((Rc::clone(n),n.try_borrow()?.update_nodes.contains(&parent_id)))
-            } else {
+            //if let Some(n) = node_map.get(teban,&mhash,&shash) {
+            //    Ok((Rc::clone(n),n.try_borrow()?.update_nodes.contains(&parent_id)))
+            //} else {
                 Ok((Rc::clone(n),false))
-            }
+            //}
         }
 
         pub fn expand_nodes(&mut self,
@@ -579,6 +579,7 @@ pub mod checkmate {
                 let expanded = n.try_borrow()?.expanded;
 
                 if need_update {
+                    println!("info string need_update!");
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
                     self.expand_nodes(depth, last_id, &n, teban, state, mc)?;
@@ -681,9 +682,10 @@ pub mod checkmate {
                                     MaybeMate::Continuation(u) => {
                                         println!("info string {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
                                         println!("info string {:?}",n.try_borrow()?.m.to_move());
-                                        update_nodes = Some((Rc::clone(n), u));
-
-                                        break;
+                                        if *u.try_borrow()? != *n.try_borrow()? {
+                                            update_nodes = Some((Rc::clone(n), u));
+                                            break;
+                                        }
                                     },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
@@ -745,34 +747,30 @@ pub mod checkmate {
                             return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
                         }
                     }
-                } else {
-                    break;
+                } else if depth == 0 {
+                    let mut pn = Number::INFINITE;
+                    let mut dn = Number::Value(0);
+
+                    for n in children.try_borrow()?.iter() {
+                        pn = pn.min(n.try_borrow()?.pn);
+                        dn += n.try_borrow()?.dn;
+                    }
+
+                    if pn == Number::Value(0) && dn == Number::INFINITE {
+                        return Ok(MaybeMate::MateMoves(self.build_moves(children
+                            .try_borrow()?
+                            .iter()
+                            .next()
+                            .ok_or(ApplicationError::LogicError(String::from(
+                                "The legal move has not yet been set."
+                            )))?)?));
+                    } else if pn == Number::INFINITE && dn == Number::Value(0) {
+                        return Ok(MaybeMate::Nomate);
+                    } else {
+                        return Ok(MaybeMate::Unknown);
+                    }
                 }
             }
-
-            if depth == 0 {
-                let mut pn = Number::INFINITE;
-                let mut dn = Number::Value(0);
-
-                for n in children.try_borrow()?.iter() {
-                    pn = pn.min(n.try_borrow()?.pn);
-                    dn += n.try_borrow()?.dn;
-                }
-
-                if pn == Number::Value(0) && dn == Number::INFINITE {
-                    return Ok(MaybeMate::MateMoves(self.build_moves(children
-                                                                    .try_borrow()?
-                                                                    .iter()
-                                                                    .next()
-                                                                    .ok_or(ApplicationError::LogicError(String::from(
-                                                                        "The legal move has not yet been set."
-                                                                    )))?)?));
-                } else if pn == Number::INFINITE && dn == Number::Value(0) {
-                    return Ok(MaybeMate::Nomate);
-                }
-            }
-
-            Ok(MaybeMate::Skip)
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
@@ -822,6 +820,7 @@ pub mod checkmate {
                 let expanded = n.try_borrow()?.expanded;
 
                 if need_update {
+                    println!("info string response need_update!");
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
                     self.expand_nodes(depth, last_id, &n, teban, state, mc)?;
@@ -924,9 +923,10 @@ pub mod checkmate {
                                     MaybeMate::Continuation(u) => {
                                         println!("info string respond {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
                                         println!("info string {:?}",n.try_borrow()?.m.to_move());
-                                        update_nodes = Some((Rc::clone(n), u));
-
-                                        break;
+                                        if *u.try_borrow()? != *n.try_borrow()? {
+                                            update_nodes = Some((Rc::clone(n), u));
+                                            break;
+                                        }
                                     },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
