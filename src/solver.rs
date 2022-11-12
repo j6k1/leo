@@ -561,15 +561,15 @@ pub mod checkmate {
                 return Ok(MaybeMate::Aborted)
             }
 
-            self.node_count += 1;
-
-            if self.max_depth.map(|d| depth >= d).unwrap_or(false) {
+            if self.max_depth.map(|d| depth > d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
 
             if self.max_nodes.map(|n| self.node_count >= n).unwrap_or(false) {
                 return Ok(MaybeMate::MaxNodes);
             }
+
+            self.node_count += 1;
 
             event_dispatcher.dispatch_events(self,event_queue)?;
 
@@ -785,19 +785,19 @@ pub mod checkmate {
                 return Ok(MaybeMate::Aborted)
             }
 
-            self.node_count += 1;
-
             if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
                 return Ok(MaybeMate::Skip);
             }
 
-            if self.max_depth.map(|d| depth >= d).unwrap_or(false) {
+            if self.max_depth.map(|d| depth > d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
 
             if self.max_nodes.map(|n| self.node_count >= n).unwrap_or(false) {
                 return Ok(MaybeMate::MaxNodes);
             }
+
+            self.node_count += 1;
 
             event_dispatcher.dispatch_events(self,event_queue)?;
 
