@@ -15,7 +15,7 @@ use usiagent::rule::{LegalMove, State};
 use usiagent::shogi::*;
 use crate::error::ApplicationError;
 use crate::search::Root;
-use crate::solver::checkmate::{CheckmateStrategy,Node};
+use crate::solver::checkmate::{CheckmateStrategy, Node, UniqID};
 
 #[derive(Clone)]
 pub enum MaybeMate {
@@ -25,6 +25,7 @@ pub enum MaybeMate {
     Continuation(Rc<RefCell<Node>>),
     MaxDepth,
     Skip,
+    Pending,
     MaxNodes,
     Timeout,
     Aborted
@@ -49,6 +50,9 @@ impl Debug for MaybeMate {
             },
             &MaybeMate::Skip => {
                 write!(f,"MaybeMate::Skip")
+            },
+            &MaybeMate::Pending => {
+                write!(f,"MaybeMate::Pending")
             },
             &MaybeMate::MaxNodes => {
                 write!(f,"MaybeMate::MaxNodes")
@@ -104,17 +108,18 @@ impl Solver {
                                                   Arc::clone(&stop),
                                                   ms.base_depth,
                                                   ms.current_depth);
-        let mut last_id = 0;
-
         let mut event_dispatcher = Root::<L,S>::create_event_dispatcher::<CheckmateStrategy<S>>(on_error_handler,&stop,&quited);
+
+        let mut uniq_id = UniqID::new();
+        let id = uniq_id.gen();
 
         strategy.oute_process(0,
                               ms.mhash,
                               ms.shash,
                               &KyokumenMap::new(),
                               &KyokumenMap::new(),
-                              &mut last_id,
-                              0,
+                              &mut uniq_id,
+                              id,
                               None,
                               &mut KyokumenMap::new(),
 
@@ -187,7 +192,7 @@ pub mod checkmate {
         mate_depth:u32,
         ref_nodes:HashSet<u64>,
         update_nodes:HashSet<u64>,
-        skip_set:HashSet<u32>,
+        skip_set:HashSet<u64>,
         expanded:bool,
         m:LegalMove,
         children:Rc<RefCell<BTreeSet<Rc<RefCell<Node>>>>>,
@@ -195,13 +200,12 @@ pub mod checkmate {
     }
 
     impl Node {
-        pub fn new_or_node(last_id:&mut u64,m:LegalMove,parent_id:u64) -> Node {
-            *last_id += 1;
+        pub fn new_or_node(id:u64,m:LegalMove,parent_id:u64) -> Node {
             let mut ref_nodes = HashSet::new();
             ref_nodes.insert(parent_id);
 
             Node {
-                id: *last_id,
+                id: id,
                 pn: Number::Value(1),
                 dn: Number::Value(1),
                 mate_depth: 0,
@@ -215,13 +219,12 @@ pub mod checkmate {
             }
         }
 
-        pub fn new_and_node(last_id:&mut u64,m:LegalMove,parent_id:u64) -> Node {
-            *last_id += 1;
+        pub fn new_and_node(id:u64,m:LegalMove,parent_id:u64) -> Node {
             let mut ref_nodes = HashSet::new();
             ref_nodes.insert(parent_id);
 
             Node {
-                id: *last_id,
+                id: id,
                 pn: Number::Value(1),
                 dn: Number::Value(1),
                 mate_depth: 0,
@@ -256,6 +259,25 @@ pub mod checkmate {
         }
     }
 
+    pub struct UniqID {
+        last_id:u64
+    }
+
+    impl UniqID {
+        pub fn new() -> UniqID {
+            UniqID {
+                last_id: 0
+            }
+        }
+
+        pub fn gen(&mut self) -> u64 {
+            let id = self.last_id;
+
+            self.last_id += 1;
+
+            id
+        }
+    }
     pub trait Comparator<T> {
         fn cmp(&self,l:&T,r:&T) -> Ordering;
     }
@@ -346,7 +368,7 @@ pub mod checkmate {
 
         pub fn expand_nodes(&mut self,
                                        depth:u32,
-                                       last_id:&mut u64,
+                                       uniq_id:&mut UniqID,
                                        n:&Rc<RefCell<Node>>,
                                        teban:Teban,
                                        state:&State,
@@ -362,7 +384,8 @@ pub mod checkmate {
                     let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
-                        Rc::new(RefCell::new(Node::new_and_node(last_id, m, parent_id)))
+                        let id = uniq_id.gen();
+                        Rc::new(RefCell::new(Node::new_and_node(id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
@@ -372,7 +395,8 @@ pub mod checkmate {
                     let mvs = Rule::respond_oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
-                        Rc::new(RefCell::new(Node::new_or_node(last_id, m, parent_id)))
+                        let id = uniq_id.gen();
+                        Rc::new(RefCell::new(Node::new_or_node(id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
@@ -400,14 +424,16 @@ pub mod checkmate {
         }
 
         pub fn expand_root_nodes(&mut self,
-                                 last_id:&mut u64,
+                                 parent_id:u64,
+                                 uniq_id:&mut UniqID,
                                  teban:Teban,
                                  state:&State,
                                  mc:&MochigomaCollections) -> Result<Rc<RefCell<BTreeSet<Rc<RefCell<Node>>>>>,ApplicationError> {
             let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
             let nodes = mvs.into_iter().map(|m| {
-                Rc::new(RefCell::new(Node::new_and_node(last_id, m, 0)))
+                let id = uniq_id.gen();
+                Rc::new(RefCell::new(Node::new_and_node(id, m, parent_id)))
             }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
             let children = Rc::new(RefCell::new(BTreeSet::new()));
@@ -425,7 +451,7 @@ pub mod checkmate {
                                                 shash:u64,
                                                 ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
-                                                last_id:&mut u64,
+                                                uniq_id:&mut UniqID,
                                                 parent_id:u64,
                                                 current_node:Option<Rc<RefCell<Node>>>,
                                                 node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
@@ -440,7 +466,7 @@ pub mod checkmate {
                                         shash,
                                         ignore_kyokumen_map,
                                         current_kyokumen_map,
-                                        last_id,
+                                        uniq_id,
                                         parent_id,
                                         current_node,
                                         node_map,
@@ -460,7 +486,7 @@ pub mod checkmate {
                                         shash,
                                         ignore_kyokumen_map,
                                         current_kyokumen_map,
-                                        last_id,
+                                        uniq_id,
                                         parent_id,
                                         current_node,
                                         node_map,
@@ -492,7 +518,7 @@ pub mod checkmate {
             Ok(mvs)
         }
 
-        pub fn update_node(&mut self, depth:u32, last_id:&mut u64, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
+        pub fn update_node(&mut self, depth:u32, id:u64, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
             let m = n.try_borrow()?.m;
             let children = Rc::clone(&n.try_borrow()?.children);
             let skip_set = n.try_borrow()?.skip_set.clone();
@@ -510,7 +536,7 @@ pub mod checkmate {
 
                 let ref_nodes = n.try_borrow()?.ref_nodes.clone();
 
-                let mut n = Node::new_or_node(last_id,m,parent_id);
+                let mut n = Node::new_or_node(id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
@@ -533,7 +559,7 @@ pub mod checkmate {
 
                 let ref_nodes = n.try_borrow()?.ref_nodes.clone();
 
-                let mut n = Node::new_and_node(last_id,m,parent_id);
+                let mut n = Node::new_and_node(id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
@@ -554,7 +580,7 @@ pub mod checkmate {
                                        shash:u64,
                                        ignore_kyokumen_map:&KyokumenMap<u64,()>,
                                        current_kyokumen_map:&KyokumenMap<u64,u32>,
-                                       last_id:&mut u64,
+                                       uniq_id:&mut UniqID,
                                        parent_id:u64,
                                        current_node:Option<Rc<RefCell<Node>>>,
                                        node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
@@ -593,12 +619,13 @@ pub mod checkmate {
                 if need_update {
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
-                    self.expand_nodes(depth, last_id, &n, teban, state, mc)?;
+                    self.expand_nodes(depth, uniq_id, &n, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        let mut u = Node::new_or_node(last_id,n.try_borrow()?.m,parent_id);
+                        let id = uniq_id.gen();
+                        let mut u = Node::new_or_node(id,n.try_borrow()?.m,parent_id);
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(0);
@@ -616,17 +643,21 @@ pub mod checkmate {
                     Rc::clone(children)
                 }
             } else {
-                self.expand_root_nodes(last_id,teban,state,mc)?
+                self.expand_root_nodes(parent_id, uniq_id,teban,state,mc)?
             };
 
             loop {
+                let parent_id = current_node.as_ref().map(|n| {
+                    n.try_borrow().map(|n| n.id)
+                }).unwrap_or(Ok(parent_id))?;
+
                 let mut update_nodes = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
                     for n in children.try_borrow()?.iter() {
-                        if n.try_borrow()?.skip_set.contains(&depth) {
+                        if n.try_borrow()?.skip_set.contains(&parent_id) {
                             continue;
                         }
 
@@ -677,7 +708,7 @@ pub mod checkmate {
                                                          shash,
                                                          &mut ignore_kyokumen_map,
                                                          &mut current_kyokumen_map,
-                                                         last_id,
+                                                         uniq_id,
                                                          parent_id,
                                                          Some(Rc::clone(n)),
                                                          node_map,
@@ -702,7 +733,7 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        n.try_borrow_mut()?.skip_set.insert(depth);
+                                        n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -735,7 +766,8 @@ pub mod checkmate {
 
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
-                        let mut u = self.update_node(depth, last_id, parent_id, n)?;
+                        let id = n.try_borrow()?.id;
+                        let mut u = self.update_node(depth, id, parent_id, n)?;
 
                         if u.pn == Number::Value(0) && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
@@ -794,7 +826,7 @@ pub mod checkmate {
                                                 shash:u64,
                                                 ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
-                                                last_id:&mut u64,
+                                                uniq_id:&mut UniqID,
                                                 parent_id:u64,
                                                 current_node:Option<Rc<RefCell<Node>>>,
                                                 node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
@@ -837,12 +869,14 @@ pub mod checkmate {
                 if need_update {
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
-                    self.expand_nodes(depth, last_id, &n, teban, state, mc)?;
+                    self.expand_nodes(depth, uniq_id, &n, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        let mut u = Node::new_and_node(last_id,n.try_borrow()?.m,parent_id);
+                        let id = n.try_borrow()?.id;
+
+                        let mut u = Node::new_and_node(id,n.try_borrow()?.m,parent_id);
 
                         u.pn = Number::Value(0);
                         u.dn = Number::INFINITE;
@@ -866,13 +900,17 @@ pub mod checkmate {
             };
 
             loop {
+                let parent_id = current_node.as_ref().map(|n| {
+                    n.try_borrow().map(|n| n.id)
+                }).unwrap_or(Ok(parent_id))?;
+
                 let mut update_nodes = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
                     for n in children.try_borrow()?.iter() {
-                        if n.try_borrow()?.skip_set.contains(&depth) {
+                        if n.try_borrow()?.skip_set.contains(&parent_id) {
                             continue;
                         }
 
@@ -923,7 +961,7 @@ pub mod checkmate {
                                                          shash,
                                                          &mut ignore_kyokumen_map,
                                                          &mut current_kyokumen_map,
-                                                         last_id,
+                                                         uniq_id,
                                                          parent_id,
                                                          Some(Rc::clone(n)),
                                                          node_map,
@@ -948,7 +986,7 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        n.try_borrow_mut()?.skip_set.insert(depth);
+                                        n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -982,7 +1020,8 @@ pub mod checkmate {
 
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
-                    let u = self.update_node(depth, last_id, parent_id, &n)?;
+                    let id = n.try_borrow()?.id;
+                    let u = self.update_node(depth, id, parent_id, &n)?;
 
                     if u.pn == Number::INFINITE && u.dn == Number::Value(0) {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
