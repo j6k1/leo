@@ -504,9 +504,6 @@ pub mod checkmate {
                 let mut dn = Number::Value(0);
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
-                    if n.try_borrow()?.skip_set.contains(&depth) {
-                        continue;
-                    }
                     pn = pn.min(n.try_borrow()?.pn);
                     dn += n.try_borrow()?.dn;
                 }
@@ -530,9 +527,6 @@ pub mod checkmate {
                 let mut dn = Number::INFINITE;
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
-                    if n.try_borrow()?.skip_set.contains(&depth) {
-                        continue;
-                    }
                     pn += n.try_borrow()?.pn;
                     dn = dn.min(n.try_borrow()?.dn);
                 }
@@ -769,9 +763,6 @@ pub mod checkmate {
                     let mut dn = Number::Value(0);
 
                     for n in children.try_borrow()?.iter() {
-                        if n.try_borrow()?.skip_set.contains(&depth) {
-                            continue;
-                        }
                         pn = pn.min(n.try_borrow()?.pn);
                         dn += n.try_borrow()?.dn;
                     }
