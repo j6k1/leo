@@ -431,7 +431,6 @@ pub mod checkmate {
                                                 event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
                                                 teban:Teban, state:&State, mc:&MochigomaCollections)
                                                 -> Result<MaybeMate,ApplicationError> where S: InfoSender + Send {
-            println!("info string depth {}",depth);
             let r = if depth % 2 == 0 {
                 match self.oute_process(depth,
                                         mhash,
@@ -490,9 +489,12 @@ pub mod checkmate {
             Ok(mvs)
         }
 
-        pub fn update_node(&mut self, depth:u32, last_id:&mut u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
+        pub fn update_node(&mut self, depth:u32, last_id:&mut u64, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
             let parent_id = n.try_borrow()?.id;
             let m = n.try_borrow()?.m;
+            let children = Rc::clone(&n.try_borrow()?.children);
+            let expanded = n.try_borrow()?.expanded;
+            let mate_depth = n.try_borrow()?.mate_depth;
 
             if depth % 2 == 0 {
                 let mut pn = Number::INFINITE;
@@ -509,8 +511,11 @@ pub mod checkmate {
 
                 n.pn = pn;
                 n.dn = dn;
+                n.children = children;
                 n.ref_nodes = ref_nodes.clone();
                 n.update_nodes = ref_nodes;
+                n.expanded = expanded;
+                n.mate_depth = mate_depth;
 
                 Ok(n)
             } else {
@@ -518,7 +523,6 @@ pub mod checkmate {
                 let mut dn = Number::INFINITE;
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
-                    println!("info string update_node pn{:?},dn{:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
                     pn += n.try_borrow()?.pn;
                     dn = dn.min(n.try_borrow()?.dn);
                 }
@@ -529,8 +533,11 @@ pub mod checkmate {
 
                 n.pn = pn;
                 n.dn = dn;
+                n.children = children;
                 n.ref_nodes = ref_nodes.clone();
                 n.update_nodes = ref_nodes;
+                n.expanded = expanded;
+                n.mate_depth = mate_depth;
 
                 Ok(n)
             }
@@ -579,24 +586,20 @@ pub mod checkmate {
                 let expanded = n.try_borrow()?.expanded;
 
                 if need_update {
-                    println!("info string need_update!");
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
                     self.expand_nodes(depth, last_id, &n, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
-                    println!("info string len{}",len);
-
                     if len == 0 {
-                        println!("info string no_mate.");
-
                         let mut u = Node::new_or_node(last_id,n.try_borrow()?.m,parent_id);
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(0);
                         u.ref_nodes = n.try_borrow()?.ref_nodes.clone();
                         u.update_nodes = n.try_borrow()?.ref_nodes.clone();
+                        u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
                     }
@@ -619,9 +622,6 @@ pub mod checkmate {
                 {
                     for n in children.try_borrow()?.iter() {
                         let m = n.try_borrow()?.m;
-
-                        println!("info string move {:?}",m.to_move());
-                        println!("info string pn{:?}",n.try_borrow()?.pn);
 
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
@@ -680,12 +680,8 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u) => {
-                                        println!("info string {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
-                                        println!("info string {:?}",n.try_borrow()?.m.to_move());
-                                        if *u.try_borrow()? != *n.try_borrow()? {
-                                            update_nodes = Some((Rc::clone(n), u));
-                                            break;
-                                        }
+                                        update_nodes = Some((Rc::clone(n), u));
+                                        break;
                                     },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
@@ -699,7 +695,7 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {},
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
-                                            "It is an unexpected type MaybeMate::MateMovess"
+                                            "It is an unexpected type MaybeMate::MateMoves"
                                         )));
                                     },
                                     r => {
@@ -722,9 +718,7 @@ pub mod checkmate {
 
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
-                        let mut u = self.update_node(depth, last_id, n)?;
-
-                        println!("info string oute,pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
+                        let mut u = self.update_node(depth, last_id, parent_id, n)?;
 
                         if u.pn == Number::Value(0) && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
@@ -820,24 +814,20 @@ pub mod checkmate {
                 let expanded = n.try_borrow()?.expanded;
 
                 if need_update {
-                    println!("info string response need_update!");
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
                     self.expand_nodes(depth, last_id, &n, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
-                    println!("info string response len{}",len);
-
                     if len == 0 {
-                        println!("info string mate.");
-
                         let mut u = Node::new_and_node(last_id,n.try_borrow()?.m,parent_id);
 
                         u.pn = Number::Value(0);
                         u.dn = Number::INFINITE;
                         u.ref_nodes = n.try_borrow()?.ref_nodes.clone();
                         u.update_nodes = n.try_borrow()?.ref_nodes.clone();
+                        u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
                     }
@@ -862,8 +852,7 @@ pub mod checkmate {
                 {
                     for n in children.try_borrow()?.iter() {
                         let m = n.try_borrow()?.m;
-                        println!("info string move response {:?}",m.to_move());
-                        println!("info string dn{:?}",n.try_borrow()?.dn);
+
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -921,12 +910,8 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u) => {
-                                        println!("info string respond {},{:?},{:?}", depth, u.try_borrow()?.pn, u.try_borrow()?.dn);
-                                        println!("info string {:?}",n.try_borrow()?.m.to_move());
-                                        if *u.try_borrow()? != *n.try_borrow()? {
-                                            update_nodes = Some((Rc::clone(n), u));
-                                            break;
-                                        }
+                                        update_nodes = Some((Rc::clone(n), u));
+                                        break;
                                     },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
@@ -937,10 +922,11 @@ pub mod checkmate {
                                     r @ MaybeMate::Aborted => {
                                         return Ok(r);
                                     },
-                                    MaybeMate::Skip | MaybeMate::MaxDepth => {},
+                                    MaybeMate::Skip | MaybeMate::MaxDepth => {
+                                    },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
-                                            "It is an unexpected type MaybeMate::MateMovess"
+                                            "It is an unexpected type MaybeMate::MateMoves"
                                         )));
                                     },
                                     r => {
@@ -964,9 +950,7 @@ pub mod checkmate {
 
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
-                    let u = self.update_node(depth, last_id, &n)?;
-
-                    println!("info string pn{:?},{:?},dn{:?},{:?}",u.pn,pn,u.dn,dn);
+                    let u = self.update_node(depth, last_id, parent_id, &n)?;
 
                     if u.pn == Number::INFINITE && u.dn == Number::Value(0) {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
