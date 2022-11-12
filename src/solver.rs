@@ -262,6 +262,36 @@ pub mod checkmate {
         }
     }
 
+    pub struct ReverseNode {
+        parent:Option<Rc<ReverseNode>>,
+        id:u64
+    }
+
+    impl ReverseNode {
+        pub fn new(parent:Rc<ReverseNode>,id:u64) -> ReverseNode {
+            ReverseNode {
+                parent:Some(parent),
+                id:id
+            }
+        }
+
+        pub fn find_root(&self) -> u64 {
+            let mut id = self.id;
+            let mut parent = self.parent.as_ref();
+
+            while let Some(n) = parent {
+                id = n.id;
+                parent = n.parent.as_ref();
+            }
+
+            id
+        }
+
+        pub fn is_active(&self) -> bool {
+            self.id == self.find_root()
+        }
+    }
+
     pub struct UniqID {
         last_id:u64
     }
