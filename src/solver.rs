@@ -334,11 +334,11 @@ pub mod checkmate {
                              node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
             -> Result<(Rc<RefCell<Node>>,bool),ApplicationError> {
 
-            //if let Some(n) = node_map.get(teban,&mhash,&shash) {
-            //    Ok((Rc::clone(n),n.try_borrow()?.update_nodes.contains(&parent_id)))
-            //} else {
+            if let Some(n) = node_map.get(teban,&mhash,&shash) {
+                Ok((Rc::clone(n),n.try_borrow()?.update_nodes.contains(&parent_id)))
+            } else {
                 Ok((Rc::clone(n),false))
-            //}
+            }
         }
 
         pub fn expand_nodes(&mut self,
@@ -490,7 +490,6 @@ pub mod checkmate {
         }
 
         pub fn update_node(&mut self, depth:u32, last_id:&mut u64, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
-            let parent_id = n.try_borrow()?.id;
             let m = n.try_borrow()?.m;
             let children = Rc::clone(&n.try_borrow()?.children);
             let expanded = n.try_borrow()?.expanded;
