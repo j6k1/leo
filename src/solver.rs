@@ -187,6 +187,7 @@ pub mod checkmate {
         mate_depth:u32,
         ref_nodes:HashSet<u64>,
         update_nodes:HashSet<u64>,
+        skip_set:HashSet<u32>,
         expanded:bool,
         m:LegalMove,
         children:Rc<RefCell<BTreeSet<Rc<RefCell<Node>>>>>,
@@ -206,6 +207,7 @@ pub mod checkmate {
                 mate_depth: 0,
                 ref_nodes:ref_nodes,
                 update_nodes:HashSet::new(),
+                skip_set:HashSet::new(),
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
@@ -225,6 +227,7 @@ pub mod checkmate {
                 mate_depth: 0,
                 ref_nodes:ref_nodes,
                 update_nodes:HashSet::new(),
+                skip_set:HashSet::new(),
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
@@ -492,6 +495,7 @@ pub mod checkmate {
         pub fn update_node(&mut self, depth:u32, last_id:&mut u64, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
             let m = n.try_borrow()?.m;
             let children = Rc::clone(&n.try_borrow()?.children);
+            let skip_set = n.try_borrow()?.skip_set.clone();
             let expanded = n.try_borrow()?.expanded;
             let mate_depth = n.try_borrow()?.mate_depth;
 
@@ -513,6 +517,7 @@ pub mod checkmate {
                 n.children = children;
                 n.ref_nodes = ref_nodes.clone();
                 n.update_nodes = ref_nodes;
+                n.skip_set = skip_set;
                 n.expanded = expanded;
                 n.mate_depth = mate_depth;
 
@@ -535,6 +540,7 @@ pub mod checkmate {
                 n.children = children;
                 n.ref_nodes = ref_nodes.clone();
                 n.update_nodes = ref_nodes;
+                n.skip_set = skip_set;
                 n.expanded = expanded;
                 n.mate_depth = mate_depth;
 
@@ -619,7 +625,15 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
+                    let len = children.try_borrow()?.len();
+
+                    let mut skip_count = 0;
+
                     for n in children.try_borrow()?.iter() {
+                        if n.try_borrow()?.skip_set.contains(&depth) {
+                            continue;
+                        }
+
                         let m = n.try_borrow()?.m;
 
                         if self.stop.load(atomic::Ordering::Acquire) {
@@ -691,7 +705,15 @@ pub mod checkmate {
                                     r @ MaybeMate::Aborted => {
                                         return Ok(r);
                                     },
-                                    MaybeMate::Skip | MaybeMate::MaxDepth => {},
+                                    MaybeMate::Skip | MaybeMate::MaxDepth => {
+                                        n.try_borrow_mut()?.skip_set.insert(depth);
+
+                                        skip_count += 1;
+
+                                        if skip_count == len {
+                                            return Ok(MaybeMate::Skip);
+                                        }
+                                    },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
                                             "It is an unexpected type MaybeMate::MateMoves"
@@ -855,7 +877,15 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
+                    let len = children.try_borrow()?.len();
+
+                    let mut skip_count = 0;
+
                     for n in children.try_borrow()?.iter() {
+                        if n.try_borrow()?.skip_set.contains(&depth) {
+                            continue;
+                        }
+
                         let m = n.try_borrow()?.m;
 
                         if self.stop.load(atomic::Ordering::Acquire) {
@@ -928,6 +958,13 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
+                                        n.try_borrow_mut()?.skip_set.insert(depth);
+
+                                        skip_count += 1;
+
+                                        if skip_count == len {
+                                            return Ok(MaybeMate::Skip);
+                                        }
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
