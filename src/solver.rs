@@ -187,6 +187,7 @@ pub mod checkmate {
 
     pub struct Node {
         id:u64,
+        parent_id:u64,
         pn:Number,
         dn:Number,
         mate_depth:u32,
@@ -206,6 +207,7 @@ pub mod checkmate {
 
             Node {
                 id: id,
+                parent_id:parent_id,
                 pn: Number::Value(1),
                 dn: Number::Value(1),
                 mate_depth: 0,
@@ -225,6 +227,7 @@ pub mod checkmate {
 
             Node {
                 id: id,
+                parent_id:parent_id,
                 pn: Number::Value(1),
                 dn: Number::Value(1),
                 mate_depth: 0,
@@ -359,8 +362,12 @@ pub mod checkmate {
                              node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
             -> Result<(Rc<RefCell<Node>>,bool),ApplicationError> {
 
-            if let Some(n) = node_map.get(teban,&mhash,&shash) {
-                Ok((Rc::clone(n),n.try_borrow()?.update_nodes.contains(&parent_id)))
+            if let Some(c) = node_map.get(teban,&mhash,&shash) {
+                if c.try_borrow()?.parent_id == parent_id {
+                    Ok((Rc::clone(n),false))
+                } else {
+                    Ok((Rc::clone(n), n.try_borrow()?.update_nodes.contains(&parent_id)))
+                }
             } else {
                 Ok((Rc::clone(n),false))
             }
@@ -368,8 +375,11 @@ pub mod checkmate {
 
         pub fn expand_nodes(&mut self,
                                        depth:u32,
+                                       mhash:u64,
+                                       shash:u64,
                                        uniq_id:&mut UniqID,
                                        n:&Rc<RefCell<Node>>,
+                                       node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                        teban:Teban,
                                        state:&State,
                                        mc:&MochigomaCollections)
@@ -419,6 +429,8 @@ pub mod checkmate {
 
             let update_nodes = n.try_borrow()?.ref_nodes.clone();
             n.try_borrow_mut()?.update_nodes = update_nodes;
+
+            node_map.insert(teban,mhash,shash,Rc::clone(n));
 
             Ok(())
         }
@@ -619,7 +631,7 @@ pub mod checkmate {
                 if need_update {
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
-                    self.expand_nodes(depth, uniq_id, &n, teban, state, mc)?;
+                    self.expand_nodes(depth, mhash,shash,uniq_id, &n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
@@ -869,7 +881,7 @@ pub mod checkmate {
                 if need_update {
                     return Ok(MaybeMate::Continuation(n));
                 } else if !expanded {
-                    self.expand_nodes(depth, uniq_id, &n, teban, state, mc)?;
+                    self.expand_nodes(depth, mhash,shash,uniq_id, &n, node_map,teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
