@@ -504,6 +504,9 @@ pub mod checkmate {
                 let mut dn = Number::Value(0);
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
+                    if n.try_borrow()?.skip_set.contains(&depth) {
+                        continue;
+                    }
                     pn = pn.min(n.try_borrow()?.pn);
                     dn += n.try_borrow()?.dn;
                 }
@@ -527,6 +530,9 @@ pub mod checkmate {
                 let mut dn = Number::INFINITE;
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
+                    if n.try_borrow()?.skip_set.contains(&depth) {
+                        continue;
+                    }
                     pn += n.try_borrow()?.pn;
                     dn = dn.min(n.try_borrow()?.dn);
                 }
@@ -625,10 +631,6 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
-                    let len = children.try_borrow()?.len();
-
-                    let mut skip_count = 0;
-
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.skip_set.contains(&depth) {
                             continue;
@@ -707,12 +709,6 @@ pub mod checkmate {
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(depth);
-
-                                        skip_count += 1;
-
-                                        if skip_count == len {
-                                            return Ok(MaybeMate::Skip);
-                                        }
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -773,6 +769,9 @@ pub mod checkmate {
                     let mut dn = Number::Value(0);
 
                     for n in children.try_borrow()?.iter() {
+                        if n.try_borrow()?.skip_set.contains(&depth) {
+                            continue;
+                        }
                         pn = pn.min(n.try_borrow()?.pn);
                         dn += n.try_borrow()?.dn;
                     }
@@ -790,8 +789,12 @@ pub mod checkmate {
                     } else {
                         return Ok(MaybeMate::Unknown);
                     }
+                } else {
+                    break;
                 }
             }
+
+            Ok(MaybeMate::Skip)
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
@@ -877,10 +880,6 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
-                    let len = children.try_borrow()?.len();
-
-                    let mut skip_count = 0;
-
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.skip_set.contains(&depth) {
                             continue;
@@ -959,12 +958,6 @@ pub mod checkmate {
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(depth);
-
-                                        skip_count += 1;
-
-                                        if skip_count == len {
-                                            return Ok(MaybeMate::Skip);
-                                        }
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
