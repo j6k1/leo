@@ -703,6 +703,12 @@ pub mod checkmate {
                                 }
                             }
                         }
+
+                        event_dispatcher.dispatch_events(self,event_queue)?;
+
+                        if self.stop.load(atomic::Ordering::Acquire) {
+                            return Ok(MaybeMate::Aborted)
+                        }
                     }
                 }
 
@@ -933,6 +939,12 @@ pub mod checkmate {
                                     }
                                 }
                             }
+                        }
+
+                        event_dispatcher.dispatch_events(self,event_queue)?;
+
+                        if self.stop.load(atomic::Ordering::Acquire) {
+                            return Ok(MaybeMate::Aborted)
                         }
                     }
                 }
