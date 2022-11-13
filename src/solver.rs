@@ -791,6 +791,7 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
+                                    MaybeMate::Pending => {},
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
                                             "It is an unexpected type MaybeMate::MateMoves"
@@ -812,6 +813,17 @@ pub mod checkmate {
                 }
 
                 if let Some((n, u)) = update_nodes.take() {
+                    {
+                        let id = u.try_borrow()?.id;
+                        let pn = u.try_borrow()?.pn;
+                        let dn = u.try_borrow()?.dn;
+
+                        if (pn == Number::Value(0) && dn == Number::INFINITE) ||
+                            (pn == Number::INFINITE && dn == Number::Value(0)) {
+                            u.try_borrow_mut()?.reverse_node = Rc::new(ReverseNode::new(id,None));
+                        }
+                    }
+
                     let mate_depth = u.try_borrow()?.mate_depth;
 
                     children.try_borrow_mut()?.remove(&n);
@@ -1050,6 +1062,7 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
+                                    MaybeMate::Pending => {},
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
                                             "It is an unexpected type MaybeMate::MateMoves"
@@ -1071,6 +1084,17 @@ pub mod checkmate {
                 }
 
                 if let Some((n, u)) = update_nodes.take() {
+                    {
+                        let id = u.try_borrow()?.id;
+                        let pn = u.try_borrow()?.pn;
+                        let dn = u.try_borrow()?.dn;
+
+                        if (pn == Number::Value(0) && dn == Number::INFINITE) ||
+                            (pn == Number::INFINITE && dn == Number::Value(0)) {
+                            u.try_borrow_mut()?.reverse_node = Rc::new(ReverseNode::new(id,None));
+                        }
+                    }
+
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
