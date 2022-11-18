@@ -181,6 +181,11 @@ impl PartialOrd for Fraction {
         Some(self.cmp(other))
     }
 }
+impl Debug for Fraction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{} / {}",self.n,self.d)
+    }
+}
 pub struct Solver {
 }
 impl Solver {
