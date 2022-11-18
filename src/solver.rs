@@ -1,6 +1,8 @@
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::{VecDeque};
 use std::fmt::{Debug, Formatter};
+use std::ops::{Add, AddAssign, Div, DivAssign};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool};
@@ -76,6 +78,108 @@ pub struct GameStateForMate<'a> {
     pub teban:Teban,
     pub state:&'a Arc<State>,
     pub mc:&'a Arc<MochigomaCollections>,
+}
+#[derive(Clone,Copy,PartialEq,Eq)]
+pub struct Fraction {
+    n:u64,
+    d:u64
+}
+fn gcd(a:u64,b:u64) -> u64 {
+    if b > a {
+        gcd(a,b)
+    } else if b == 0 {
+        a
+    } else {
+        gcd(b,a%b)
+    }
+}
+impl Fraction {
+    pub fn new(n:u64) -> Fraction {
+        Fraction {
+            n:n,
+            d:1
+        }
+    }
+}
+
+impl Add for Fraction {
+    type Output = Fraction;
+    fn add(self, rhs: Self) -> Self::Output {
+        let ad = self.d;
+        let bd = rhs.d;
+        let an = self.n * bd;
+        let bn = rhs.n * ad;
+        let d = ad * bd;
+        let n = an + bn;
+
+        if n >= d {
+            let g = gcd(n,d);
+
+            Fraction {
+                n:n / g,
+                d:d / g
+            }
+        } else {
+            Fraction {
+                n:n,
+                d:d
+            }
+        }
+    }
+}
+impl AddAssign for Fraction {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+impl Div for Fraction {
+    type Output = Fraction;
+    fn div(self, rhs: Self) -> Self::Output {
+        let ad = self.d;
+        let bd = rhs.d;
+        let an = self.n;
+        let bn = rhs.n;
+
+        let n = an * bd;
+        let d = bn * ad;
+
+        if n >= d {
+            let g = gcd(n,d);
+
+            Fraction {
+                n:n / g,
+                d:d / g
+            }
+        } else {
+            Fraction {
+                n:n,
+                d:d
+            }
+        }
+    }
+}
+impl DivAssign for Fraction {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = *self / rhs;
+    }
+}
+impl Ord for Fraction {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let ad = self.d;
+        let bd = other.d;
+        let an = self.n;
+        let bn = other.n;
+
+        let an = an * bd;
+        let bn = bn * ad;
+
+        an.cmp(&bn)
+    }
+}
+impl PartialOrd for Fraction {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 pub struct Solver {
 }
@@ -703,11 +807,9 @@ pub mod checkmate {
                 }
             };
 
-            let mut pending_count;
+            let mut pending = false;
 
             loop {
-                pending_count = 0;
-
                 let parent_id = current_node.as_ref().map(|n| {
                     n.try_borrow().map(|n| n.id)
                 }).unwrap_or(Ok(parent_id))?;
@@ -812,7 +914,7 @@ pub mod checkmate {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
                                     MaybeMate::Pending => {
-                                        pending_count += 1;
+                                        pending = true;
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -905,7 +1007,7 @@ pub mod checkmate {
                 }
             }
 
-            if pending_count > 0 {
+            if pending {
                 Ok(MaybeMate::Pending)
             } else {
                 Ok(MaybeMate::Skip)
@@ -994,11 +1096,9 @@ pub mod checkmate {
                 )));
             };
 
-            let mut pending_count;
+            let mut pending = false;
 
             loop {
-                pending_count = 0;
-
                 let parent_id = current_node.as_ref().map(|n| {
                     n.try_borrow().map(|n| n.id)
                 }).unwrap_or(Ok(parent_id))?;
@@ -1103,7 +1203,7 @@ pub mod checkmate {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
                                     MaybeMate::Pending => {
-                                        pending_count += 1;
+                                        pending = true;
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -1159,7 +1259,7 @@ pub mod checkmate {
                 }
             }
 
-            if pending_count > 0 {
+            if pending {
                 Ok(MaybeMate::Pending)
             } else {
                 Ok(MaybeMate::Skip)
