@@ -17,7 +17,7 @@ use usiagent::rule::{LegalMove, State};
 use usiagent::shogi::*;
 use crate::error::ApplicationError;
 use crate::search::Root;
-use crate::solver::checkmate::{CheckmateStrategy, Node, ReverseNode, UniqID};
+use crate::solver::checkmate::{CheckmateStrategy, Node, UniqID};
 
 #[derive(Clone)]
 pub enum MaybeMate {
@@ -27,7 +27,6 @@ pub enum MaybeMate {
     Continuation(Rc<RefCell<Node>>),
     MaxDepth,
     Skip,
-    Pending,
     MaxNodes,
     Timeout,
     Aborted
@@ -52,9 +51,6 @@ impl Debug for MaybeMate {
             },
             &MaybeMate::Skip => {
                 write!(f,"MaybeMate::Skip")
-            },
-            &MaybeMate::Pending => {
-                write!(f,"MaybeMate::Pending")
             },
             &MaybeMate::MaxNodes => {
                 write!(f,"MaybeMate::MaxNodes")
@@ -100,6 +96,10 @@ impl Fraction {
             d:1
         }
     }
+
+    pub fn is_zero(&self) -> bool {
+        self.n == 0
+    }
 }
 
 impl Add for Fraction {
@@ -132,16 +132,11 @@ impl AddAssign for Fraction {
         *self = *self + rhs;
     }
 }
-impl Div for Fraction {
+impl Div<u64> for Fraction {
     type Output = Fraction;
-    fn div(self, rhs: Self) -> Self::Output {
-        let ad = self.d;
-        let bd = rhs.d;
-        let an = self.n;
-        let bn = rhs.n;
-
-        let n = an * bd;
-        let d = bn * ad;
+    fn div(self, rhs: u64) -> Self::Output {
+        let n = self.n;
+        let d = self.d * rhs;
 
         if n >= d {
             let g = gcd(n,d);
@@ -158,8 +153,8 @@ impl Div for Fraction {
         }
     }
 }
-impl DivAssign for Fraction {
-    fn div_assign(&mut self, rhs: Self) {
+impl DivAssign<u64> for Fraction {
+    fn div_assign(&mut self, rhs: u64) {
         *self = *self / rhs;
     }
 }
@@ -229,7 +224,6 @@ impl Solver {
                               &KyokumenMap::new(),
                               &mut uniq_id,
                               id,
-                              &Rc::new(ReverseNode::new(id,None)),
                               None,
                               &mut KyokumenMap::new(),
 
@@ -248,7 +242,7 @@ pub mod checkmate {
     use std::cmp::Ordering;
     use std::collections::{BTreeSet, HashSet, VecDeque};
     use std::ops::{Add, AddAssign};
-    use std::rc::{Rc, Weak};
+    use std::rc::{Rc};
     use std::sync::atomic::{AtomicBool};
     use std::sync::{Arc, atomic, Mutex};
     use std::time::{Duration, Instant};
@@ -261,12 +255,21 @@ pub mod checkmate {
     use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
     use crate::error::{ApplicationError, SendSelDepthError};
     use crate::search::{TIMELIMIT_MARGIN};
-    use crate::solver::{MaybeMate};
+    use crate::solver::{Fraction, MaybeMate};
 
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
     pub enum Number {
-        Value(u64),
+        Value(Fraction),
         INFINITE
+    }
+
+    impl Number {
+        pub fn is_zero(&self) -> bool {
+            match self {
+                &Number::INFINITE => false,
+                &Number::Value(v) => v.is_zero()
+            }
+        }
     }
 
     impl Add for Number {
@@ -297,12 +300,10 @@ pub mod checkmate {
 
     pub struct Node {
         id:u64,
-        parent_id:u64,
         pn:Number,
         dn:Number,
-        depth:u32,
         mate_depth:u32,
-        reverse_node:Rc<ReverseNode>,
+        parent_set:HashSet<u64>,
         skip_set:HashSet<u64>,
         expanded:bool,
         m:LegalMove,
@@ -311,18 +312,16 @@ pub mod checkmate {
     }
 
     impl Node {
-        pub fn new_or_node(id:u64,depth:u32,m:LegalMove,parent_id:u64,parent:&Rc<ReverseNode>) -> Node {
-            let mut ref_nodes = HashSet::new();
-            ref_nodes.insert(parent_id);
+        pub fn new_or_node(id:u64,m:LegalMove,parent_id:u64) -> Node {
+            let mut parent_set = HashSet::new();
+            parent_set.insert(parent_id);
 
             Node {
                 id: id,
-                parent_id:parent_id,
-                pn: Number::Value(1),
-                dn: Number::Value(1),
-                depth: depth,
+                pn: Number::Value(Fraction::new(1)),
+                dn: Number::Value(Fraction::new(1)),
                 mate_depth: 0,
-                reverse_node:Rc::new(ReverseNode::new(id,Some(parent))),
+                parent_set:parent_set,
                 skip_set:HashSet::new(),
                 expanded: false,
                 m:m,
@@ -331,18 +330,16 @@ pub mod checkmate {
             }
         }
 
-        pub fn new_and_node(id:u64,depth:u32,m:LegalMove,parent_id:u64,parent:&Rc<ReverseNode>) -> Node {
-            let mut ref_nodes = HashSet::new();
-            ref_nodes.insert(parent_id);
+        pub fn new_and_node(id:u64,m:LegalMove,parent_id:u64) -> Node {
+            let mut parent_set = HashSet::new();
+            parent_set.insert(parent_id);
 
             Node {
                 id: id,
-                parent_id:parent_id,
-                pn: Number::Value(1),
-                dn: Number::Value(1),
-                depth: depth,
+                pn: Number::Value(Fraction::new(1)),
+                dn: Number::Value(Fraction::new(1)),
                 mate_depth: 0,
-                reverse_node:Rc::new(ReverseNode::new(id,Some(parent))),
+                parent_set:parent_set,
                 skip_set:HashSet::new(),
                 expanded: false,
                 m:m,
@@ -369,36 +366,6 @@ pub mod checkmate {
     impl PartialOrd for Node {
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(other))
-        }
-    }
-
-    pub struct ReverseNode {
-        id:u64,
-        parent:Option<Weak<ReverseNode>>
-    }
-
-    impl ReverseNode {
-        pub fn new<'a>(id:u64,parent:Option<&'a Rc<ReverseNode>>) -> ReverseNode {
-            ReverseNode {
-                id:id,
-                parent:parent.map(|n| Rc::downgrade(n))
-            }
-        }
-
-        pub fn find_root(&self) -> u64 {
-            let mut id = self.id;
-            let mut parent = self.parent.as_ref().and_then(|n| n.upgrade());
-
-            while let Some(n) = parent {
-                id = n.id;
-                parent = n.parent.as_ref().and_then(|n| n.upgrade());
-            }
-
-            id
-        }
-
-        pub fn is_active(&self) -> bool {
-            self.find_root() == 0
         }
     }
 
@@ -498,23 +465,15 @@ pub mod checkmate {
                              mhash:u64,
                              shash:u64,
                              parent_id:u64,
-                             depth:u32,
                              teban:Teban,
                              node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
-            -> Result<(Rc<RefCell<Node>>,bool,bool),ApplicationError> {
+            -> Result<Rc<RefCell<Node>>,ApplicationError> {
 
             if let Some(c) = node_map.get(teban,&mhash,&shash) {
-                if c.try_borrow()?.parent_id == parent_id {
-                    Ok((Rc::clone(n),false,false))
-                } else if c.try_borrow()?.depth > depth {
-                    Ok((Rc::clone(c), true, false))
-                } else if !c.try_borrow()?.reverse_node.is_active() {
-                    Ok((Rc::clone(c),true,false))
-                } else {
-                    Ok((Rc::clone(n),false,true))
-                }
+                c.try_borrow_mut()?.parent_set.insert(parent_id);
+                Ok(Rc::clone(c))
             } else {
-                Ok((Rc::clone(n),false,false))
+                Ok(Rc::clone(n))
             }
         }
 
@@ -533,7 +492,6 @@ pub mod checkmate {
 
             {
                 let n = n.try_borrow()?;
-                let reverse_node = &n.reverse_node;
 
                 let mut children = n.children.try_borrow_mut()?;
 
@@ -542,7 +500,7 @@ pub mod checkmate {
 
                     let nodes = mvs.into_iter().map(|m| {
                         let id = uniq_id.gen();
-                        Rc::new(RefCell::new(Node::new_and_node(id, depth,m, parent_id,reverse_node)))
+                        Rc::new(RefCell::new(Node::new_and_node(id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
@@ -553,7 +511,7 @@ pub mod checkmate {
 
                     let nodes = mvs.into_iter().map(|m| {
                         let id = uniq_id.gen();
-                        Rc::new(RefCell::new(Node::new_or_node(id, depth, m, parent_id,reverse_node)))
+                        Rc::new(RefCell::new(Node::new_or_node(id, m, parent_id)))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
@@ -566,12 +524,14 @@ pub mod checkmate {
 
             let len = n.try_borrow()?.children.try_borrow()?.len();
 
+            let parent_count = n.try_borrow()?.parent_set.len() as u64;
+
             if depth % 2 == 0 {
-                n.try_borrow_mut()?.pn = Number::Value(1);
-                n.try_borrow_mut()?.dn = Number::Value(len as u64);
+                n.try_borrow_mut()?.pn = Number::Value(Fraction::new(1) / parent_count);
+                n.try_borrow_mut()?.dn = Number::Value(Fraction::new(len as u64) / parent_count);
             } else {
-                n.try_borrow_mut()?.pn = Number::Value(len as u64);
-                n.try_borrow_mut()?.dn = Number::Value(1);
+                n.try_borrow_mut()?.pn = Number::Value(Fraction::new(len as u64) / parent_count);
+                n.try_borrow_mut()?.dn = Number::Value(Fraction::new(1) / parent_count);
             }
 
             node_map.insert(teban,mhash,shash,Rc::clone(n));
@@ -581,7 +541,6 @@ pub mod checkmate {
 
         pub fn expand_root_nodes(&mut self,
                                  parent_id:u64,
-                                 reverse_node:&Rc<ReverseNode>,
                                  uniq_id:&mut UniqID,
                                  teban:Teban,
                                  state:&State,
@@ -590,7 +549,7 @@ pub mod checkmate {
 
             let nodes = mvs.into_iter().map(|m| {
                 let id = uniq_id.gen();
-                Rc::new(RefCell::new(Node::new_and_node(id, 0, m, parent_id, reverse_node)))
+                Rc::new(RefCell::new(Node::new_and_node(id, m, parent_id)))
             }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
             let children = Rc::new(RefCell::new(BTreeSet::new()));
@@ -610,7 +569,6 @@ pub mod checkmate {
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                                 uniq_id:&mut UniqID,
                                                 parent_id:u64,
-                                                parent:&Rc<ReverseNode>,
                                                 current_node:Option<Rc<RefCell<Node>>>,
                                                 node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                                 mate_depth:&mut Option<u32>,
@@ -626,7 +584,6 @@ pub mod checkmate {
                                         current_kyokumen_map,
                                         uniq_id,
                                         parent_id,
-                                        parent,
                                         current_node,
                                         node_map,
                                         mate_depth,
@@ -647,7 +604,6 @@ pub mod checkmate {
                                         current_kyokumen_map,
                                         uniq_id,
                                         parent_id,
-                                        parent,
                                         current_node,
                                         node_map,
                                         mate_depth,
@@ -678,36 +634,37 @@ pub mod checkmate {
             Ok(mvs)
         }
 
-        pub fn update_node(&mut self, depth:u32, id:u64, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
+        pub fn update_node(&mut self, depth:u32, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
+            let id = n.try_borrow()?.id;
             let m = n.try_borrow()?.m;
             let children = Rc::clone(&n.try_borrow()?.children);
+            let parent_set = n.try_borrow()?.parent_set.clone();
             let skip_set = n.try_borrow()?.skip_set.clone();
             let expanded = n.try_borrow()?.expanded;
             let mate_depth = n.try_borrow()?.mate_depth;
 
             if depth % 2 == 0 {
                 let mut pn = Number::INFINITE;
-                let mut dn = Number::Value(0);
+                let mut dn = Number::Value(Fraction::new(0));
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
                     pn = pn.min(n.try_borrow()?.pn);
                     dn += n.try_borrow()?.dn;
                 }
 
-                let reverse_node = &n.try_borrow()?.reverse_node;
-                let mut n = Node::new_or_node(id,depth, m,parent_id, reverse_node);
+                let mut n = Node::new_or_node(id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
-                n.parent_id = parent_id;
                 n.children = children;
+                n.parent_set = parent_set;
                 n.skip_set = skip_set;
                 n.expanded = expanded;
                 n.mate_depth = mate_depth;
 
                 Ok(n)
             } else {
-                let mut pn = Number::Value(0);
+                let mut pn = Number::Value(Fraction::new(0));
                 let mut dn = Number::INFINITE;
 
                 for n in n.try_borrow()?.children.try_borrow()?.iter() {
@@ -715,13 +672,12 @@ pub mod checkmate {
                     dn = dn.min(n.try_borrow()?.dn);
                 }
 
-                let reverse_node = &n.try_borrow()?.reverse_node;
-                let mut n = Node::new_and_node(id,depth, m,parent_id,reverse_node);
+                let mut n = Node::new_and_node(id,m,parent_id);
 
                 n.pn = pn;
                 n.dn = dn;
                 n.children = children;
-                n.parent_id = parent_id;
+                n.parent_set = parent_set;
                 n.skip_set = skip_set;
                 n.expanded = expanded;
                 n.mate_depth = mate_depth;
@@ -738,7 +694,6 @@ pub mod checkmate {
                                        current_kyokumen_map:&KyokumenMap<u64,u32>,
                                        uniq_id:&mut UniqID,
                                        parent_id:u64,
-                                       parent:&Rc<ReverseNode>,
                                        current_node:Option<Rc<RefCell<Node>>>,
                                        node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                        mate_depth:&mut Option<u32>,
@@ -769,28 +724,21 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let children = if let Some(n) = current_node.as_ref() {
-                let (mut n,need_update,pending) = self.normalize_node(&n,mhash,shash,parent_id,depth,teban,node_map)?;
-
-                if pending {
-                    return Ok(MaybeMate::Pending);
-                }
+                let mut n = self.normalize_node(&n,mhash,shash,parent_id,teban,node_map)?;
 
                 let expanded = n.try_borrow()?.expanded;
 
-                if need_update {
-                    n.try_borrow_mut()?.parent_id = parent_id;
-                    return Ok(MaybeMate::Continuation(n));
-                } else if !expanded {
+                if !expanded {
                     self.expand_nodes(depth, mhash,shash,uniq_id, &n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
                         let id = uniq_id.gen();
-                        let mut u = Node::new_or_node(id,depth, n.try_borrow()?.m,parent_id,parent);
+                        let mut u = Node::new_or_node(id,n.try_borrow()?.m,parent_id);
 
                         u.pn = Number::INFINITE;
-                        u.dn = Number::Value(0);
+                        u.dn = Number::Value(Fraction::new(0));
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
@@ -803,7 +751,7 @@ pub mod checkmate {
                     Rc::clone(children)
                 }
             } else {
-                let children = self.expand_root_nodes(parent_id, parent, uniq_id,teban,state,mc)?;
+                let children = self.expand_root_nodes(parent_id, uniq_id,teban,state,mc)?;
 
                 if children.try_borrow()?.len() == 0 {
                     return Ok(MaybeMate::Nomate);
@@ -812,16 +760,10 @@ pub mod checkmate {
                 }
             };
 
-            let mut pending = false;
-
             loop {
                 let parent_id = current_node.as_ref().map(|n| {
                     n.try_borrow().map(|n| n.id)
                 }).unwrap_or(Ok(parent_id))?;
-
-                let parent_reverse = current_node.as_ref().map(|n| {
-                    n.try_borrow().map(|n| Rc::clone(&n.reverse_node))
-                }).unwrap_or(Ok(Rc::clone(parent)))?;
 
                 let mut update_nodes = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
@@ -861,10 +803,10 @@ pub mod checkmate {
                         if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
                             if c >= 3 {
                                 let id = n.try_borrow()?.id;
-                                let mut u = Node::new_or_node(id,depth, n.try_borrow()?.m,parent_id,&parent_reverse);
+                                let mut u = Node::new_or_node(id,n.try_borrow()?.m,parent_id);
 
                                 u.pn = Number::INFINITE;
-                                u.dn = Number::Value(0);
+                                u.dn = Number::Value(Fraction::new(0));
                                 u.expanded =  true;
 
                                 let u = Rc::new(RefCell::new(u));
@@ -892,7 +834,6 @@ pub mod checkmate {
                                                          &mut current_kyokumen_map,
                                                          uniq_id,
                                                          parent_id,
-                                                         &parent_reverse,
                                                          Some(Rc::clone(n)),
                                                          node_map,
                                                          mate_depth,
@@ -918,9 +859,6 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
-                                    MaybeMate::Pending => {
-                                        pending = true;
-                                    },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
                                             "It is an unexpected type MaybeMate::MateMoves"
@@ -942,17 +880,6 @@ pub mod checkmate {
                 }
 
                 if let Some((n, u)) = update_nodes.take() {
-                    {
-                        let id = u.try_borrow()?.id;
-                        let pn = u.try_borrow()?.pn;
-                        let dn = u.try_borrow()?.dn;
-
-                        if (pn == Number::Value(0) && dn == Number::INFINITE) ||
-                            (pn == Number::INFINITE && dn == Number::Value(0)) {
-                            u.try_borrow_mut()?.reverse_node = Rc::new(ReverseNode::new(id,None));
-                        }
-                    }
-
                     let mate_depth = u.try_borrow()?.mate_depth;
 
                     children.try_borrow_mut()?.remove(&n);
@@ -961,40 +888,39 @@ pub mod checkmate {
                     if let Some(n) = current_node.as_ref() {
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
-                        let id = n.try_borrow()?.id;
-                        let mut u = self.update_node(depth, id, parent_id, n)?;
+                        let mut u = self.update_node(depth, parent_id, n)?;
 
-                        if u.pn == Number::Value(0) && u.dn == Number::INFINITE {
+                        if u.pn.is_zero() && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
                             return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
                         } else if u.pn != pn || u.dn != dn {
                             return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
                         }
-                    } else if !self.strict_moves && u.try_borrow()?.pn == Number::Value(0) && u.try_borrow()?.dn == Number::INFINITE {
+                    } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
                     } else {
                         let mut pn = Number::INFINITE;
-                        let mut dn = Number::Value(0);
+                        let mut dn = Number::Value(Fraction::new(0));
 
                         for n in children.try_borrow()?.iter() {
                             pn = pn.min(n.try_borrow()?.pn);
                             dn += n.try_borrow()?.dn;
                         }
 
-                        if pn == Number::Value(0) && dn == Number::INFINITE {
+                        if pn.is_zero() && dn == Number::INFINITE {
                             return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
                         }
                     }
                 } else if depth == 0 {
                     let mut pn = Number::INFINITE;
-                    let mut dn = Number::Value(0);
+                    let mut dn = Number::Value(Fraction::new(0));
 
                     for n in children.try_borrow()?.iter() {
                         pn = pn.min(n.try_borrow()?.pn);
                         dn += n.try_borrow()?.dn;
                     }
 
-                    if pn == Number::Value(0) && dn == Number::INFINITE {
+                    if pn.is_zero() && dn == Number::INFINITE {
                         return Ok(MaybeMate::MateMoves(self.build_moves(children
                             .try_borrow()?
                             .iter()
@@ -1002,7 +928,7 @@ pub mod checkmate {
                             .ok_or(ApplicationError::LogicError(String::from(
                                 "The legal move has not yet been set."
                             )))?)?));
-                    } else if pn == Number::INFINITE && dn == Number::Value(0) {
+                    } else if pn == Number::INFINITE && dn.is_zero() {
                         return Ok(MaybeMate::Nomate);
                     } else {
                         return Ok(MaybeMate::Unknown);
@@ -1012,11 +938,7 @@ pub mod checkmate {
                 }
             }
 
-            if pending {
-                Ok(MaybeMate::Pending)
-            } else {
-                Ok(MaybeMate::Skip)
-            }
+            Ok(MaybeMate::Skip)
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
@@ -1027,7 +949,6 @@ pub mod checkmate {
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                                 uniq_id:&mut UniqID,
                                                 parent_id:u64,
-                                                parent:&Rc<ReverseNode>,
                                                 current_node:Option<Rc<RefCell<Node>>>,
                                                 node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                                 mate_depth:&mut Option<u32>,
@@ -1062,17 +983,11 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let children = if let Some(n) = current_node.as_ref() {
-                let (mut n,need_update, pending) = self.normalize_node(&n,mhash,shash,parent_id,depth, teban,node_map)?;
-
-                if pending {
-                    return Ok(MaybeMate::Pending);
-                }
+                let mut n = self.normalize_node(&n,mhash,shash,parent_id,teban,node_map)?;
 
                 let expanded = n.try_borrow()?.expanded;
 
-                if need_update {
-                    return Ok(MaybeMate::Continuation(n));
-                } else if !expanded {
+                if !expanded {
                     self.expand_nodes(depth, mhash,shash,uniq_id, &n, node_map,teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
@@ -1080,9 +995,9 @@ pub mod checkmate {
                     if len == 0 {
                         let id = n.try_borrow()?.id;
 
-                        let mut u = Node::new_and_node(id,depth, n.try_borrow()?.m,parent_id,parent);
+                        let mut u = Node::new_and_node(id,n.try_borrow()?.m,parent_id);
 
-                        u.pn = Number::Value(0);
+                        u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
                         u.expanded =  true;
 
@@ -1101,16 +1016,10 @@ pub mod checkmate {
                 )));
             };
 
-            let mut pending = false;
-
             loop {
                 let parent_id = current_node.as_ref().map(|n| {
                     n.try_borrow().map(|n| n.id)
                 }).unwrap_or(Ok(parent_id))?;
-
-                let parent_reverse = current_node.as_ref().map(|n| {
-                    n.try_borrow().map(|n| Rc::clone(&n.reverse_node))
-                }).unwrap_or(Ok(Rc::clone(parent)))?;
 
                 let mut update_nodes = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
@@ -1150,9 +1059,9 @@ pub mod checkmate {
                         if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
                             if c >= 3 {
                                 let id = n.try_borrow()?.id;
-                                let mut u = Node::new_and_node(id,depth, n.try_borrow()?.m,parent_id,&parent_reverse);
+                                let mut u = Node::new_and_node(id,n.try_borrow()?.m,parent_id);
 
-                                u.pn = Number::Value(0);
+                                u.pn = Number::Value(Fraction::new(0));
                                 u.dn = Number::INFINITE;
                                 u.expanded =  true;
 
@@ -1181,7 +1090,6 @@ pub mod checkmate {
                                                          &mut current_kyokumen_map,
                                                          uniq_id,
                                                          parent_id,
-                                                         &parent_reverse,
                                                          Some(Rc::clone(n)),
                                                          node_map,
                                                          mate_depth,
@@ -1207,9 +1115,6 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
-                                    MaybeMate::Pending => {
-                                        pending = true;
-                                    },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
                                             "It is an unexpected type MaybeMate::MateMoves"
@@ -1231,17 +1136,6 @@ pub mod checkmate {
                 }
 
                 if let Some((n, u)) = update_nodes.take() {
-                    {
-                        let id = u.try_borrow()?.id;
-                        let pn = u.try_borrow()?.pn;
-                        let dn = u.try_borrow()?.dn;
-
-                        if (pn == Number::Value(0) && dn == Number::INFINITE) ||
-                            (pn == Number::INFINITE && dn == Number::Value(0)) {
-                            u.try_borrow_mut()?.reverse_node = Rc::new(ReverseNode::new(id,None));
-                        }
-                    }
-
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
@@ -1251,10 +1145,9 @@ pub mod checkmate {
                                                          )))?;
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
-                    let id = n.try_borrow()?.id;
-                    let u = self.update_node(depth, id, parent_id, &n)?;
+                    let u = self.update_node(depth, parent_id, &n)?;
 
-                    if u.pn == Number::INFINITE && u.dn == Number::Value(0) {
+                    if u.pn == Number::INFINITE && u.dn.is_zero() {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
                     } else if u.pn != pn || u.dn != dn {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
@@ -1264,11 +1157,7 @@ pub mod checkmate {
                 }
             }
 
-            if pending {
-                Ok(MaybeMate::Pending)
-            } else {
-                Ok(MaybeMate::Skip)
-            }
+            Ok(MaybeMate::Skip)
         }
 
         fn send_seldepth(&mut self, depth:u32) -> Result<(),SendSelDepthError>{
