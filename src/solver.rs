@@ -24,7 +24,7 @@ pub enum MaybeMate {
     Nomate,
     MateMoves(VecDeque<LegalMove>),
     Unknown,
-    Continuation(Rc<RefCell<Node>>),
+    Continuation(Rc<RefCell<Node>>,Teban,u64,u64),
     MaxDepth,
     Skip,
     MaxNodes,
@@ -43,8 +43,8 @@ impl Debug for MaybeMate {
             &MaybeMate::Unknown => {
                 write!(f,"MaybeMate::Unknown")
             },
-            &MaybeMate::Continuation(_) => {
-                write!(f,"MaybeMate::Continuation")
+            &MaybeMate::Continuation(_,teban,_,_) => {
+                write!(f,"MaybeMate::Continuation({:?})",teban)
             },
             &MaybeMate::MaxDepth => {
                 write!(f,"MaybeMate::MaxDepth")
@@ -303,8 +303,9 @@ pub mod checkmate {
         pn:Number,
         dn:Number,
         mate_depth:u32,
-        parent_set:HashSet<u64>,
-        skip_set:HashSet<u64>,
+        ref_count:u64,
+        skip_depth:Option<u32>,
+        sennichite:bool,
         expanded:bool,
         m:LegalMove,
         children:Rc<RefCell<BTreeSet<Rc<RefCell<Node>>>>>,
@@ -321,8 +322,9 @@ pub mod checkmate {
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
                 mate_depth: 0,
-                parent_set:parent_set,
-                skip_set:HashSet::new(),
+                ref_count:1,
+                skip_depth:None,
+                sennichite: false,
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
@@ -339,8 +341,9 @@ pub mod checkmate {
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
                 mate_depth: 0,
-                parent_set:parent_set,
-                skip_set:HashSet::new(),
+                ref_count:1,
+                skip_depth:None,
+                sennichite: false,
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
@@ -464,13 +467,20 @@ pub mod checkmate {
                              n:&Rc<RefCell<Node>>,
                              mhash:u64,
                              shash:u64,
-                             parent_id:u64,
                              teban:Teban,
                              node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
             -> Result<Rc<RefCell<Node>>,ApplicationError> {
 
+            let expanded = n.try_borrow()?.expanded;
+
+            if n.try_borrow()?.sennichite {
+                return Ok(Rc::clone(n))
+            }
+
             if let Some(c) = node_map.get(teban,&mhash,&shash) {
-                c.try_borrow_mut()?.parent_set.insert(parent_id);
+                if !expanded {
+                    c.try_borrow_mut()?.ref_count += 1;
+                }
                 Ok(Rc::clone(c))
             } else {
                 Ok(Rc::clone(n))
@@ -524,7 +534,7 @@ pub mod checkmate {
 
             let len = n.try_borrow()?.children.try_borrow()?.len();
 
-            let parent_count = n.try_borrow()?.parent_set.len() as u64;
+            let parent_count = n.try_borrow()?.ref_count;
 
             if depth % 2 == 0 {
                 n.try_borrow_mut()?.pn = Number::Value(Fraction::new(1) / parent_count);
@@ -635,13 +645,11 @@ pub mod checkmate {
         }
 
         pub fn update_node(&mut self, depth:u32, parent_id:u64, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
-            let id = n.try_borrow()?.id;
-            let m = n.try_borrow()?.m;
-            let children = Rc::clone(&n.try_borrow()?.children);
-            let parent_set = n.try_borrow()?.parent_set.clone();
-            let skip_set = n.try_borrow()?.skip_set.clone();
-            let expanded = n.try_borrow()?.expanded;
-            let mate_depth = n.try_borrow()?.mate_depth;
+            let (id,m,children,ref_count,skip_depth,expanded,mate_depth) = {
+                let n =  n.try_borrow()?;
+
+                (n.id,n.m,Rc::clone(&n.children),n.ref_count,n.skip_depth,n.expanded,n.mate_depth)
+            };
 
             if depth % 2 == 0 {
                 let mut pn = Number::INFINITE;
@@ -657,8 +665,8 @@ pub mod checkmate {
                 n.pn = pn;
                 n.dn = dn;
                 n.children = children;
-                n.parent_set = parent_set;
-                n.skip_set = skip_set;
+                n.ref_count = ref_count;
+                n.skip_depth = skip_depth;
                 n.expanded = expanded;
                 n.mate_depth = mate_depth;
 
@@ -677,8 +685,8 @@ pub mod checkmate {
                 n.pn = pn;
                 n.dn = dn;
                 n.children = children;
-                n.parent_set = parent_set;
-                n.skip_set = skip_set;
+                n.ref_count = ref_count;
+                n.skip_depth = skip_depth;
                 n.expanded = expanded;
                 n.mate_depth = mate_depth;
 
@@ -724,7 +732,7 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let children = if let Some(n) = current_node.as_ref() {
-                let mut n = self.normalize_node(&n,mhash,shash,parent_id,teban,node_map)?;
+                let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
                 let expanded = n.try_borrow()?.expanded;
 
@@ -744,7 +752,7 @@ pub mod checkmate {
                         n = Rc::new(RefCell::new(u));
                     }
 
-                    return Ok(MaybeMate::Continuation(n));
+                    return Ok(MaybeMate::Continuation(n,teban,mhash,shash));
                 } else {
                     let children = &n.try_borrow()?.children;
 
@@ -765,13 +773,13 @@ pub mod checkmate {
                     n.try_borrow().map(|n| n.id)
                 }).unwrap_or(Ok(parent_id))?;
 
-                let mut update_nodes = None;
+                let mut update_info = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
                     for n in children.try_borrow()?.iter() {
-                        if n.try_borrow()?.skip_set.contains(&parent_id) {
+                        if n.try_borrow()?.skip_depth.map(|d| d <= depth).unwrap_or(false) {
                             continue;
                         }
 
@@ -795,23 +803,23 @@ pub mod checkmate {
                                                               state.get_banmen(),
                                                               &mc, m.to_applied_move(), &o);
 
-                        if let Some(()) = ignore_kyokumen_map.get(teban, &mhash, &shash) {
-                            n.try_borrow_mut()?.skip_set.insert(parent_id);
-                            continue;
-                        }
+                        {
+                            let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
+                            let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
-                        if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
-                            if c >= 3 {
-                                let id = n.try_borrow()?.id;
-                                let mut u = Node::new_or_node(id,n.try_borrow()?.m,parent_id);
+                            if s || sc {
+                                let parent_id = n.try_borrow()?.id;
+                                let mut u = self.update_node(depth + 1, parent_id, n)?;
 
                                 u.pn = Number::INFINITE;
                                 u.dn = Number::Value(Fraction::new(0));
-                                u.expanded =  true;
+                                u.expanded = true;
+                                u.sennichite = true;
 
                                 let u = Rc::new(RefCell::new(u));
 
-                                return Ok(MaybeMate::Continuation(u));
+                                update_info = Some((Rc::clone(n), u,teban,mhash,shash));
+                                break;
                             }
                         }
 
@@ -843,8 +851,8 @@ pub mod checkmate {
                                                          &state,
                                                          &mc
                                 )? {
-                                    MaybeMate::Continuation(u) => {
-                                        update_nodes = Some((Rc::clone(n), u));
+                                    MaybeMate::Continuation(u,teban,mhash,shash) => {
+                                        update_info = Some((Rc::clone(n), u,teban,mhash,shash));
                                         break;
                                     },
                                     r @ MaybeMate::MaxNodes => {
@@ -857,7 +865,9 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        n.try_borrow_mut()?.skip_set.insert(parent_id);
+                                        let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.max(depth));
+
+                                        n.try_borrow_mut()?.skip_depth = skip_depth;
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -879,8 +889,10 @@ pub mod checkmate {
                     }
                 }
 
-                if let Some((n, u)) = update_nodes.take() {
+                if let Some((n, u,t,mh,sh)) = update_info.take() {
                     let mate_depth = u.try_borrow()?.mate_depth;
+
+                    node_map.insert(t,mh,sh,Rc::clone(&u));
 
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
@@ -892,9 +904,9 @@ pub mod checkmate {
 
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
-                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
+                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
                         } else if u.pn != pn || u.dn != dn {
-                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
+                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
                         }
                     } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
@@ -983,7 +995,7 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let children = if let Some(n) = current_node.as_ref() {
-                let mut n = self.normalize_node(&n,mhash,shash,parent_id,teban,node_map)?;
+                let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
                 let expanded = n.try_borrow()?.expanded;
 
@@ -1004,7 +1016,7 @@ pub mod checkmate {
                         n = Rc::new(RefCell::new(u));
                     }
 
-                    return Ok(MaybeMate::Continuation(n));
+                    return Ok(MaybeMate::Continuation(n,teban,mhash,shash));
                 } else {
                     let children = &n.try_borrow()?.children;
 
@@ -1027,7 +1039,7 @@ pub mod checkmate {
 
                 {
                     for n in children.try_borrow()?.iter() {
-                        if n.try_borrow()?.skip_set.contains(&parent_id) {
+                        if n.try_borrow()?.skip_depth.map(|d| d <= depth).unwrap_or(false) {
                             continue;
                         }
 
@@ -1050,24 +1062,23 @@ pub mod checkmate {
                         let shash = self.hasher.calc_sub_hash(shash, teban,
                                                               state.get_banmen(),
                                                               &mc, m.to_applied_move(), &o);
+                        {
+                            let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
+                            let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
-                        if let Some(()) = ignore_kyokumen_map.get(teban, &mhash, &shash) {
-                            n.try_borrow_mut()?.skip_set.insert(parent_id);
-                            continue;
-                        }
-
-                        if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
-                            if c >= 3 {
-                                let id = n.try_borrow()?.id;
-                                let mut u = Node::new_and_node(id,n.try_borrow()?.m,parent_id);
+                            if s || sc {
+                                let parent_id = n.try_borrow()?.id;
+                                let mut u = self.update_node(depth + 1, parent_id, n)?;
 
                                 u.pn = Number::Value(Fraction::new(0));
                                 u.dn = Number::INFINITE;
-                                u.expanded =  true;
+                                u.expanded = true;
+                                u.sennichite = true;
 
                                 let u = Rc::new(RefCell::new(u));
 
-                                return Ok(MaybeMate::Continuation(u));
+                                update_nodes = Some((Rc::clone(n), u,teban,mhash,shash));
+                                break;
                             }
                         }
 
@@ -1099,8 +1110,8 @@ pub mod checkmate {
                                                          &state,
                                                          &mc
                                 )? {
-                                    MaybeMate::Continuation(u) => {
-                                        update_nodes = Some((Rc::clone(n), u));
+                                    MaybeMate::Continuation(u,teban,mhash,shash) => {
+                                        update_nodes = Some((Rc::clone(n), u,teban,mhash,shash));
                                         break;
                                     },
                                     r @ MaybeMate::MaxNodes => {
@@ -1113,7 +1124,9 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        n.try_borrow_mut()?.skip_set.insert(parent_id);
+                                        let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.max(depth));
+
+                                        n.try_borrow_mut()?.skip_depth = skip_depth;
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -1135,7 +1148,9 @@ pub mod checkmate {
                     }
                 }
 
-                if let Some((n, u)) = update_nodes.take() {
+                if let Some((n, u,t,mh,sh)) = update_nodes.take() {
+                    node_map.insert(t,mh,sh,Rc::clone(&u));
+
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
@@ -1148,9 +1163,9 @@ pub mod checkmate {
                     let u = self.update_node(depth, parent_id, &n)?;
 
                     if u.pn == Number::INFINITE && u.dn.is_zero() {
-                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
+                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
                     } else if u.pn != pn || u.dn != dn {
-                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
+                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
                     }
                 } else {
                     break;
