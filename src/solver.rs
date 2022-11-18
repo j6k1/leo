@@ -398,11 +398,11 @@ pub mod checkmate {
                 if c.try_borrow()?.parent_id == parent_id {
                     Ok((Rc::clone(n),false,false))
                 } else if c.try_borrow()?.depth > depth {
-                    Ok((Rc::clone(c),true,false))
+                    Ok((Rc::clone(c), true, false))
                 } else if !c.try_borrow()?.reverse_node.is_active() {
                     Ok((Rc::clone(c),true,false))
                 } else {
-                    Ok((Rc::clone(n),true,true))
+                    Ok((Rc::clone(n),false,true))
                 }
             } else {
                 Ok((Rc::clone(n),false,false))
@@ -694,10 +694,20 @@ pub mod checkmate {
                     Rc::clone(children)
                 }
             } else {
-                self.expand_root_nodes(parent_id, parent, uniq_id,teban,state,mc)?
+                let children = self.expand_root_nodes(parent_id, parent, uniq_id,teban,state,mc)?;
+
+                if children.try_borrow()?.len() == 0 {
+                    return Ok(MaybeMate::Nomate);
+                } else {
+                    children
+                }
             };
 
+            let mut pending_count;
+
             loop {
+                pending_count = 0;
+
                 let parent_id = current_node.as_ref().map(|n| {
                     n.try_borrow().map(|n| n.id)
                 }).unwrap_or(Ok(parent_id))?;
@@ -737,12 +747,22 @@ pub mod checkmate {
                                                               &mc, m.to_applied_move(), &o);
 
                         if let Some(()) = ignore_kyokumen_map.get(teban, &mhash, &shash) {
+                            n.try_borrow_mut()?.skip_set.insert(parent_id);
                             continue;
                         }
 
                         if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
                             if c >= 3 {
-                                continue;
+                                let id = n.try_borrow()?.id;
+                                let mut u = Node::new_or_node(id,depth, n.try_borrow()?.m,parent_id,&parent_reverse);
+
+                                u.pn = Number::INFINITE;
+                                u.dn = Number::Value(0);
+                                u.expanded =  true;
+
+                                let u = Rc::new(RefCell::new(u));
+
+                                return Ok(MaybeMate::Continuation(u));
                             }
                         }
 
@@ -791,7 +811,9 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
-                                    MaybeMate::Pending => {},
+                                    MaybeMate::Pending => {
+                                        pending_count += 1;
+                                    },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
                                             "It is an unexpected type MaybeMate::MateMoves"
@@ -883,7 +905,11 @@ pub mod checkmate {
                 }
             }
 
-            Ok(MaybeMate::Skip)
+            if pending_count > 0 {
+                Ok(MaybeMate::Pending)
+            } else {
+                Ok(MaybeMate::Skip)
+            }
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
@@ -968,7 +994,11 @@ pub mod checkmate {
                 )));
             };
 
+            let mut pending_count;
+
             loop {
+                pending_count = 0;
+
                 let parent_id = current_node.as_ref().map(|n| {
                     n.try_borrow().map(|n| n.id)
                 }).unwrap_or(Ok(parent_id))?;
@@ -1008,12 +1038,22 @@ pub mod checkmate {
                                                               &mc, m.to_applied_move(), &o);
 
                         if let Some(()) = ignore_kyokumen_map.get(teban, &mhash, &shash) {
+                            n.try_borrow_mut()?.skip_set.insert(parent_id);
                             continue;
                         }
 
                         if let Some(&c) = current_kyokumen_map.get(teban, &mhash, &shash) {
                             if c >= 3 {
-                                continue;
+                                let id = n.try_borrow()?.id;
+                                let mut u = Node::new_and_node(id,depth, n.try_borrow()?.m,parent_id,&parent_reverse);
+
+                                u.pn = Number::Value(0);
+                                u.dn = Number::INFINITE;
+                                u.expanded =  true;
+
+                                let u = Rc::new(RefCell::new(u));
+
+                                return Ok(MaybeMate::Continuation(u));
                             }
                         }
 
@@ -1062,7 +1102,9 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         n.try_borrow_mut()?.skip_set.insert(parent_id);
                                     },
-                                    MaybeMate::Pending => {},
+                                    MaybeMate::Pending => {
+                                        pending_count += 1;
+                                    },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
                                             "It is an unexpected type MaybeMate::MateMoves"
@@ -1117,7 +1159,11 @@ pub mod checkmate {
                 }
             }
 
-            Ok(MaybeMate::Skip)
+            if pending_count > 0 {
+                Ok(MaybeMate::Pending)
+            } else {
+                Ok(MaybeMate::Skip)
+            }
         }
 
         fn send_seldepth(&mut self, depth:u32) -> Result<(),SendSelDepthError>{
