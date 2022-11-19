@@ -762,6 +762,8 @@ pub mod checkmate {
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(Fraction::new(0));
+                        u.ref_count = n.try_borrow()?.ref_count;
+                        u.skip_depth = n.try_borrow()?.skip_depth.clone();
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
@@ -1053,6 +1055,8 @@ pub mod checkmate {
 
                 if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
                     return Ok(MaybeMate::Mate);
+                } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
+                    return Ok(MaybeMate::Nomate);
                 }
 
                 let expanded = n.try_borrow()?.expanded;
@@ -1069,6 +1073,8 @@ pub mod checkmate {
 
                         u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
+                        u.ref_count = n.try_borrow()?.ref_count;
+                        u.skip_depth = n.try_borrow()?.skip_depth.clone();
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
