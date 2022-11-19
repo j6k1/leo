@@ -25,7 +25,6 @@ pub enum MaybeMate {
     MateMoves(VecDeque<LegalMove>),
     Unknown,
     Continuation(Rc<RefCell<Node>>,u64,u64),
-    Mate,
     MaxDepth,
     Skip,
     MaxNodes,
@@ -46,9 +45,6 @@ impl Debug for MaybeMate {
             },
             &MaybeMate::Continuation(_,_,_) => {
                 write!(f,"MaybeMate::Continuation")
-            },
-            &MaybeMate::Mate => {
-                write!(f,"MaybeMate::Mate")
             },
             &MaybeMate::MaxDepth => {
                 write!(f,"MaybeMate::MaxDepth")
@@ -743,10 +739,6 @@ pub mod checkmate {
             let children = if let Some(n) = current_node.as_ref() {
                 let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
-                if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
-                    return Ok(MaybeMate::Nomate);
-                }
-
                 let expanded = n.try_borrow()?.expanded;
 
                 println!("info string expanded {}",expanded);
@@ -892,14 +884,6 @@ pub mod checkmate {
                                     MaybeMate::Nomate => {
 
                                     },
-                                    MaybeMate::Mate if depth == 0 && !self.strict_moves => {
-                                        return Ok(MaybeMate::MateMoves(self.build_moves(n)?));
-                                    },
-                                    MaybeMate::Mate if depth == 0 => {
-                                    },
-                                    MaybeMate::Mate => {
-                                        return Ok(MaybeMate::Mate);
-                                    },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
                                     },
@@ -966,47 +950,37 @@ pub mod checkmate {
                         }
                     } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
-                    } else {
-                        let mut pn = Number::INFINITE;
-                        let mut dn = Number::Value(Fraction::new(0));
-
-                        for n in children.try_borrow()?.iter() {
-                            pn = pn.min(n.try_borrow()?.pn);
-                            dn += n.try_borrow()?.dn;
-                        }
-
-                        if pn.is_zero() && dn == Number::INFINITE {
-                            return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
-                        }
-                    }
-                } else if depth == 0 {
-                    let mut pn = Number::INFINITE;
-                    let mut dn = Number::Value(Fraction::new(0));
-
-                    for n in children.try_borrow()?.iter() {
-                        pn = pn.min(n.try_borrow()?.pn);
-                        dn += n.try_borrow()?.dn;
-                    }
-
-                    if pn.is_zero() && dn == Number::INFINITE {
-                        return Ok(MaybeMate::MateMoves(self.build_moves(children
-                            .try_borrow()?
-                            .iter()
-                            .next()
-                            .ok_or(ApplicationError::LogicError(String::from(
-                                "The legal move has not yet been set."
-                            )))?)?));
-                    } else if pn == Number::INFINITE && dn.is_zero() {
-                        return Ok(MaybeMate::Nomate);
-                    } else {
-                        return Ok(MaybeMate::Unknown);
                     }
                 } else {
                     break;
                 }
             }
 
-            Ok(MaybeMate::Skip)
+            if depth == 0 {
+                let mut pn = Number::INFINITE;
+                let mut dn = Number::Value(Fraction::new(0));
+
+                for n in children.try_borrow()?.iter() {
+                    pn = pn.min(n.try_borrow()?.pn);
+                    dn += n.try_borrow()?.dn;
+                }
+
+                if pn.is_zero() && dn == Number::INFINITE {
+                    return Ok(MaybeMate::MateMoves(self.build_moves(children
+                        .try_borrow()?
+                        .iter()
+                        .next()
+                        .ok_or(ApplicationError::LogicError(String::from(
+                            "The legal move has not yet been set."
+                        )))?)?));
+                } else if pn == Number::INFINITE && dn.is_zero() {
+                    Ok(MaybeMate::Nomate)
+                } else {
+                    Ok(MaybeMate::Unknown)
+                }
+            } else {
+                Ok(MaybeMate::Skip)
+            }
         }
 
         pub fn response_oute_process<L: Logger>(&mut self,
@@ -1052,12 +1026,6 @@ pub mod checkmate {
 
             let children = if let Some(n) = current_node.as_ref() {
                 let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
-
-                if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
-                    return Ok(MaybeMate::Mate);
-                } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
-                    return Ok(MaybeMate::Nomate);
-                }
 
                 let expanded = n.try_borrow()?.expanded;
 
@@ -1197,9 +1165,6 @@ pub mod checkmate {
                                     MaybeMate::Nomate => {
                                         return Ok(MaybeMate::Nomate);
                                     },
-                                    MaybeMate::Mate => {
-
-                                    },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
                                     },
@@ -1256,10 +1221,7 @@ pub mod checkmate {
                     println!("info string update response pn {:?}, dn {:?}",u.pn,u.dn);
                     println!("info string is sennichite {}",u.sennichite);
 
-                    if u.pn == Number::INFINITE && u.dn.is_zero() {
-                        println!("info string return nomate.");
-                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
-                    } else if u.pn != pn || u.dn != dn {
+                    if u.pn != pn || u.dn != dn {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                     } else {
                         n.try_borrow_mut()?.children = u.children;
