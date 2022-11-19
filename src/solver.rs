@@ -741,8 +741,6 @@ pub mod checkmate {
 
                 let expanded = n.try_borrow()?.expanded;
 
-                println!("info string expanded {}",expanded);
-
                 if !expanded {
                     let (id,ref_count,skip_depth) = {
                         let n =  n.try_borrow_mut()?;
@@ -770,8 +768,6 @@ pub mod checkmate {
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
-
-                        println!("info string nomate.");
                     }
 
                     return Ok(MaybeMate::Continuation(n,mhash,shash));
@@ -785,8 +781,6 @@ pub mod checkmate {
 
                 children
             };
-
-            println!("info string len {}",children.try_borrow()?.len());
 
             if children.try_borrow()?.len() == 0 {
                 return Ok(MaybeMate::Nomate);
@@ -804,16 +798,12 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
-                    //println!("info string len {}",children.try_borrow()?.len());
-
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.sennichite {
-                            println!("info string skip sennichite.");
                             continue;
                         }
 
                         if n.try_borrow()?.skip_depth.map(|d| d <= depth).unwrap_or(false) {
-                            println!("info string skip {}",depth);
                             continue;
                         }
 
@@ -823,9 +813,6 @@ pub mod checkmate {
 
                         let m = n.try_borrow()?.m;
 
-                        println!("info string {:?}",m.to_move());
-                        println!("info string pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
-                        println!("info string id {}, mate_depth {}",n.try_borrow()?.id,n.try_borrow()?.mate_depth);
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -849,7 +836,6 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if s || sc {
-                                println!("info string sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::INFINITE;
@@ -893,7 +879,6 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
-                                        println!("info string continuation id {}, pn {:?}, dn {:?}, mate_depth {}",n.try_borrow()?.id,n.try_borrow()?.pn,n.try_borrow()?.dn,n.try_borrow()?.mate_depth);
                                         update_info = Some((Rc::clone(n), u,mhash,shash));
                                         break;
                                     },
@@ -943,25 +928,20 @@ pub mod checkmate {
                         node_map.insert(teban.opposite(), mh, sh, Rc::clone(&u));
                     }
 
-                    println!("info string update oute.");
                     if !children.try_borrow()?.contains(&n) {
                         return Err(ApplicationError::LogicError(String::from(
                             "The update target node could not be found."
                         )));
                     }
 
-                    println!("info string borrow children.");
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
-                    println!("info string borrowed children.");
 
                     if let Some(n) = current_node.as_ref() {
                         let n = self.normalize_node(n,mhash,shash,teban,node_map)?;
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
                         let mut u = self.update_node(depth, &n)?;
-
-                        println!("info string {}, pn {:?}, u.pn {:?}, dn {:?}, u.dn {:?}",depth,pn,u.pn,dn,u.dn);
 
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
@@ -1093,8 +1073,6 @@ pub mod checkmate {
                 )));
             };
 
-            println!("info string response len {}",children.try_borrow()?.len());
-
             loop {
                 let parent_id = if let Some(n) = current_node.as_ref() {
                     self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
@@ -1140,7 +1118,6 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if sc {
-                                println!("info string response sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::Value(Fraction::new(0));
@@ -1239,8 +1216,6 @@ pub mod checkmate {
                         node_map.insert(teban.opposite(), mh, sh, Rc::clone(&u));
                     }
 
-                    println!("info string response");
-
                     if !children.try_borrow()?.contains(&n) {
                         return Err(ApplicationError::LogicError(String::from(
                             "The update target node could not be found."
@@ -1258,9 +1233,6 @@ pub mod checkmate {
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
                     let u = self.update_node(depth, &n)?;
-
-                    println!("info string update response pn {:?}, dn {:?}",u.pn,u.dn);
-                    println!("info string is sennichite {}",u.sennichite);
 
                     if u.pn != pn || u.dn != dn {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
