@@ -496,15 +496,13 @@ pub mod checkmate {
                                        mhash:u64,
                                        shash:u64,
                                        uniq_id:&mut UniqID,
-                                       n:&Rc<RefCell<Node>>,
+                                       mut n:Node,
                                        node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                        teban:Teban,
                                        state:&State,
                                        mc:&MochigomaCollections)
-                                       -> Result<(),ApplicationError> {
+                                       -> Result<Rc<RefCell<Node>>,ApplicationError> {
             {
-                let n = n.try_borrow()?;
-
                 let mut children = n.children.try_borrow_mut()?;
 
                 if depth % 2 == 0 {
@@ -532,23 +530,25 @@ pub mod checkmate {
                 }
             }
 
-            n.try_borrow_mut()?.expanded = true;
+            n.expanded = true;
 
-            let len = n.try_borrow()?.children.try_borrow()?.len();
+            let len = n.children.try_borrow()?.len();
 
-            let parent_count = n.try_borrow()?.ref_count;
+            let parent_count = n.ref_count;
 
             if depth % 2 == 0 {
-                n.try_borrow_mut()?.pn = Number::Value(Fraction::new(1) / parent_count);
-                n.try_borrow_mut()?.dn = Number::Value(Fraction::new(len as u64) / parent_count);
+                n.pn = Number::Value(Fraction::new(1) / parent_count);
+                n.dn = Number::Value(Fraction::new(len as u64) / parent_count);
             } else {
-                n.try_borrow_mut()?.pn = Number::Value(Fraction::new(len as u64) / parent_count);
-                n.try_borrow_mut()?.dn = Number::Value(Fraction::new(1) / parent_count);
+                n.pn = Number::Value(Fraction::new(len as u64) / parent_count);
+                n.dn = Number::Value(Fraction::new(1) / parent_count);
             }
 
-            node_map.insert(teban,mhash,shash,Rc::clone(n));
+            let n = Rc::new(RefCell::new(n));
 
-            Ok(())
+            node_map.insert(teban,mhash,shash,Rc::clone(&n));
+
+            Ok(n)
         }
 
         pub fn expand_root_nodes(&mut self,
@@ -737,19 +737,30 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let children = if let Some(n) = current_node.as_ref() {
-                let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
+                let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
                 let expanded = n.try_borrow()?.expanded;
 
                 println!("info string expanded {}",expanded);
 
                 if !expanded {
-                    self.expand_nodes(depth, mhash,shash,uniq_id, &n,node_map, teban, state, mc)?;
+                    let (id,ref_count,skip_depth) = {
+                        let n =  n.try_borrow_mut()?;
+
+                        (n.id,n.ref_count,n.skip_depth)
+                    };
+
+                    let mut n = Node::new_or_node(id,n.try_borrow()?.m);
+
+                    n.ref_count = ref_count;
+                    n.skip_depth = skip_depth;
+
+                    let mut n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        let id = uniq_id.gen();
+                        let id = n.try_borrow()?.id;
                         let mut u = Node::new_or_node(id,n.try_borrow()?.m);
 
                         u.pn = Number::INFINITE;
@@ -814,7 +825,7 @@ pub mod checkmate {
 
                         println!("info string {:?}",m.to_move());
                         println!("info string pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
-
+                        println!("info string id {}, mate_depth {}",n.try_borrow()?.id,n.try_borrow()?.mate_depth);
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -882,6 +893,7 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
+                                        println!("info string continuation id {}, pn {:?}, dn {:?}, mate_depth {}",n.try_borrow()?.id,n.try_borrow()?.pn,n.try_borrow()?.dn,n.try_borrow()?.mate_depth);
                                         update_info = Some((Rc::clone(n), u,mhash,shash));
                                         break;
                                     },
@@ -929,6 +941,13 @@ pub mod checkmate {
 
                     if !sennichite {
                         node_map.insert(teban.opposite(), mh, sh, Rc::clone(&u));
+                    }
+
+                    println!("info string update oute.");
+                    if !children.try_borrow()?.contains(&n) {
+                        return Err(ApplicationError::LogicError(String::from(
+                            "The update target node could not be found."
+                        )));
                     }
 
                     println!("info string borrow children.");
@@ -1029,18 +1048,28 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let children = if let Some(n) = current_node.as_ref() {
-                let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
+                let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
                 let expanded = n.try_borrow()?.expanded;
 
                 if !expanded {
-                    self.expand_nodes(depth, mhash,shash,uniq_id, &n, node_map,teban, state, mc)?;
+                    let (id,ref_count,skip_depth) = {
+                        let n =  n.try_borrow_mut()?;
+
+                        (n.id,n.ref_count,n.skip_depth)
+                    };
+
+                    let mut n = Node::new_and_node(id,n.try_borrow()?.m);
+
+                    n.ref_count = ref_count;
+                    n.skip_depth = skip_depth;
+
+                    let mut n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
                         let id = n.try_borrow()?.id;
-
                         let mut u = Node::new_and_node(id,n.try_borrow()?.m);
 
                         u.pn = Number::Value(Fraction::new(0));
@@ -1208,6 +1237,14 @@ pub mod checkmate {
 
                     if !sennichite {
                         node_map.insert(teban.opposite(), mh, sh, Rc::clone(&u));
+                    }
+
+                    println!("info string response");
+
+                    if !children.try_borrow()?.contains(&n) {
+                        return Err(ApplicationError::LogicError(String::from(
+                            "The update target node could not be found."
+                        )));
                     }
 
                     children.try_borrow_mut()?.remove(&n);
