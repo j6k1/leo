@@ -767,23 +767,19 @@ pub mod checkmate {
                 } else {
                     let children = &n.try_borrow()?.children;
 
-                    if children.try_borrow()?.len() == 0 {
-                        return Ok(MaybeMate::Nomate);
-                    } else {
-                        Rc::clone(children)
-                    }
+                    Rc::clone(children)
                 }
             } else {
                 let children = self.expand_root_nodes(uniq_id,teban,state,mc)?;
 
-                if children.try_borrow()?.len() == 0 {
-                    return Ok(MaybeMate::Nomate);
-                } else {
-                    children
-                }
+                children
             };
 
             println!("info string len {}",children.try_borrow()?.len());
+
+            if children.try_borrow()?.len() == 0 {
+                return Ok(MaybeMate::Nomate);
+            }
 
             loop {
                 let parent_id = if let Some(n) = current_node.as_ref() {
