@@ -799,10 +799,10 @@ pub mod checkmate {
                             _ => None,
                         };
 
-                        let mhash = self.hasher.calc_main_hash(mhash, teban.opposite(),
+                        let mhash = self.hasher.calc_main_hash(mhash, teban,
                                                                state.get_banmen(),
                                                                &mc, m.to_applied_move(), &o);
-                        let shash = self.hasher.calc_sub_hash(shash, teban.opposite(),
+                        let shash = self.hasher.calc_sub_hash(shash, teban,
                                                               state.get_banmen(),
                                                               &mc, m.to_applied_move(), &o);
 
@@ -1065,10 +1065,10 @@ pub mod checkmate {
                             _ => None,
                         };
 
-                        let mhash = self.hasher.calc_main_hash(mhash, teban.opposite(),
+                        let mhash = self.hasher.calc_main_hash(mhash, teban,
                                                                state.get_banmen(),
                                                                &mc, m.to_applied_move(), &o);
-                        let shash = self.hasher.calc_sub_hash(shash, teban.opposite(),
+                        let shash = self.hasher.calc_sub_hash(shash, teban,
                                                               state.get_banmen(),
                                                               &mc, m.to_applied_move(), &o);
                         {
