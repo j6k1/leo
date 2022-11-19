@@ -806,6 +806,10 @@ pub mod checkmate {
                             continue;
                         }
 
+                        if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
+                            continue;
+                        }
+
                         let m = n.try_borrow()?.m;
 
                         println!("info string {:?}",m.to_move());
