@@ -1168,7 +1168,7 @@ pub mod checkmate {
                     let sennichite = n.try_borrow()?.sennichite;
 
                     if !sennichite {
-                        node_map.insert(teban, mh, sh, Rc::clone(&u));
+                        node_map.insert(teban.opposite(), mh, sh, Rc::clone(&u));
                     }
 
                     children.try_borrow_mut()?.remove(&n);
