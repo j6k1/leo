@@ -24,7 +24,7 @@ pub enum MaybeMate {
     Nomate,
     MateMoves(VecDeque<LegalMove>),
     Unknown,
-    Continuation(Rc<RefCell<Node>>,Teban,u64,u64),
+    Continuation(Rc<RefCell<Node>>,u64,u64),
     MaxDepth,
     Skip,
     MaxNodes,
@@ -43,8 +43,8 @@ impl Debug for MaybeMate {
             &MaybeMate::Unknown => {
                 write!(f,"MaybeMate::Unknown")
             },
-            &MaybeMate::Continuation(_,teban,_,_) => {
-                write!(f,"MaybeMate::Continuation({:?})",teban)
+            &MaybeMate::Continuation(_,_,_) => {
+                write!(f,"MaybeMate::Continuation")
             },
             &MaybeMate::MaxDepth => {
                 write!(f,"MaybeMate::MaxDepth")
@@ -753,7 +753,7 @@ pub mod checkmate {
                         n = Rc::new(RefCell::new(u));
                     }
 
-                    return Ok(MaybeMate::Continuation(n,teban,mhash,shash));
+                    return Ok(MaybeMate::Continuation(n,mhash,shash));
                 } else {
                     let children = &n.try_borrow()?.children;
 
@@ -820,7 +820,7 @@ pub mod checkmate {
 
                                 let u = Rc::new(RefCell::new(u));
 
-                                update_info = Some((Rc::clone(n), u,teban,mhash,shash));
+                                update_info = Some((Rc::clone(n), u,teban.opposite(),mhash,shash));
                                 break;
                             }
                         }
@@ -853,7 +853,7 @@ pub mod checkmate {
                                                          &state,
                                                          &mc
                                 )? {
-                                    MaybeMate::Continuation(u,teban,mhash,shash) => {
+                                    MaybeMate::Continuation(u,mhash,shash) => {
                                         update_info = Some((Rc::clone(n), u,teban,mhash,shash));
                                         break;
                                     },
@@ -897,7 +897,7 @@ pub mod checkmate {
                     let sennichite = n.try_borrow()?.sennichite;
 
                     if !sennichite {
-                        node_map.insert(t, mh, sh, Rc::clone(&u));
+                        node_map.insert(t.opposite(), mh, sh, Rc::clone(&u));
                     }
 
                     children.try_borrow_mut()?.remove(&n);
@@ -911,9 +911,9 @@ pub mod checkmate {
 
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
-                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
+                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                         } else if u.pn != pn || u.dn != dn {
-                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
+                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                         }
                     } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
@@ -1023,7 +1023,7 @@ pub mod checkmate {
                         n = Rc::new(RefCell::new(u));
                     }
 
-                    return Ok(MaybeMate::Continuation(n,teban,mhash,shash));
+                    return Ok(MaybeMate::Continuation(n,mhash,shash));
                 } else {
                     let children = &n.try_borrow()?.children;
 
@@ -1085,7 +1085,7 @@ pub mod checkmate {
 
                                 let u = Rc::new(RefCell::new(u));
 
-                                update_info = Some((Rc::clone(n), u, teban, mhash, shash));
+                                update_info = Some((Rc::clone(n), u, mhash, shash));
                                 break;
                             }
 
@@ -1126,8 +1126,8 @@ pub mod checkmate {
                                                          &state,
                                                          &mc
                                 )? {
-                                    MaybeMate::Continuation(u,teban,mhash,shash) => {
-                                        update_info = Some((Rc::clone(n), u, teban, mhash, shash));
+                                    MaybeMate::Continuation(u,mhash,shash) => {
+                                        update_info = Some((Rc::clone(n), u, mhash, shash));
                                         break;
                                     },
                                     r @ MaybeMate::MaxNodes => {
@@ -1164,11 +1164,11 @@ pub mod checkmate {
                     }
                 }
 
-                if let Some((n, u,t,mh,sh)) = update_info.take() {
+                if let Some((n, u,mh,sh)) = update_info.take() {
                     let sennichite = n.try_borrow()?.sennichite;
 
                     if !sennichite {
-                        node_map.insert(t, mh, sh, Rc::clone(&u));
+                        node_map.insert(teban, mh, sh, Rc::clone(&u));
                     }
 
                     children.try_borrow_mut()?.remove(&n);
@@ -1184,9 +1184,9 @@ pub mod checkmate {
                     let u = self.update_node(depth, &n)?;
 
                     if u.pn == Number::INFINITE && u.dn.is_zero() {
-                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
+                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                     } else if u.pn != pn || u.dn != dn {
-                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),teban,mhash,shash));
+                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                     }
                 } else {
                     break;
