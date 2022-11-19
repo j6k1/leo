@@ -241,7 +241,7 @@ pub mod checkmate {
     use std::cell::{RefCell};
     use std::cmp::Ordering;
     use std::collections::{BTreeSet, VecDeque};
-    use std::ops::{Add, AddAssign};
+    use std::ops::{Add, AddAssign, Div};
     use std::rc::{Rc};
     use std::sync::atomic::{AtomicBool};
     use std::sync::{Arc, atomic, Mutex};
@@ -296,6 +296,16 @@ pub mod checkmate {
 
             *self = v;
         }    
+    }
+
+    impl Div<u64> for Number {
+        type Output = Number;
+        fn div(self, rhs: u64) -> Self::Output {
+            match self {
+                Number::INFINITE => Number::INFINITE,
+                Number::Value(f) => Number::Value(f / rhs)
+            }
+        }
     }
 
     pub struct Node {
@@ -653,8 +663,8 @@ pub mod checkmate {
 
                 let mut n = Node::new_or_node(id,m);
 
-                n.pn = pn;
-                n.dn = dn;
+                n.pn = pn / ref_count;
+                n.dn = dn / ref_count;
                 n.children = children;
                 n.ref_count = ref_count;
                 n.skip_depth = skip_depth;
@@ -673,8 +683,8 @@ pub mod checkmate {
 
                 let mut n = Node::new_and_node(id,m);
 
-                n.pn = pn;
-                n.dn = dn;
+                n.pn = pn / ref_count;
+                n.dn = dn / ref_count;
                 n.children = children;
                 n.ref_count = ref_count;
                 n.skip_depth = skip_depth;
@@ -1080,6 +1090,10 @@ pub mod checkmate {
                             }
 
                             if s {
+                                let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.max(depth));
+
+                                n.try_borrow_mut()?.skip_depth = skip_depth;
+
                                 continue;
                             }
                         }
