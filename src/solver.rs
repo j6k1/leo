@@ -767,7 +767,11 @@ pub mod checkmate {
                 } else {
                     let children = &n.try_borrow()?.children;
 
-                    Rc::clone(children)
+                    if children.try_borrow()?.len() == 0 {
+                        return Ok(MaybeMate::Nomate);
+                    } else {
+                        Rc::clone(children)
+                    }
                 }
             } else {
                 let children = self.expand_root_nodes(uniq_id,teban,state,mc)?;
@@ -793,7 +797,7 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
-                    println!("info string len {}",children.try_borrow()?.len());
+                    //println!("info string len {}",children.try_borrow()?.len());
 
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.sennichite {
