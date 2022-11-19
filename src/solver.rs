@@ -760,9 +760,11 @@ pub mod checkmate {
             };
 
             loop {
-                let parent_id = current_node.as_ref().map(|n| {
-                    n.try_borrow().map(|n| n.id)
-                }).unwrap_or(Ok(parent_id))?;
+                let parent_id = if let Some(n) = current_node.as_ref() {
+                    self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
+                } else {
+                    parent_id
+                };
 
                 let mut update_info = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
@@ -795,9 +797,10 @@ pub mod checkmate {
                                                               &mc, m.to_applied_move(), &o);
 
                         {
+                            let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
-                            if sc {
+                            if s || sc {
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::INFINITE;
@@ -1023,9 +1026,11 @@ pub mod checkmate {
             };
 
             loop {
-                let parent_id = current_node.as_ref().map(|n| {
-                    n.try_borrow().map(|n| n.id)
-                }).unwrap_or(Ok(parent_id))?;
+                let parent_id = if let Some(n) = current_node.as_ref() {
+                    self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
+                } else {
+                    parent_id
+                };
 
                 let mut update_info = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
@@ -1060,7 +1065,7 @@ pub mod checkmate {
                             let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
-                            if s || sc {
+                            if sc {
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::Value(Fraction::new(0));
@@ -1072,6 +1077,10 @@ pub mod checkmate {
 
                                 update_info = Some((Rc::clone(n), u, teban, mhash, shash));
                                 break;
+                            }
+
+                            if s {
+                                continue;
                             }
                         }
 
