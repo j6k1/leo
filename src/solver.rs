@@ -25,6 +25,7 @@ pub enum MaybeMate {
     MateMoves(VecDeque<LegalMove>),
     Unknown,
     Continuation(Rc<RefCell<Node>>,u64,u64),
+    Mate,
     MaxDepth,
     Skip,
     MaxNodes,
@@ -45,6 +46,9 @@ impl Debug for MaybeMate {
             },
             &MaybeMate::Continuation(_,_,_) => {
                 write!(f,"MaybeMate::Continuation")
+            },
+            &MaybeMate::Mate => {
+                write!(f,"MaybeMate::Mate")
             },
             &MaybeMate::MaxDepth => {
                 write!(f,"MaybeMate::MaxDepth")
@@ -735,7 +739,13 @@ pub mod checkmate {
             let children = if let Some(n) = current_node.as_ref() {
                 let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
+                if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
+                    return Ok(MaybeMate::Nomate);
+                }
+
                 let expanded = n.try_borrow()?.expanded;
+
+                println!("info string expanded {}",expanded);
 
                 if !expanded {
                     self.expand_nodes(depth, mhash,shash,uniq_id, &n,node_map, teban, state, mc)?;
@@ -751,6 +761,8 @@ pub mod checkmate {
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
+
+                        println!("info string nomate.");
                     }
 
                     return Ok(MaybeMate::Continuation(n,mhash,shash));
@@ -769,6 +781,8 @@ pub mod checkmate {
                 }
             };
 
+            println!("info string len {}",children.try_borrow()?.len());
+
             loop {
                 let parent_id = if let Some(n) = current_node.as_ref() {
                     self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
@@ -781,12 +795,23 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
+                    println!("info string len {}",children.try_borrow()?.len());
+
                     for n in children.try_borrow()?.iter() {
+                        if n.try_borrow()?.sennichite {
+                            println!("info string skip sennichite.");
+                            continue;
+                        }
+
                         if n.try_borrow()?.skip_depth.map(|d| d <= depth).unwrap_or(false) {
+                            println!("info string skip {}",depth);
                             continue;
                         }
 
                         let m = n.try_borrow()?.m;
+
+                        println!("info string {:?}",m.to_move());
+                        println!("info string pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
 
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
@@ -811,6 +836,7 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if s || sc {
+                                println!("info string sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::INFINITE;
@@ -857,6 +883,17 @@ pub mod checkmate {
                                         update_info = Some((Rc::clone(n), u,teban,mhash,shash));
                                         break;
                                     },
+                                    MaybeMate::Nomate => {
+
+                                    },
+                                    MaybeMate::Mate if depth == 0 && !self.strict_moves => {
+                                        return Ok(MaybeMate::MateMoves(self.build_moves(n)?));
+                                    },
+                                    MaybeMate::Mate if depth == 0 => {
+                                    },
+                                    MaybeMate::Mate => {
+                                        return Ok(MaybeMate::Mate);
+                                    },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
                                     },
@@ -900,14 +937,18 @@ pub mod checkmate {
                         node_map.insert(t.opposite(), mh, sh, Rc::clone(&u));
                     }
 
+                    println!("info string borrow children.");
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
+                    println!("info string borrowed children.");
 
                     if let Some(n) = current_node.as_ref() {
                         let n = self.normalize_node(n,mhash,shash,teban,node_map)?;
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
                         let mut u = self.update_node(depth, &n)?;
+
+                        println!("info string {}, pn {:?}, u.pn {:?}, dn {:?}, u.dn {:?}",depth,pn,u.pn,dn,u.dn);
 
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
                             u.mate_depth = mate_depth + 1;
@@ -1004,6 +1045,10 @@ pub mod checkmate {
             let children = if let Some(n) = current_node.as_ref() {
                 let mut n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
+                if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
+                    return Ok(MaybeMate::Mate);
+                }
+
                 let expanded = n.try_borrow()?.expanded;
 
                 if !expanded {
@@ -1035,6 +1080,8 @@ pub mod checkmate {
                 )));
             };
 
+            println!("info string response len {}",children.try_borrow()?.len());
+
             loop {
                 let parent_id = if let Some(n) = current_node.as_ref() {
                     self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
@@ -1048,6 +1095,10 @@ pub mod checkmate {
 
                 {
                     for n in children.try_borrow()?.iter() {
+                        if n.try_borrow()?.sennichite {
+                            continue;
+                        }
+
                         if n.try_borrow()?.skip_depth.map(|d| d <= depth).unwrap_or(false) {
                             continue;
                         }
@@ -1076,6 +1127,7 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if sc {
+                                println!("info string response sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::Value(Fraction::new(0));
@@ -1130,6 +1182,12 @@ pub mod checkmate {
                                         update_info = Some((Rc::clone(n), u, mhash, shash));
                                         break;
                                     },
+                                    MaybeMate::Nomate => {
+                                        return Ok(MaybeMate::Nomate);
+                                    },
+                                    MaybeMate::Mate => {
+
+                                    },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
                                     },
@@ -1183,7 +1241,10 @@ pub mod checkmate {
                     let dn = n.try_borrow()?.dn;
                     let u = self.update_node(depth, &n)?;
 
+                    println!("info string update response pn {:?}, dn {:?}",u.pn,u.dn);
+
                     if u.pn == Number::INFINITE && u.dn.is_zero() {
+                        println!("info string return nomate.");
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                     } else if u.pn != pn || u.dn != dn {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
