@@ -223,8 +223,8 @@ impl Solver {
         strategy.oute_process(0,
                               ms.mhash,
                               ms.shash,
-                              &KyokumenMap::new(),
-                              &KyokumenMap::new(),
+                              &mut KyokumenMap::new(),
+                              &mut KyokumenMap::new(),
                               &mut uniq_id,
                               None,
                               &mut KyokumenMap::new(),
@@ -587,6 +587,21 @@ pub mod checkmate {
                                                 event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
                                                 teban:Teban, state:&State, mc:&MochigomaCollections)
                                                 -> Result<MaybeMate,ApplicationError> where S: InfoSender + Send {
+
+            let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
+            let mut current_kyokumen_map = current_kyokumen_map.clone();
+
+            ignore_kyokumen_map.insert(teban, mhash, shash, ());
+
+            match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
+                &c => {
+                    current_kyokumen_map.insert(teban, mhash, shash, c + 1);
+                }
+            }
+
+            let ignore_kyokumen_map = &mut ignore_kyokumen_map;
+            let current_kyokumen_map = &mut current_kyokumen_map;
+
             let r = if depth % 2 == 0 {
                 match self.oute_process(depth,
                                         mhash,
@@ -701,8 +716,8 @@ pub mod checkmate {
                                        depth:u32,
                                        mhash:u64,
                                        shash:u64,
-                                       ignore_kyokumen_map:&KyokumenMap<u64,()>,
-                                       current_kyokumen_map:&KyokumenMap<u64,u32>,
+                                       ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
+                                       current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                        uniq_id:&mut UniqID,
                                        current_node:Option<Rc<RefCell<Node>>>,
                                        node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
@@ -785,9 +800,6 @@ pub mod checkmate {
 
             loop {
                 let mut update_info = None;
-                let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
-                let mut current_kyokumen_map = current_kyokumen_map.clone();
-
                 {
                     println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
@@ -844,14 +856,6 @@ pub mod checkmate {
                             }
                         }
 
-                        ignore_kyokumen_map.insert(teban, mhash, shash, ());
-
-                        match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
-                            &c => {
-                                current_kyokumen_map.insert(teban, mhash, shash, c + 1);
-                            }
-                        }
-
                         let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
                         match next {
@@ -859,8 +863,8 @@ pub mod checkmate {
                                 match self.inter_process(depth + 1,
                                                          mhash,
                                                          shash,
-                                                         &mut ignore_kyokumen_map,
-                                                         &mut current_kyokumen_map,
+                                                         ignore_kyokumen_map,
+                                                         current_kyokumen_map,
                                                          uniq_id,
                                                          Some(Rc::clone(n)),
                                                          node_map,
@@ -1073,9 +1077,6 @@ pub mod checkmate {
 
             loop {
                 let mut update_info = None;
-                let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
-                let mut current_kyokumen_map = current_kyokumen_map.clone();
-
                 {
                     println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
@@ -1136,14 +1137,6 @@ pub mod checkmate {
                             }
                         }
 
-                        ignore_kyokumen_map.insert(teban, mhash, shash, ());
-
-                        match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
-                            &c => {
-                                current_kyokumen_map.insert(teban, mhash, shash, c + 1);
-                            }
-                        }
-
                         let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
                         match next {
@@ -1151,8 +1144,8 @@ pub mod checkmate {
                                 match self.inter_process(depth + 1,
                                                          mhash,
                                                          shash,
-                                                         &mut ignore_kyokumen_map,
-                                                         &mut current_kyokumen_map,
+                                                         ignore_kyokumen_map,
+                                                         current_kyokumen_map,
                                                          uniq_id,
                                                          Some(Rc::clone(n)),
                                                          node_map,
