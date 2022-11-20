@@ -455,13 +455,13 @@ pub mod checkmate {
                              node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
             -> Result<Rc<RefCell<Node>>,ApplicationError> {
 
-            let expanded = n.try_borrow()?.expanded;
-
             if n.try_borrow()?.sennichite {
                 return Ok(Rc::clone(n))
             }
 
             if let Some(c) = node_map.get(teban,&mhash,&shash) {
+                let expanded = c.try_borrow()?.expanded;
+
                 if !expanded {
                     c.try_borrow_mut()?.ref_count += 1;
                 }
