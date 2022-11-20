@@ -219,7 +219,6 @@ impl Solver {
         let mut event_dispatcher = Root::<L,S>::create_event_dispatcher::<CheckmateStrategy<S>>(on_error_handler,&stop,&quited);
 
         let mut uniq_id = UniqID::new();
-        let id = uniq_id.gen();
 
         strategy.oute_process(0,
                               ms.mhash,
@@ -227,7 +226,6 @@ impl Solver {
                               &KyokumenMap::new(),
                               &KyokumenMap::new(),
                               &mut uniq_id,
-                              id,
                               None,
                               &mut KyokumenMap::new(),
 
@@ -582,7 +580,6 @@ pub mod checkmate {
                                                 ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                                 uniq_id:&mut UniqID,
-                                                parent_id:u64,
                                                 current_node:Option<Rc<RefCell<Node>>>,
                                                 node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                                 mate_depth:&mut Option<u32>,
@@ -597,7 +594,6 @@ pub mod checkmate {
                                         ignore_kyokumen_map,
                                         current_kyokumen_map,
                                         uniq_id,
-                                        parent_id,
                                         current_node,
                                         node_map,
                                         mate_depth,
@@ -617,7 +613,6 @@ pub mod checkmate {
                                         ignore_kyokumen_map,
                                         current_kyokumen_map,
                                         uniq_id,
-                                        parent_id,
                                         current_node,
                                         node_map,
                                         mate_depth,
@@ -709,7 +704,6 @@ pub mod checkmate {
                                        ignore_kyokumen_map:&KyokumenMap<u64,()>,
                                        current_kyokumen_map:&KyokumenMap<u64,u32>,
                                        uniq_id:&mut UniqID,
-                                       parent_id:u64,
                                        current_node:Option<Rc<RefCell<Node>>>,
                                        node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                        mate_depth:&mut Option<u32>,
@@ -790,12 +784,6 @@ pub mod checkmate {
             }
 
             loop {
-                let parent_id = if let Some(n) = current_node.as_ref() {
-                    self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
-                } else {
-                    parent_id
-                };
-
                 let mut update_info = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
@@ -874,7 +862,6 @@ pub mod checkmate {
                                                          &mut ignore_kyokumen_map,
                                                          &mut current_kyokumen_map,
                                                          uniq_id,
-                                                         parent_id,
                                                          Some(Rc::clone(n)),
                                                          node_map,
                                                          mate_depth,
@@ -1001,7 +988,6 @@ pub mod checkmate {
                                                 ignore_kyokumen_map:&mut KyokumenMap<u64,()>,
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                                 uniq_id:&mut UniqID,
-                                                parent_id:u64,
                                                 current_node:Option<Rc<RefCell<Node>>>,
                                                 node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
                                                 mate_depth:&mut Option<u32>,
@@ -1086,12 +1072,6 @@ pub mod checkmate {
             }
 
             loop {
-                let parent_id = if let Some(n) = current_node.as_ref() {
-                    self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
-                } else {
-                    parent_id
-                };
-
                 let mut update_info = None;
                 let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
@@ -1174,7 +1154,6 @@ pub mod checkmate {
                                                          &mut ignore_kyokumen_map,
                                                          &mut current_kyokumen_map,
                                                          uniq_id,
-                                                         parent_id,
                                                          Some(Rc::clone(n)),
                                                          node_map,
                                                          mate_depth,
