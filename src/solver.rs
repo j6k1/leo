@@ -936,7 +936,12 @@ pub mod checkmate {
 
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)), mhash, shash));
                     } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
+                        *mate_depth = Some(md + 1);
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
+                    } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE && mate_depth.map(|d| {
+                        md + 1 < d
+                    }).unwrap_or(false) {
+                        *mate_depth = Some(md + 1);
                     }
                 } else {
                     break;
@@ -1057,6 +1062,7 @@ pub mod checkmate {
             };
 
             if children.try_borrow()?.len() == 0 {
+                println!("info string return mate.");
                 return Ok(MaybeMate::Mate);
             }
 
