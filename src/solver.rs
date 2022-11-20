@@ -116,18 +116,11 @@ impl Add for Fraction {
         let d = ad * bd;
         let n = an + bn;
 
-        if n >= d {
-            let g = gcd(n,d);
+        let g = gcd(n,d);
 
-            Fraction {
-                n:n / g,
-                d:d / g
-            }
-        } else {
-            Fraction {
-                n:n,
-                d:d
-            }
+        Fraction {
+            n:n / g,
+            d:d / g
         }
     }
 }
@@ -142,18 +135,11 @@ impl Div<u64> for Fraction {
         let n = self.n;
         let d = self.d * rhs;
 
-        if n >= d {
-            let g = gcd(n,d);
+        let g = gcd(n,d);
 
-            Fraction {
-                n:n / g,
-                d:d / g
-            }
-        } else {
-            Fraction {
-                n:n,
-                d:d
-            }
+        Fraction {
+            n:n / g,
+            d:d / g
         }
     }
 }
@@ -919,7 +905,7 @@ pub mod checkmate {
                 }
 
                 if let Some((n, u,mh,sh)) = update_info.take() {
-                    let mate_depth = mate_depth.map(|d| d - depth).unwrap_or(0);
+                    let md = u.try_borrow()?.mate_depth;
 
                     let sennichite = u.try_borrow()?.sennichite;
 
@@ -944,8 +930,10 @@ pub mod checkmate {
                         let mut u = self.update_node(depth, &n)?;
 
                         println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
-                        if u.pn != pn || u.dn != dn || u.mate_depth != mate_depth {
-                            u.mate_depth = mate_depth;
+                        if u.pn.is_zero() && u.dn == Number::INFINITE {
+                            u.mate_depth = md + 1;
+                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)), mhash, shash));
+                        } else if u.pn != pn || u.dn != dn {
                             return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)), mhash, shash));
                         } else {
                             n.try_borrow_mut()?.children = u.children;
@@ -1215,8 +1203,7 @@ pub mod checkmate {
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
-                    let mate_depth = mate_depth.map(|d| d - depth).unwrap_or(0);
-
+                    let mate_depth = u.try_borrow()?.mate_depth;
                     let n = current_node.as_ref().map(|n| Rc::clone(n))
                                                          .ok_or(ApplicationError::LogicError(String::from(
                                                             "current node is not set."
@@ -1227,8 +1214,10 @@ pub mod checkmate {
                     let mut u = self.update_node(depth, &n)?;
 
                     println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
-                    if u.pn != pn || u.dn != dn || u.mate_depth != mate_depth {
-                        u.mate_depth = mate_depth;
+                    if u.pn.is_zero() && u.dn == Number::INFINITE {
+                        u.mate_depth = mate_depth + 1;
+                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
+                    } else if u.pn != pn || u.dn != dn {
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                     } else {
                         n.try_borrow_mut()?.children = u.children;
