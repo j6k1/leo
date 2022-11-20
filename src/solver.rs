@@ -716,6 +716,10 @@ pub mod checkmate {
                 return Ok(MaybeMate::Aborted)
             }
 
+            if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
+                return Ok(MaybeMate::Skip);
+            }
+
             if self.max_depth.map(|d| depth > d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
