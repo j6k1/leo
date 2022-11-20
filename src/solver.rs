@@ -864,7 +864,6 @@ pub mod checkmate {
 
                                         u.pn = Number::INFINITE;
                                         u.expanded = true;
-                                        u.sennichite = true;
 
                                         let u = Rc::new(RefCell::new(u));
 
@@ -1145,7 +1144,6 @@ pub mod checkmate {
 
                                         u.dn = Number::INFINITE;
                                         u.expanded = true;
-                                        u.sennichite = true;
 
                                         let u = Rc::new(RefCell::new(u));
 
