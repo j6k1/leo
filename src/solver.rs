@@ -790,10 +790,12 @@ pub mod checkmate {
                     println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.sennichite {
+                            println!("info string skip sennichite.");
                             continue;
                         }
 
                         if n.try_borrow()?.skip_depth.map(|d| d <= depth).unwrap_or(false) {
+                            println!("info string skip skip_depth");
                             continue;
                         }
 
@@ -924,20 +926,15 @@ pub mod checkmate {
 
                     if let Some(n) = current_node.as_ref() {
                         let n = self.normalize_node(n,mhash,shash,teban,node_map)?;
-                        let pn = n.try_borrow()?.pn;
-                        let dn = n.try_borrow()?.dn;
 
                         let mut u = self.update_node(depth, &n)?;
 
                         println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
                             u.mate_depth = md + 1;
-                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)), mhash, shash));
-                        } else if u.pn != pn || u.dn != dn {
-                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)), mhash, shash));
-                        } else {
-                            n.try_borrow_mut()?.children = u.children;
                         }
+
+                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)), mhash, shash));
                     } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
                     }
@@ -1069,10 +1066,12 @@ pub mod checkmate {
                     println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.sennichite {
+                            println!("info string skip sennichite response.");
                             continue;
                         }
 
                         if n.try_borrow()?.skip_depth.map(|d| d <= depth).unwrap_or(false) {
+                            println!("info string skip skip_depth response");
                             continue;
                         }
 
@@ -1209,19 +1208,14 @@ pub mod checkmate {
                                                             "current node is not set."
                                                          )))?;
                     let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
-                    let pn = n.try_borrow()?.pn;
-                    let dn = n.try_borrow()?.dn;
                     let mut u = self.update_node(depth, &n)?;
 
                     println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
                     if u.pn.is_zero() && u.dn == Number::INFINITE {
                         u.mate_depth = mate_depth + 1;
-                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
-                    } else if u.pn != pn || u.dn != dn {
-                        return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
-                    } else {
-                        n.try_borrow_mut()?.children = u.children;
                     }
+
+                    return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                 } else {
                     break;
                 }
