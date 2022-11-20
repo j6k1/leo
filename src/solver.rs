@@ -591,11 +591,11 @@ pub mod checkmate {
             let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
             let mut current_kyokumen_map = current_kyokumen_map.clone();
 
-            ignore_kyokumen_map.insert(teban, mhash, shash, ());
+            ignore_kyokumen_map.insert(teban.opposite(), mhash, shash, ());
 
-            match current_kyokumen_map.get(teban, &mhash, &shash).unwrap_or(&0) {
+            match current_kyokumen_map.get(teban.opposite(), &mhash, &shash).unwrap_or(&0) {
                 &c => {
-                    current_kyokumen_map.insert(teban, mhash, shash, c + 1);
+                    current_kyokumen_map.insert(teban.opposite(), mhash, shash, c + 1);
                 }
             }
 
