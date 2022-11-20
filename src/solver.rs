@@ -25,6 +25,7 @@ pub enum MaybeMate {
     MateMoves(VecDeque<LegalMove>),
     Unknown,
     Continuation(Rc<RefCell<Node>>,u64,u64),
+    Mate,
     MaxDepth,
     Skip,
     MaxNodes,
@@ -45,6 +46,9 @@ impl Debug for MaybeMate {
             },
             &MaybeMate::Continuation(_,_,_) => {
                 write!(f,"MaybeMate::Continuation")
+            },
+            &MaybeMate::Mate => {
+                write!(f,"MaybeMate::Mate")
             },
             &MaybeMate::MaxDepth => {
                 write!(f,"MaybeMate::MaxDepth")
@@ -237,7 +241,6 @@ impl Solver {
 }
 
 pub mod checkmate {
-    use std::borrow::Borrow;
     use std::cell::{RefCell};
     use std::cmp::Ordering;
     use std::collections::{BTreeSet, VecDeque};
@@ -405,9 +408,9 @@ pub mod checkmate {
     impl Comparator<Node> for OrNodeComparator {
         #[inline]
         fn cmp(&self,l:&Node,r:&Node) -> Ordering {
-            l.borrow().pn.cmp(&r.borrow().pn)
-                .then(l.borrow().mate_depth.cmp(&r.borrow().mate_depth))
-                .then(l.borrow().id.cmp(&r.borrow().id))
+            l.pn.cmp(&r.pn)
+                .then(l.mate_depth.cmp(&r.mate_depth))
+                .then(l.id.cmp(&r.id))
         }
     }
 
@@ -417,9 +420,9 @@ pub mod checkmate {
     impl Comparator<Node> for AndNodeComparator {
         #[inline]
         fn cmp(&self,l:&Node,r:&Node) -> Ordering {
-            l.borrow().dn.cmp(&r.borrow().dn)
-                .then(l.borrow().mate_depth.cmp(&r.borrow().mate_depth))
-                .then(l.borrow().id.cmp(&r.borrow().id))
+            l.dn.cmp(&r.dn)
+                .then(l.mate_depth.cmp(&r.mate_depth))
+                .then(l.id.cmp(&r.id))
         }
     }
 
@@ -764,7 +767,7 @@ pub mod checkmate {
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(Fraction::new(0));
                         u.ref_count = n.try_borrow()?.ref_count;
-                        u.skip_depth = n.try_borrow()?.skip_depth.clone();
+                        u.skip_depth = n.try_borrow()?.skip_depth;
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
@@ -798,6 +801,7 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
+                    println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.sennichite {
                             continue;
@@ -813,6 +817,7 @@ pub mod checkmate {
 
                         let m = n.try_borrow()?.m;
 
+                        println!("info string {} pn {:?}, dn {:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -836,6 +841,7 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if s || sc {
+                                println!("info string sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::INFINITE;
@@ -879,6 +885,7 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
+                                        println!("info {} pn {:?}, dn {:?}",depth, u.try_borrow()?.pn,u.try_borrow()?.dn);
                                         update_info = Some((Rc::clone(n), u,mhash,shash));
                                         break;
                                     },
@@ -894,8 +901,9 @@ pub mod checkmate {
                                     r @ MaybeMate::Aborted => {
                                         return Ok(r);
                                     },
-                                    MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.max(depth));
+                                    MaybeMate::Skip | MaybeMate::MaxDepth | MaybeMate::Mate => {
+                                        println!("info string {}, skip.",depth);
+                                        let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.min(depth));
 
                                         n.try_borrow_mut()?.skip_depth = skip_depth;
                                     },
@@ -920,7 +928,7 @@ pub mod checkmate {
                 }
 
                 if let Some((n, u,mh,sh)) = update_info.take() {
-                    let mate_depth = u.try_borrow()?.mate_depth;
+                    let mate_depth = mate_depth.map(|d| d - depth).unwrap_or(0);
 
                     let sennichite = u.try_borrow()?.sennichite;
 
@@ -941,12 +949,12 @@ pub mod checkmate {
                         let n = self.normalize_node(n,mhash,shash,teban,node_map)?;
                         let pn = n.try_borrow()?.pn;
                         let dn = n.try_borrow()?.dn;
+
                         let mut u = self.update_node(depth, &n)?;
 
-                        if u.pn.is_zero() && u.dn == Number::INFINITE {
-                            u.mate_depth = mate_depth + 1;
-                            return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
-                        } else if u.pn != pn || u.dn != dn {
+                        println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
+                        if u.pn != pn || u.dn != dn || u.mate_depth != mate_depth {
+                            u.mate_depth = mate_depth;
                             return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)), mhash, shash));
                         } else {
                             n.try_borrow_mut()?.children = u.children;
@@ -1055,7 +1063,7 @@ pub mod checkmate {
                         u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
                         u.ref_count = n.try_borrow()?.ref_count;
-                        u.skip_depth = n.try_borrow()?.skip_depth.clone();
+                        u.skip_depth = n.try_borrow()?.skip_depth;
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
@@ -1073,6 +1081,10 @@ pub mod checkmate {
                 )));
             };
 
+            if children.try_borrow()?.len() == 0 {
+                return Ok(MaybeMate::Mate);
+            }
+
             loop {
                 let parent_id = if let Some(n) = current_node.as_ref() {
                     self.normalize_node(n,mhash,shash,teban,node_map)?.try_borrow()?.id
@@ -1085,6 +1097,7 @@ pub mod checkmate {
                 let mut current_kyokumen_map = current_kyokumen_map.clone();
 
                 {
+                    println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
                         if n.try_borrow()?.sennichite {
                             continue;
@@ -1096,6 +1109,7 @@ pub mod checkmate {
 
                         let m = n.try_borrow()?.m;
 
+                        println!("info string {} pn {:?}, dn {:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -1118,6 +1132,7 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if sc {
+                                println!("info string response sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::Value(Fraction::new(0));
@@ -1132,6 +1147,7 @@ pub mod checkmate {
                             }
 
                             if s {
+                                println!("info string response sennichite continue.");
                                 let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.max(depth));
 
                                 n.try_borrow_mut()?.skip_depth = skip_depth;
@@ -1169,6 +1185,7 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
+                                        println!("info {} pn {:?}, dn {:?}",depth, u.try_borrow()?.pn,u.try_borrow()?.dn);
                                         update_info = Some((Rc::clone(n), u, mhash, shash));
                                         break;
                                     },
@@ -1184,8 +1201,9 @@ pub mod checkmate {
                                     r @ MaybeMate::Aborted => {
                                         return Ok(r);
                                     },
-                                    MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.max(depth));
+                                    MaybeMate::Skip | MaybeMate::MaxDepth | MaybeMate::Mate => {
+                                        println!("info string {}, skip.",depth);
+                                        let skip_depth = n.try_borrow()?.skip_depth.clone().map(|d| d.min(depth));
 
                                         n.try_borrow_mut()?.skip_depth = skip_depth;
                                     },
@@ -1225,6 +1243,8 @@ pub mod checkmate {
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
+                    let mate_depth = mate_depth.map(|d| d - depth).unwrap_or(0);
+
                     let n = current_node.as_ref().map(|n| Rc::clone(n))
                                                          .ok_or(ApplicationError::LogicError(String::from(
                                                             "current node is not set."
@@ -1232,9 +1252,11 @@ pub mod checkmate {
                     let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
                     let pn = n.try_borrow()?.pn;
                     let dn = n.try_borrow()?.dn;
-                    let u = self.update_node(depth, &n)?;
+                    let mut u = self.update_node(depth, &n)?;
 
-                    if u.pn != pn || u.dn != dn {
+                    println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
+                    if u.pn != pn || u.dn != dn || u.mate_depth != mate_depth {
+                        u.mate_depth = mate_depth;
                         return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
                     } else {
                         n.try_borrow_mut()?.children = u.children;
