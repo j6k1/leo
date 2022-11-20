@@ -773,10 +773,6 @@ pub mod checkmate {
                 children
             };
 
-            if children.try_borrow()?.len() == 0 {
-                return Ok(MaybeMate::Nomate);
-            }
-
             loop {
                 let mut update_info = None;
                 {
@@ -847,9 +843,6 @@ pub mod checkmate {
                                         update_info = Some((Rc::clone(n), u,mhash,shash));
                                         break;
                                     },
-                                    MaybeMate::Nomate => {
-
-                                    },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
                                     },
@@ -881,13 +874,13 @@ pub mod checkmate {
                                 }
                             }
                         }
-
-                        event_dispatcher.dispatch_events(self,event_queue)?;
-
-                        if self.stop.load(atomic::Ordering::Acquire) {
-                            return Ok(MaybeMate::Aborted)
-                        }
                     }
+                }
+
+                event_dispatcher.dispatch_events(self,event_queue)?;
+
+                if self.stop.load(atomic::Ordering::Acquire) {
+                    return Ok(MaybeMate::Aborted)
                 }
 
                 if let Some((n, u,mh,sh)) = update_info.take() {
@@ -1126,9 +1119,6 @@ pub mod checkmate {
                                         update_info = Some((Rc::clone(n), u, mhash, shash));
                                         break;
                                     },
-                                    MaybeMate::Nomate => {
-                                        return Ok(MaybeMate::Nomate);
-                                    },
                                     r @ MaybeMate::MaxNodes => {
                                         return Ok(r);
                                     },
@@ -1148,6 +1138,7 @@ pub mod checkmate {
                                         let u = Rc::new(RefCell::new(u));
 
                                         update_info = Some((Rc::clone(n), u,mhash,shash));
+                                        break;
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -1160,13 +1151,13 @@ pub mod checkmate {
                                 }
                             }
                         }
-
-                        event_dispatcher.dispatch_events(self,event_queue)?;
-
-                        if self.stop.load(atomic::Ordering::Acquire) {
-                            return Ok(MaybeMate::Aborted)
-                        }
                     }
+                }
+
+                event_dispatcher.dispatch_events(self,event_queue)?;
+
+                if self.stop.load(atomic::Ordering::Acquire) {
+                    return Ok(MaybeMate::Aborted)
                 }
 
                 if let Some((n, u,mh,sh)) = update_info.take() {
