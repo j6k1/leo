@@ -776,11 +776,9 @@ pub mod checkmate {
             loop {
                 let mut update_info = None;
                 {
-                    println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
                         let m = n.try_borrow()?.m;
 
-                        println!("info string {} pn {:?}, dn {:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -804,7 +802,6 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if s || sc {
-                                println!("info string sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::INFINITE;
@@ -839,7 +836,6 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
-                                        println!("info {} pn {:?}, dn {:?}",depth, u.try_borrow()?.pn,u.try_borrow()?.dn);
                                         update_info = Some((Rc::clone(n), u,mhash,shash));
                                         break;
                                     },
@@ -906,7 +902,6 @@ pub mod checkmate {
 
                         let mut u = self.update_node(depth, &n)?;
 
-                        println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
                             u.mate_depth = md + 1;
                         }
@@ -1039,11 +1034,9 @@ pub mod checkmate {
             loop {
                 let mut update_info = None;
                 {
-                    println!("info string {} len {}",depth,children.try_borrow()?.len());
                     for n in children.try_borrow()?.iter() {
                         let m = n.try_borrow()?.m;
 
-                        println!("info string {} pn {:?}, dn {:?}",depth,n.try_borrow()?.pn,n.try_borrow()?.dn);
                         if self.stop.load(atomic::Ordering::Acquire) {
                             return Ok(MaybeMate::Aborted)
                         }
@@ -1066,7 +1059,6 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if sc {
-                                println!("info string response sennichite.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.pn = Number::Value(Fraction::new(0));
@@ -1081,7 +1073,6 @@ pub mod checkmate {
                             }
 
                             if s {
-                                println!("info string response sennichite continue.");
                                 let mut u = self.update_node(depth + 1, n)?;
 
                                 u.dn = Number::INFINITE;
@@ -1115,7 +1106,6 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
-                                        println!("info {} pn {:?}, dn {:?}",depth, u.try_borrow()?.pn,u.try_borrow()?.dn);
                                         update_info = Some((Rc::clone(n), u, mhash, shash));
                                         break;
                                     },
@@ -1129,7 +1119,6 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        println!("info string {}, skip.",depth);
                                         let mut u = self.update_node(depth + 1, n)?;
 
                                         u.dn = Number::INFINITE;
@@ -1184,7 +1173,6 @@ pub mod checkmate {
                     let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
                     let mut u = self.update_node(depth, &n)?;
 
-                    println!("info string {} update pn {:?}, dn {:?}",depth,u.pn,u.dn);
                     if u.pn.is_zero() && u.dn == Number::INFINITE {
                         u.mate_depth = mate_depth + 1;
                     }
