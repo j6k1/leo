@@ -394,6 +394,11 @@ impl Clone for Evalutor {
         }
     }
 }
+impl Drop for Evalutor {
+    fn drop(&mut self) {
+        self.sender.send(Message::Quit).expect("An error occurred during the termination process of Evalutor's calculation thread.");
+    }
+}
 pub struct Trainer<M>
     where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
 
