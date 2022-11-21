@@ -398,7 +398,7 @@ pub mod checkmate {
         #[inline]
         fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             l.dn.cmp(&r.dn)
-                .then(l.mate_depth.cmp(&r.mate_depth))
+                .then(r.mate_depth.cmp(&l.mate_depth))
                 .then(l.id.cmp(&r.id))
         }
     }
@@ -911,7 +911,7 @@ pub mod checkmate {
                         *mate_depth = Some(md + 1);
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
                     } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE && mate_depth.map(|d| {
-                        md + 1 < d
+                        md + 1 > d
                     }).unwrap_or(false) {
                         *mate_depth = Some(md + 1);
                     }
@@ -1173,7 +1173,7 @@ pub mod checkmate {
                     let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
                     let mut u = self.update_node(depth, &n)?;
 
-                    if u.pn.is_zero() && u.dn == Number::INFINITE && u.mate_depth < mate_depth + 1 {
+                    if u.pn.is_zero() && u.dn == Number::INFINITE {
                         u.mate_depth = mate_depth + 1;
                     }
 
