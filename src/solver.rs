@@ -1173,7 +1173,7 @@ pub mod checkmate {
                     let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
                     let mut u = self.update_node(depth, &n)?;
 
-                    if u.pn.is_zero() && u.dn == Number::INFINITE {
+                    if u.pn.is_zero() && u.dn == Number::INFINITE && u.mate_depth < mate_depth + 1 {
                         u.mate_depth = mate_depth + 1;
                     }
 
