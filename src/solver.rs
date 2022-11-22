@@ -301,7 +301,7 @@ pub mod checkmate {
         expanded:bool,
         m:LegalMove,
         children:Rc<RefCell<BTreeSet<Rc<RefCell<Node>>>>>,
-        comparator:Box<dyn Comparator<Node>>
+        comparator:Comparator
     }
 
     impl Node {
@@ -316,7 +316,7 @@ pub mod checkmate {
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
-                comparator:Box::new(AndNodeComparator)
+                comparator:Comparator::AndNodeComparator
             }
         }
 
@@ -331,7 +331,7 @@ pub mod checkmate {
                 expanded: false,
                 m:m,
                 children:Rc::new(RefCell::new(BTreeSet::new())),
-                comparator:Box::new(OrNodeComparator)
+                comparator:Comparator::OrNodeComparator
             }
         }
     }
@@ -356,6 +356,23 @@ pub mod checkmate {
         }
     }
 
+    impl Clone for Node {
+        fn clone(&self) -> Self {
+            Node {
+                id: self.id,
+                pn: self.pn,
+                dn: self.dn,
+                mate_depth: self.mate_depth,
+                ref_count: self.ref_count,
+                sennichite: self.sennichite,
+                expanded: self.expanded,
+                m: self.m,
+                children: Rc::clone(&self.children),
+                comparator: self.comparator.clone()
+            }
+        }
+    }
+
     pub struct UniqID {
         last_id:u64
     }
@@ -375,31 +392,26 @@ pub mod checkmate {
             id
         }
     }
-    pub trait Comparator<T> {
-        fn cmp(&self,l:&T,r:&T) -> Ordering;
+    #[derive(Clone,Copy)]
+    pub enum Comparator {
+        OrNodeComparator,
+        AndNodeComparator
     }
 
-    #[derive(Clone)]
-    pub struct OrNodeComparator;
-
-    impl Comparator<Node> for OrNodeComparator {
-        #[inline]
-        fn cmp(&self,l:&Node,r:&Node) -> Ordering {
-            l.pn.cmp(&r.pn)
-                .then(l.mate_depth.cmp(&r.mate_depth))
-                .then(l.id.cmp(&r.id))
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct AndNodeComparator;
-
-    impl Comparator<Node> for AndNodeComparator {
-        #[inline]
-        fn cmp(&self,l:&Node,r:&Node) -> Ordering {
-            l.dn.cmp(&r.dn)
-                .then(r.mate_depth.cmp(&l.mate_depth))
-                .then(l.id.cmp(&r.id))
+    impl Comparator {
+        pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
+            match self {
+                &Comparator::OrNodeComparator => {
+                    l.pn.cmp(&r.pn)
+                        .then(l.mate_depth.cmp(&r.mate_depth))
+                        .then(l.id.cmp(&r.id))
+                },
+                &Comparator::AndNodeComparator => {
+                    l.dn.cmp(&r.dn)
+                        .then(r.mate_depth.cmp(&l.mate_depth))
+                        .then(l.id.cmp(&r.id))
+                }
+            }
         }
     }
 
