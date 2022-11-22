@@ -902,7 +902,7 @@ pub mod checkmate {
 
                         let mut u = self.update_node(depth, &n)?;
 
-                        if u.pn.is_zero() && u.dn == Number::INFINITE {
+                        if u.pn.is_zero() && u.dn == Number::INFINITE && md + 1 > u.mate_depth {
                             u.mate_depth = md + 1;
                         }
 
@@ -910,9 +910,7 @@ pub mod checkmate {
                     } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                         *mate_depth = Some(md + 1);
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
-                    } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE && mate_depth.map(|d| {
-                        md + 1 > d
-                    }).unwrap_or(false) {
+                    } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                         *mate_depth = Some(md + 1);
                     }
                 } else {
@@ -921,6 +919,20 @@ pub mod checkmate {
             }
 
             if depth == 0 {
+                if let Some(n) = children
+                    .try_borrow()?
+                    .iter()
+                    .next() {
+
+                    if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
+                        return Ok(MaybeMate::MateMoves(self.build_moves(n)?));
+                    }
+                } else {
+                    return Err(ApplicationError::LogicError(String::from(
+                        "The legal move has not yet been set."
+                    )));
+                }
+
                 let mut pn = Number::INFINITE;
                 let mut dn = Number::Value(Fraction::new(0));
 
@@ -929,15 +941,7 @@ pub mod checkmate {
                     dn += n.try_borrow()?.dn;
                 }
 
-                if pn.is_zero() && dn == Number::INFINITE {
-                    return Ok(MaybeMate::MateMoves(self.build_moves(children
-                        .try_borrow()?
-                        .iter()
-                        .next()
-                        .ok_or(ApplicationError::LogicError(String::from(
-                            "The legal move has not yet been set."
-                        )))?)?));
-                } else if pn == Number::INFINITE && dn.is_zero() {
+                if pn == Number::INFINITE && dn.is_zero() {
                     Ok(MaybeMate::Nomate)
                 } else {
                     Ok(MaybeMate::Unknown)
@@ -1165,7 +1169,7 @@ pub mod checkmate {
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
-                    let mate_depth = u.try_borrow()?.mate_depth;
+                    let md = u.try_borrow()?.mate_depth;
                     let n = current_node.as_ref().map(|n| Rc::clone(n))
                                                          .ok_or(ApplicationError::LogicError(String::from(
                                                             "current node is not set."
@@ -1173,8 +1177,8 @@ pub mod checkmate {
                     let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
                     let mut u = self.update_node(depth, &n)?;
 
-                    if u.pn.is_zero() && u.dn == Number::INFINITE {
-                        u.mate_depth = mate_depth + 1;
+                    if u.pn.is_zero() && u.dn == Number::INFINITE && (u.mate_depth == 0 || u.mate_depth > md + 1) {
+                        u.mate_depth = md + 1;
                     }
 
                     return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u)),mhash,shash));
