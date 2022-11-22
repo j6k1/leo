@@ -650,11 +650,13 @@ pub mod checkmate {
         }
 
         pub fn update_node(&mut self, depth:u32, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
-            {
+            let children = {
                 let mut children = Rc::new(RefCell::new(BTreeSet::new()));
 
                 std::mem::swap(&mut n.try_borrow_mut()?.children, &mut children);
-            }
+
+                children
+            };
 
             let mut n = n.try_borrow()?.deref().clone();
 
@@ -662,26 +664,28 @@ pub mod checkmate {
                 let mut pn = Number::INFINITE;
                 let mut dn = Number::Value(Fraction::new(0));
 
-                for n in n.children.try_borrow()?.iter() {
+                for n in children.try_borrow()?.iter() {
                     pn = pn.min(n.try_borrow()?.pn);
                     dn += n.try_borrow()?.dn;
                 }
 
                 n.pn = pn / n.ref_count;
                 n.dn = dn / n.ref_count;
+                n.children = children;
 
                 Ok(n)
             } else {
                 let mut pn = Number::Value(Fraction::new(0));
                 let mut dn = Number::INFINITE;
 
-                for n in n.children.try_borrow()?.iter() {
+                for n in children.try_borrow()?.iter() {
                     pn += n.try_borrow()?.pn;
                     dn = dn.min(n.try_borrow()?.dn);
                 }
 
                 n.pn = pn / n.ref_count;
                 n.dn = dn / n.ref_count;
+                n.children = children;
 
                 Ok(n)
             }
