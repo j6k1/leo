@@ -224,7 +224,7 @@ pub mod checkmate {
     use std::cell::{RefCell};
     use std::cmp::Ordering;
     use std::collections::{BTreeSet, VecDeque};
-    use std::ops::{Add, AddAssign, Div};
+    use std::ops::{Add, AddAssign, Deref, Div};
     use std::rc::{Rc};
     use std::sync::atomic::{AtomicBool};
     use std::sync::{Arc, atomic, Mutex};
@@ -650,52 +650,38 @@ pub mod checkmate {
         }
 
         pub fn update_node(&mut self, depth:u32, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
-            let (id,m,children,ref_count,expanded,mate_depth) = {
-                let mut n =  n.try_borrow_mut()?;
-
+            {
                 let mut children = Rc::new(RefCell::new(BTreeSet::new()));
 
-                std::mem::swap(&mut n.children, &mut children);
+                std::mem::swap(&mut n.try_borrow_mut()?.children, &mut children);
+            }
 
-                (n.id,n.m,children,n.ref_count,n.expanded,n.mate_depth)
-            };
+            let mut n = n.try_borrow()?.deref().clone();
 
             if depth % 2 == 0 {
                 let mut pn = Number::INFINITE;
                 let mut dn = Number::Value(Fraction::new(0));
 
-                for n in children.try_borrow()?.iter() {
+                for n in n.children.try_borrow()?.iter() {
                     pn = pn.min(n.try_borrow()?.pn);
                     dn += n.try_borrow()?.dn;
                 }
 
-                let mut n = Node::new_or_node(id,m);
-
-                n.pn = pn / ref_count;
-                n.dn = dn / ref_count;
-                n.children = children;
-                n.ref_count = ref_count;
-                n.expanded = expanded;
-                n.mate_depth = mate_depth;
+                n.pn = pn / n.ref_count;
+                n.dn = dn / n.ref_count;
 
                 Ok(n)
             } else {
                 let mut pn = Number::Value(Fraction::new(0));
                 let mut dn = Number::INFINITE;
 
-                for n in children.try_borrow()?.iter() {
+                for n in n.children.try_borrow()?.iter() {
                     pn += n.try_borrow()?.pn;
                     dn = dn.min(n.try_borrow()?.dn);
                 }
 
-                let mut n = Node::new_and_node(id,m);
-
-                n.pn = pn / ref_count;
-                n.dn = dn / ref_count;
-                n.children = children;
-                n.ref_count = ref_count;
-                n.expanded = expanded;
-                n.mate_depth = mate_depth;
+                n.pn = pn / n.ref_count;
+                n.dn = dn / n.ref_count;
 
                 Ok(n)
             }
@@ -747,27 +733,17 @@ pub mod checkmate {
                 let expanded = n.try_borrow()?.expanded;
 
                 if !expanded {
-                    let (id,ref_count) = {
-                        let n =  n.try_borrow_mut()?;
-
-                        (n.id,n.ref_count)
-                    };
-
-                    let mut n = Node::new_or_node(id,n.try_borrow()?.m);
-
-                    n.ref_count = ref_count;
+                    let n = n.try_borrow()?.deref().clone();
 
                     let mut n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        let id = n.try_borrow()?.id;
-                        let mut u = Node::new_or_node(id,n.try_borrow()?.m);
+                        let mut u = n.try_borrow()?.deref().clone();
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(Fraction::new(0));
-                        u.ref_count = n.try_borrow()?.ref_count;
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
@@ -814,7 +790,7 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if s || sc {
-                                let mut u = self.update_node(depth + 1, n)?;
+                                let mut u = n.try_borrow()?.deref().clone();
 
                                 u.pn = Number::INFINITE;
                                 u.dn = Number::Value(Fraction::new(0));
@@ -1009,27 +985,17 @@ pub mod checkmate {
                 let expanded = n.try_borrow()?.expanded;
 
                 if !expanded {
-                    let (id,ref_count) = {
-                        let n =  n.try_borrow_mut()?;
-
-                        (n.id,n.ref_count)
-                    };
-
-                    let mut n = Node::new_and_node(id,n.try_borrow()?.m);
-
-                    n.ref_count = ref_count;
+                    let n = n.try_borrow()?.deref().clone();
 
                     let mut n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        let id = n.try_borrow()?.id;
-                        let mut u = Node::new_and_node(id,n.try_borrow()?.m);
+                        let mut u = n.try_borrow()?.deref().clone();
 
                         u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
-                        u.ref_count = n.try_borrow()?.ref_count;
                         u.expanded =  true;
 
                         n = Rc::new(RefCell::new(u));
@@ -1075,7 +1041,7 @@ pub mod checkmate {
                             let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                             if sc {
-                                let mut u = self.update_node(depth + 1, n)?;
+                                let mut u = n.try_borrow()?.deref().clone();
 
                                 u.pn = Number::Value(Fraction::new(0));
                                 u.dn = Number::INFINITE;
@@ -1089,7 +1055,7 @@ pub mod checkmate {
                             }
 
                             if s {
-                                let mut u = self.update_node(depth + 1, n)?;
+                                let mut u = n.try_borrow()?.deref().clone();
 
                                 u.dn = Number::INFINITE;
                                 u.expanded = true;
