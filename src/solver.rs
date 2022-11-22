@@ -540,6 +540,7 @@ pub mod checkmate {
 
             assert!(node_map.get(teban,&mhash,&shash).is_none());
             node_map.insert(teban,mhash,shash,Rc::clone(&n));
+            assert!(node_map.get(teban,&mhash,&shash).is_some());
 
             Ok(n)
         }
@@ -735,27 +736,26 @@ pub mod checkmate {
             let children = if let Some(n) = current_node.as_ref() {
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
+                println!("{}",node_map.get(teban,&mhash,&shash).is_some());
+                println!("{}",n.try_borrow()?.expanded);
+                assert!(node_map.get(teban,&mhash,&shash).is_some() || !n.try_borrow()?.expanded);
                 let expanded = n.try_borrow()?.expanded;
 
                 if !expanded {
                     let n = n.try_borrow()?.deref().clone();
 
-                    let mut n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
+                    let n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        let mut u = n.try_borrow()?.deref().clone();
-
-                        u.pn = Number::INFINITE;
-                        u.dn = Number::Value(Fraction::new(0));
-                        u.expanded =  true;
-
-                        n = Rc::new(RefCell::new(u));
+                        n.try_borrow_mut()?.pn = Number::INFINITE;
+                        n.try_borrow_mut()?.dn = Number::Value(Fraction::new(0));
                     }
 
                     return Ok(MaybeMate::Continuation(n));
                 } else {
+                    node_map.insert(teban,mhash,shash,Rc::clone(&n));
                     let children = &n.try_borrow()?.children;
 
                     Rc::clone(children)
@@ -799,11 +799,14 @@ pub mod checkmate {
 
                                 u.pn = Number::INFINITE;
                                 u.dn = Number::Value(Fraction::new(0));
-                                u.expanded = true;
                                 u.sennichite = true;
 
                                 let u = Rc::new(RefCell::new(u));
 
+                                {
+                                    let n = self.normalize_node(n,mhash,shash,teban.opposite(),node_map)?;
+                                    assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                                }
                                 update_info = Some((Rc::clone(n), u));
                                 break;
                             }
@@ -836,6 +839,10 @@ pub mod checkmate {
                                                 "Node not found in map"
                                             )));
                                         }
+                                        {
+                                            let n = self.normalize_node(n,mhash,shash,teban.opposite(),node_map)?;
+                                            assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                                        }
                                         update_info = Some((Rc::clone(n), u));
                                         break;
                                     },
@@ -849,15 +856,18 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = self.update_node(depth + 1, n)?;
+                                        let mut u = n.try_borrow()?.deref().clone();
 
                                         u.pn = Number::INFINITE;
-                                        u.expanded = true;
 
                                         let u = Rc::new(RefCell::new(u));
 
                                         node_map.insert(teban.opposite(),mhash,shash,Rc::clone(&u));
 
+                                        {
+                                            let n = self.normalize_node(n,mhash,shash,teban.opposite(),node_map)?;
+                                            assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                                        }
                                         update_info = Some((Rc::clone(n), u));
                                         break;
                                     },
@@ -889,11 +899,30 @@ pub mod checkmate {
                             "The update target node could not be found."
                         )));
                     }
+                    {
+                        let m = n.try_borrow()?.m;
 
+                        let o = match m {
+                            LegalMove::To(ref m) => {
+                                m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
+                            },
+                            _ => None,
+                        };
+
+                        let mhash = self.hasher.calc_main_hash(mhash, teban,
+                                                               state.get_banmen(),
+                                                               &mc, m.to_applied_move(), &o);
+                        let shash = self.hasher.calc_sub_hash(shash, teban,
+                                                              state.get_banmen(),
+                                                              &mc, m.to_applied_move(), &o);
+                        let n = self.normalize_node(&n,mhash,shash,teban.opposite(),node_map)?;
+                        assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                    }
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
                     if let Some(n) = current_node.as_ref() {
+                        assert!(node_map.get(teban,&mhash,&shash).is_some());
                         let n = self.normalize_node(n,mhash,shash,teban,node_map)?;
 
                         let mut u = self.update_node(depth, &n)?;
@@ -990,27 +1019,27 @@ pub mod checkmate {
             let children = if let Some(n) = current_node.as_ref() {
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
+                println!("{}",depth);
+                println!("{}",node_map.get(teban,&mhash,&shash).is_some());
+                println!("{}",n.try_borrow()?.expanded);
+                assert!(node_map.get(teban,&mhash,&shash).is_some() || !n.try_borrow()?.expanded);
                 let expanded = n.try_borrow()?.expanded;
 
                 if !expanded {
                     let n = n.try_borrow()?.deref().clone();
 
-                    let mut n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
+                    let n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        let mut u = n.try_borrow()?.deref().clone();
-
-                        u.pn = Number::Value(Fraction::new(0));
-                        u.dn = Number::INFINITE;
-                        u.expanded =  true;
-
-                        n = Rc::new(RefCell::new(u));
+                        n.try_borrow_mut()?.pn = Number::Value(Fraction::new(0));
+                        n.try_borrow_mut()?.dn = Number::INFINITE;
                     }
 
                     return Ok(MaybeMate::Continuation(n));
                 } else {
+                    node_map.insert(teban,mhash,shash,Rc::clone(&n));
                     let children = &n.try_borrow()?.children;
 
                     Rc::clone(children)
@@ -1053,12 +1082,17 @@ pub mod checkmate {
 
                                 u.pn = Number::Value(Fraction::new(0));
                                 u.dn = Number::INFINITE;
-                                u.expanded = true;
                                 u.sennichite = true;
 
                                 let u = Rc::new(RefCell::new(u));
 
+                                {
+                                    let n = self.normalize_node(n,mhash,shash,teban.opposite(),node_map)?;
+                                    assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                                }
+
                                 update_info = Some((Rc::clone(n), u));
+
                                 break;
                             }
 
@@ -1066,10 +1100,14 @@ pub mod checkmate {
                                 let mut u = n.try_borrow()?.deref().clone();
 
                                 u.dn = Number::INFINITE;
-                                u.expanded = true;
                                 u.sennichite = true;
 
                                 let u = Rc::new(RefCell::new(u));
+
+                                {
+                                    let n = self.normalize_node(n,mhash,shash,teban.opposite(),node_map)?;
+                                    assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                                }
 
                                 update_info = Some((Rc::clone(n), u));
                                 break;
@@ -1103,6 +1141,10 @@ pub mod checkmate {
                                                 "Node not found in map"
                                             )));
                                         }
+                                        {
+                                            let n = self.normalize_node(n,mhash,shash,teban.opposite(),node_map)?;
+                                            assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                                        }
 
                                         update_info = Some((Rc::clone(n), u));
                                         break;
@@ -1117,14 +1159,17 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = n.try_borrow()?.clone();
+                                        let mut u = n.try_borrow()?.deref().clone();
 
                                         u.dn = Number::INFINITE;
-                                        u.expanded = true;
 
                                         let u = Rc::new(RefCell::new(u));
 
                                         node_map.insert(teban.opposite(),mhash,shash,Rc::clone(&u));
+                                        {
+                                            let n = self.normalize_node(n,mhash,shash,teban.opposite(),node_map)?;
+                                            assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                                        }
 
                                         update_info = Some((Rc::clone(n), u));
                                         break;
@@ -1155,7 +1200,25 @@ pub mod checkmate {
                             "The update target node could not be found."
                         )));
                     }
+                    {
+                        let m = n.try_borrow()?.m;
 
+                        let o = match m {
+                            LegalMove::To(ref m) => {
+                                m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
+                            },
+                            _ => None,
+                        };
+
+                        let mhash = self.hasher.calc_main_hash(mhash, teban,
+                                                               state.get_banmen(),
+                                                               &mc, m.to_applied_move(), &o);
+                        let shash = self.hasher.calc_sub_hash(shash, teban,
+                                                              state.get_banmen(),
+                                                              &mc, m.to_applied_move(), &o);
+                        let n = self.normalize_node(&n,mhash,shash,teban.opposite(),node_map)?;
+                        assert_eq!(n.try_borrow()?.id,u.try_borrow()?.id);
+                    }
                     children.try_borrow_mut()?.remove(&n);
                     children.try_borrow_mut()?.insert(Rc::clone(&u));
 
@@ -1164,6 +1227,7 @@ pub mod checkmate {
                                                          .ok_or(ApplicationError::LogicError(String::from(
                                                             "current node is not set."
                                                          )))?;
+                    assert!(node_map.get(teban,&mhash,&shash).is_some());
                     let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
                     let mut u = self.update_node(depth, &n)?;
 
@@ -1171,6 +1235,7 @@ pub mod checkmate {
                         u.mate_depth = md + 1;
                     }
 
+                    assert_eq!(n.try_borrow()?.id,u.id);
                     return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
                 } else {
                     break;
