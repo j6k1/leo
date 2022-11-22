@@ -538,6 +538,7 @@ pub mod checkmate {
 
             let n = Rc::new(RefCell::new(n));
 
+            assert!(node_map.get(teban,&mhash,&shash).is_none());
             node_map.insert(teban,mhash,shash,Rc::clone(&n));
 
             Ok(n)
@@ -803,7 +804,7 @@ pub mod checkmate {
 
                                 let u = Rc::new(RefCell::new(u));
 
-                                update_info = Some((Rc::clone(n), u,mhash,shash));
+                                update_info = Some((Rc::clone(n), u));
                                 break;
                             }
                         }
@@ -828,7 +829,14 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
-                                        update_info = Some((Rc::clone(n), u,mhash,shash));
+                                        if let Some(n) = node_map.get_mut(teban.opposite(),&mhash,&shash) {
+                                            *n = Rc::clone(&u);
+                                        } else {
+                                            return Err(ApplicationError::LogicError(String::from(
+                                                "Node not found in map"
+                                            )));
+                                        }
+                                        update_info = Some((Rc::clone(n), u));
                                         break;
                                     },
                                     r @ MaybeMate::MaxNodes => {
@@ -848,7 +856,9 @@ pub mod checkmate {
 
                                         let u = Rc::new(RefCell::new(u));
 
-                                        update_info = Some((Rc::clone(n), u,mhash,shash));
+                                        node_map.insert(teban.opposite(),mhash,shash,Rc::clone(&u));
+
+                                        update_info = Some((Rc::clone(n), u));
                                         break;
                                     },
                                     MaybeMate::MateMoves(_) => {
@@ -871,14 +881,8 @@ pub mod checkmate {
                     return Ok(MaybeMate::Aborted)
                 }
 
-                if let Some((n, u,mh,sh)) = update_info.take() {
+                if let Some((n, u)) = update_info.take() {
                     let md = u.try_borrow()?.mate_depth;
-
-                    let sennichite = u.try_borrow()?.sennichite;
-
-                    if !sennichite {
-                        node_map.insert(teban.opposite(), mh, sh, Rc::clone(&u));
-                    }
 
                     if !children.try_borrow()?.contains(&n) {
                         return Err(ApplicationError::LogicError(String::from(
@@ -1054,7 +1058,7 @@ pub mod checkmate {
 
                                 let u = Rc::new(RefCell::new(u));
 
-                                update_info = Some((Rc::clone(n), u, mhash, shash));
+                                update_info = Some((Rc::clone(n), u));
                                 break;
                             }
 
@@ -1067,7 +1071,7 @@ pub mod checkmate {
 
                                 let u = Rc::new(RefCell::new(u));
 
-                                update_info = Some((Rc::clone(n), u,mhash,shash));
+                                update_info = Some((Rc::clone(n), u));
                                 break;
                             }
                         }
@@ -1092,7 +1096,15 @@ pub mod checkmate {
                                                          &mc
                                 )? {
                                     MaybeMate::Continuation(u,mhash,shash) => {
-                                        update_info = Some((Rc::clone(n), u, mhash, shash));
+                                        if let Some(n) = node_map.get_mut(teban.opposite(),&mhash,&shash) {
+                                            *n = Rc::clone(&u);
+                                        } else {
+                                            return Err(ApplicationError::LogicError(String::from(
+                                                "Node not found in map"
+                                            )));
+                                        }
+
+                                        update_info = Some((Rc::clone(n), u));
                                         break;
                                     },
                                     r @ MaybeMate::MaxNodes => {
@@ -1105,14 +1117,16 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = self.update_node(depth + 1, n)?;
+                                        let mut u = n.try_borrow()?.clone();
 
                                         u.dn = Number::INFINITE;
                                         u.expanded = true;
 
                                         let u = Rc::new(RefCell::new(u));
 
-                                        update_info = Some((Rc::clone(n), u,mhash,shash));
+                                        node_map.insert(teban.opposite(),mhash,shash,Rc::clone(&u));
+
+                                        update_info = Some((Rc::clone(n), u));
                                         break;
                                     },
                                     MaybeMate::MateMoves(_) => {
@@ -1135,13 +1149,7 @@ pub mod checkmate {
                     return Ok(MaybeMate::Aborted)
                 }
 
-                if let Some((n, u,mh,sh)) = update_info.take() {
-                    let sennichite = u.try_borrow()?.sennichite;
-
-                    if !sennichite {
-                        node_map.insert(teban.opposite(), mh, sh, Rc::clone(&u));
-                    }
-
+                if let Some((n, u)) = update_info.take() {
                     if !children.try_borrow()?.contains(&n) {
                         return Err(ApplicationError::LogicError(String::from(
                             "The update target node could not be found."
