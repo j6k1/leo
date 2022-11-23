@@ -855,11 +855,8 @@ pub mod checkmate {
                                 MaybeMate::Continuation(u) => {
                                     let mut u = u;
 
-                                    if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE &&
-                                       u.try_borrow()?.pn == n.try_borrow()?.pn &&
-                                       u.try_borrow()?.dn == n.try_borrow()?.dn &&
+                                    if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE &&
                                        u.try_borrow()?.mate_depth == n.try_borrow()?.mate_depth {
-
                                         let n = Node::clone(u.try_borrow()?.deref());
                                         let n = n.to_decided_node(uniq_id.gen());
 
@@ -933,7 +930,7 @@ pub mod checkmate {
 
                     let mut u = self.update_node(depth, &n)?;
 
-                    if u.pn.is_zero() && u.dn == Number::INFINITE && md + 1 > u.mate_depth {
+                    if u.pn.is_zero() && u.dn == Number::INFINITE && (u.mate_depth == 0 || md + 1 < u.mate_depth) {
                         u.mate_depth = md + 1;
                     }
 
@@ -1177,7 +1174,7 @@ pub mod checkmate {
             let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
             let mut u = self.update_node(depth, &n)?;
 
-            if u.pn.is_zero() && u.dn == Number::INFINITE && (u.mate_depth == 0 || u.mate_depth > md + 1) {
+            if u.pn.is_zero() && u.dn == Number::INFINITE && u.mate_depth < md + 1 {
                 u.mate_depth = md + 1;
             }
 
