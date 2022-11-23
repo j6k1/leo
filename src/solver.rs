@@ -1200,7 +1200,7 @@ pub mod checkmate {
                 }
 
                 let md = u.try_borrow()?.mate_depth;
-                let u = Rc::clone(&n);
+                let u = Rc::clone(&current_node);
 
                 let pn = u.try_borrow()?.pn;
                 let dn = u.try_borrow()?.dn;
