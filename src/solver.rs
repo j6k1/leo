@@ -864,8 +864,13 @@ pub mod checkmate {
 
                                         let u = Rc::new(RefCell::new(u));
 
-                                        children.try_borrow_mut()?.pop();
-                                        children.try_borrow_mut()?.push(u);
+                                        if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
+                                            *p = u;
+                                        } else {
+                                            return Err(ApplicationError::LogicError(String::from(
+                                                "Node to be updated could not be found."
+                                            )));
+                                        }
 
                                         continue;
                                     }
@@ -916,8 +921,13 @@ pub mod checkmate {
 
                 let u = update_node;
 
-                children.try_borrow_mut()?.pop();
-                children.try_borrow_mut()?.push(Rc::clone(&u));
+                if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
+                    *p = Rc::clone(&u);
+                } else {
+                    return Err(ApplicationError::LogicError(String::from(
+                        "Node to be updated could not be found."
+                    )));
+                }
 
                 let md = u.try_borrow()?.mate_depth;
 
@@ -1161,8 +1171,13 @@ pub mod checkmate {
 
             let u = update_node;
 
-            children.try_borrow_mut()?.pop();
-            children.try_borrow_mut()?.push(Rc::clone(&u));
+            if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
+                *p = Rc::clone(&u);
+            } else {
+                return Err(ApplicationError::LogicError(String::from(
+                    "Node to be updated could not be found."
+                )));
+            }
 
             let md = u.try_borrow()?.mate_depth;
             let n = current_node.as_ref().map(|n| Rc::clone(n))
