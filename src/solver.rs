@@ -898,8 +898,6 @@ pub mod checkmate {
 
                                     if !pn.is_zero() || dn != Number::INFINITE {
                                         u.try_borrow_mut()?.pn = Number::INFINITE;
-
-                                        node_map.insert(teban.opposite(), mhash, shash, Rc::clone(&u));
                                     }
 
                                     update_node = u;
@@ -1144,8 +1142,6 @@ pub mod checkmate {
                                 u.dn = Number::INFINITE;
 
                                 let u = Rc::new(RefCell::new(u));
-
-                                node_map.insert(teban.opposite(), mhash, shash, Rc::clone(&u));
 
                                 update_node = u;
                             },
