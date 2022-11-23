@@ -492,7 +492,6 @@ pub mod checkmate {
                              teban:Teban,
                              node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
             -> Result<Rc<RefCell<Node>>,ApplicationError> {
-
             if n.try_borrow()?.sennichite {
                 return Ok(Rc::clone(n))
             }
@@ -684,6 +683,8 @@ pub mod checkmate {
                 children
             };
 
+            n.try_borrow_mut()?.children = Rc::clone(&children);
+
             let mut n = Node::clone(n.try_borrow()?.deref());
 
             if depth % 2 == 0 {
@@ -853,25 +854,17 @@ pub mod checkmate {
                                                      &mc
                             )? {
                                 MaybeMate::Continuation(u) => {
-                                    let mut u = u;
-
                                     if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE &&
                                        u.try_borrow()?.mate_depth == n.try_borrow()?.mate_depth {
-                                        let n = Node::clone(u.try_borrow()?.deref());
-                                        let n = n.to_decided_node(uniq_id.gen());
+                                        let u = Node::clone(u.try_borrow()?.deref());
+                                        let u = u.to_decided_node(uniq_id.gen());
 
-                                        u = Rc::new(RefCell::new(n));
+                                        let u = Rc::new(RefCell::new(u));
 
                                         children.try_borrow_mut()?.pop();
-                                        children.try_borrow_mut()?.push(Rc::clone(&u));
+                                        children.try_borrow_mut()?.push(u);
 
                                         continue;
-                                    } else if let Some(n) = node_map.get_mut(teban.opposite(), &mhash, &shash) {
-                                        *n = Rc::clone(&u);
-                                    } else {
-                                        return Err(ApplicationError::LogicError(String::from(
-                                            "Node not found in map"
-                                        )));
                                     }
 
                                     update_node = u;
@@ -934,7 +927,11 @@ pub mod checkmate {
                         u.mate_depth = md + 1;
                     }
 
-                    return Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))));
+                    let u = Rc::new(RefCell::new(u));
+
+                    node_map.insert(teban,mhash,shash, Rc::clone(&u));
+
+                    return Ok(MaybeMate::Continuation(u));
                 } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                     *mate_depth = Some(md + 1);
                     return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
@@ -1114,14 +1111,6 @@ pub mod checkmate {
                                                  &mc
                         )? {
                             MaybeMate::Continuation(u) => {
-                                if let Some(n) = node_map.get_mut(teban.opposite(), &mhash, &shash) {
-                                    *n = Rc::clone(&u);
-                                } else {
-                                    return Err(ApplicationError::LogicError(String::from(
-                                        "Node not found in map"
-                                    )));
-                                }
-
                                 update_node = u;
                             },
                             r @ MaybeMate::MaxNodes => {
@@ -1178,7 +1167,11 @@ pub mod checkmate {
                 u.mate_depth = md + 1;
             }
 
-            Ok(MaybeMate::Continuation(Rc::new(RefCell::new(u))))
+            let u = Rc::new(RefCell::new(u));
+
+            node_map.insert(teban,mhash,shash, Rc::clone(&u));
+
+            return Ok(MaybeMate::Continuation(u));
         }
 
         fn send_seldepth(&mut self, depth:u32) -> Result<(),SendSelDepthError>{
