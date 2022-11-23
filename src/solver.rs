@@ -674,7 +674,7 @@ pub mod checkmate {
             Ok(mvs)
         }
 
-        pub fn update_node(&mut self, depth:u32, n:&Rc<RefCell<Node>>) -> Result<Node,ApplicationError> {
+        pub fn update_node(&mut self, depth:u32, n:&Rc<RefCell<Node>>) -> Result<(),ApplicationError> {
             let children = {
                 let mut children = Rc::new(RefCell::new(BinaryHeap::new()));
 
@@ -684,8 +684,6 @@ pub mod checkmate {
             };
 
             n.try_borrow_mut()?.children = Rc::clone(&children);
-
-            let mut n = Node::clone(n.try_borrow()?.deref());
 
             if depth % 2 == 0 {
                 let mut pn = Number::INFINITE;
@@ -697,11 +695,13 @@ pub mod checkmate {
                     println!("pn {:?}, dn {:?}",pn,dn);
                 }
 
-                n.pn = pn / n.ref_count;
-                n.dn = dn / n.ref_count;
-                n.children = children;
+                let ref_count = n.try_borrow()?.ref_count;
 
-                Ok(n)
+                n.try_borrow_mut()?.pn = pn / ref_count;
+                n.try_borrow_mut()?.dn = dn / ref_count;
+                n.try_borrow_mut()?.children = children;
+
+                Ok(())
             } else {
                 let mut pn = Number::Value(Fraction::new(0));
                 let mut dn = Number::INFINITE;
@@ -712,11 +712,13 @@ pub mod checkmate {
                     println!("pn {:?}, dn {:?}",pn,dn);
                 }
 
-                n.pn = pn / n.ref_count;
-                n.dn = dn / n.ref_count;
-                n.children = children;
+                let ref_count = n.try_borrow()?.ref_count;
 
-                Ok(n)
+                n.try_borrow_mut()?.pn = pn / ref_count;
+                n.try_borrow_mut()?.dn = dn / ref_count;
+                n.try_borrow_mut()?.children = children;
+
+                Ok(())
             }
         }
 
@@ -781,7 +783,12 @@ pub mod checkmate {
 
                     return Ok(MaybeMate::Continuation(n));
                 } else {
-                    (Some(Rc::clone(&n)),Rc::clone(&n.try_borrow()?.children))
+                    let n = Node::clone(n.try_borrow()?.deref());
+                    let n = Rc::new(RefCell::new(n));
+
+                    let children = Rc::clone(&n.try_borrow()?.children);
+
+                    (Some(n),children)
                 }
             } else {
                 let children = self.expand_root_nodes(uniq_id,teban,state,mc)?;
@@ -934,28 +941,32 @@ pub mod checkmate {
 
                 let md = u.try_borrow()?.mate_depth;
 
-                if let Some(n) = current_node.as_ref() {
-                    let n = Node::clone(n.try_borrow()?.deref());
+                if let Some(u) = current_node.as_ref() {
+                    let pn = u.try_borrow()?.pn;
+                    let dn = u.try_borrow()?.dn;
 
-                    let n = Rc::new(RefCell::new(n));
+                    self.update_node(depth, u)?;
 
-                    let mut u = self.update_node(depth, &n)?;
+                    let update_mate_depth = u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE &&
+                        (u.try_borrow()?.mate_depth == 0 || md + 1 < u.try_borrow()?.mate_depth);
 
-                    if u.pn.is_zero() && u.dn == Number::INFINITE && (u.mate_depth == 0 || md + 1 < u.mate_depth) {
-                        u.mate_depth = md + 1;
+                    if update_mate_depth {
+                        u.try_borrow_mut()?.mate_depth = md + 1;
                     }
-
-                    let u = Rc::new(RefCell::new(u));
 
                     if !u.try_borrow()?.sennichite {
                         node_map.insert(teban, mhash, shash, Rc::clone(&u));
                     }
 
-                    return Ok(MaybeMate::Continuation(u));
+                    if u.try_borrow()?.pn != pn || u.try_borrow()?.dn != dn {
+                        return Ok(MaybeMate::Continuation(Rc::clone(u)));
+                    }
                 } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
                     *mate_depth = Some(md + 1);
                     return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
-                } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
+                } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE && mate_depth.map(|d| {
+                    md + 1 < d
+                }).unwrap_or(false) {
                     *mate_depth = Some(md + 1);
                 }
             }
@@ -1053,7 +1064,9 @@ pub mod checkmate {
 
                     return Ok(MaybeMate::Continuation(n));
                 } else {
-                    Rc::clone(&n)
+                    let n = Node::clone(n.try_borrow()?.deref());
+
+                    Rc::new(RefCell::new(n))
                 }
             } else {
                 return Err(ApplicationError::LogicError(String::from(
@@ -1063,151 +1076,157 @@ pub mod checkmate {
 
             let children = Rc::clone(&current_node.try_borrow()?.children);
 
-            assert!(children.try_borrow()?.len()>0);
-            let n = children.try_borrow_mut()?.peek().map(|n| {
-                Rc::clone(n)
-            }).ok_or(ApplicationError::LogicError(String::from(
-                "None of the child nodes exist."
-            )))?;
+            loop {
+                assert!(children.try_borrow()?.len() > 0);
+                let n = children.try_borrow_mut()?.peek().map(|n| {
+                    Rc::clone(n)
+                }).ok_or(ApplicationError::LogicError(String::from(
+                    "None of the child nodes exist."
+                )))?;
 
-            println!("pn {:?} dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
+                println!("pn {:?} dn {:?}", n.try_borrow()?.pn, n.try_borrow()?.dn);
 
-            let update_node;
+                let update_node;
 
-            let m = n.try_borrow()?.m;
+                let m = n.try_borrow()?.m;
 
-            if self.stop.load(atomic::Ordering::Acquire) {
-                return Ok(MaybeMate::Aborted)
-            }
+                if self.stop.load(atomic::Ordering::Acquire) {
+                    return Ok(MaybeMate::Aborted)
+                }
 
-            let o = match m {
-                LegalMove::To(ref m) => {
-                    m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
-                },
-                _ => None,
-            };
+                let o = match m {
+                    LegalMove::To(ref m) => {
+                        m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
+                    },
+                    _ => None,
+                };
 
-            let mhash = self.hasher.calc_main_hash(mhash, teban,
-                                                   state.get_banmen(),
-                                                   &mc, m.to_applied_move(), &o);
-            let shash = self.hasher.calc_sub_hash(shash, teban,
-                                                  state.get_banmen(),
-                                                  &mc, m.to_applied_move(), &o);
-            let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
-            let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
+                let mhash = self.hasher.calc_main_hash(mhash, teban,
+                                                       state.get_banmen(),
+                                                       &mc, m.to_applied_move(), &o);
+                let shash = self.hasher.calc_sub_hash(shash, teban,
+                                                      state.get_banmen(),
+                                                      &mc, m.to_applied_move(), &o);
+                let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
+                let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
-            if sc {
-                let mut u = Node::clone(n.try_borrow()?.deref());
+                if sc {
+                    let mut u = Node::clone(n.try_borrow()?.deref());
 
-                u.pn = Number::Value(Fraction::new(0));
-                u.dn = Number::INFINITE;
-                u.sennichite = true;
+                    u.pn = Number::Value(Fraction::new(0));
+                    u.dn = Number::INFINITE;
+                    u.sennichite = true;
 
-                let u = Rc::new(RefCell::new(u));
+                    let u = Rc::new(RefCell::new(u));
 
-                update_node = u;
-            } else if s {
-                let mut u = Node::clone(n.try_borrow()?.deref());
+                    update_node = u;
+                } else if s {
+                    let mut u = Node::clone(n.try_borrow()?.deref());
 
-                u.dn = Number::INFINITE;
-                u.sennichite = true;
+                    u.dn = Number::INFINITE;
+                    u.sennichite = true;
 
-                let u = Rc::new(RefCell::new(u));
+                    let u = Rc::new(RefCell::new(u));
 
-                update_node = u;
-            } else {
-                let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
+                    update_node = u;
+                } else {
+                    let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
-                match next {
-                    (state, mc, _) => {
-                        match self.inter_process(depth + 1,
-                                                 mhash,
-                                                 shash,
-                                                 ignore_kyokumen_map,
-                                                 current_kyokumen_map,
-                                                 uniq_id,
-                                                 Some(Rc::clone(&n)),
-                                                 node_map,
-                                                 mate_depth,
-                                                 event_queue,
-                                                 event_dispatcher,
-                                                 teban.opposite(),
-                                                 &state,
-                                                 &mc
-                        )? {
-                            MaybeMate::Continuation(u) => {
-                                update_node = u;
-                            },
-                            r @ MaybeMate::MaxNodes => {
-                                return Ok(r);
-                            },
-                            r @ MaybeMate::Timeout => {
-                                return Ok(r);
-                            },
-                            r @ MaybeMate::Aborted => {
-                                return Ok(r);
-                            },
-                            MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                let mut u = Node::clone(n.try_borrow()?.deref());
+                    match next {
+                        (state, mc, _) => {
+                            match self.inter_process(depth + 1,
+                                                     mhash,
+                                                     shash,
+                                                     ignore_kyokumen_map,
+                                                     current_kyokumen_map,
+                                                     uniq_id,
+                                                     Some(Rc::clone(&n)),
+                                                     node_map,
+                                                     mate_depth,
+                                                     event_queue,
+                                                     event_dispatcher,
+                                                     teban.opposite(),
+                                                     &state,
+                                                     &mc
+                            )? {
+                                MaybeMate::Continuation(u) => {
+                                    update_node = u;
+                                },
+                                r @ MaybeMate::MaxNodes => {
+                                    return Ok(r);
+                                },
+                                r @ MaybeMate::Timeout => {
+                                    return Ok(r);
+                                },
+                                r @ MaybeMate::Aborted => {
+                                    return Ok(r);
+                                },
+                                MaybeMate::Skip | MaybeMate::MaxDepth => {
+                                    let mut u = Node::clone(n.try_borrow()?.deref());
 
-                                u.dn = Number::INFINITE;
+                                    u.dn = Number::INFINITE;
 
-                                let u = Rc::new(RefCell::new(u));
+                                    let u = Rc::new(RefCell::new(u));
 
-                                update_node = u;
-                            },
-                            MaybeMate::MateMoves(_) => {
-                                return Err(ApplicationError::LogicError(String::from(
-                                    "It is an unexpected type MaybeMate::MateMoves"
-                                )));
-                            },
-                            r => {
-                                return Err(ApplicationError::LogicError(format!("It is an unexpected type {:?}", r)));
+                                    update_node = u;
+                                },
+                                MaybeMate::MateMoves(_) => {
+                                    return Err(ApplicationError::LogicError(String::from(
+                                        "It is an unexpected type MaybeMate::MateMoves"
+                                    )));
+                                },
+                                r => {
+                                    return Err(ApplicationError::LogicError(format!("It is an unexpected type {:?}", r)));
+                                }
                             }
                         }
                     }
                 }
+
+                event_dispatcher.dispatch_events(self, event_queue)?;
+
+                if self.stop.load(atomic::Ordering::Acquire) {
+                    return Ok(MaybeMate::Aborted)
+                }
+
+                let u = update_node;
+
+                if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
+                    *p = Rc::clone(&u);
+                } else {
+                    return Err(ApplicationError::LogicError(String::from(
+                        "Node to be updated could not be found."
+                    )));
+                }
+
+                let md = u.try_borrow()?.mate_depth;
+                let u = Rc::clone(&n);
+
+                let pn = u.try_borrow()?.pn;
+                let dn = u.try_borrow()?.dn;
+
+                self.update_node(depth, &u)?;
+
+                let update_mate_depth = u.try_borrow()?.pn.is_zero() &&
+                                              u.try_borrow()?.dn == Number::INFINITE &&
+                                              u.try_borrow()?.mate_depth < md + 1;
+
+                if update_mate_depth {
+                    u.try_borrow_mut()?.mate_depth = md + 1;
+                }
+
+                if !u.try_borrow()?.sennichite {
+                    node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                }
+
+                if u.try_borrow()?.pn == Number::INFINITE {
+                    let a = 1;
+                }
+                println!("info string pn {:?}, dn {:?}", u.try_borrow()?.pn, u.try_borrow()?.dn);
+                if u.try_borrow()?.pn != pn || u.try_borrow()?.dn != dn {
+                    return Ok(MaybeMate::Continuation(Rc::clone(&u)));
+                }
             }
-
-            event_dispatcher.dispatch_events(self,event_queue)?;
-
-            if self.stop.load(atomic::Ordering::Acquire) {
-                return Ok(MaybeMate::Aborted)
-            }
-
-            let u = update_node;
-
-            if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
-                *p = Rc::clone(&u);
-            } else {
-                return Err(ApplicationError::LogicError(String::from(
-                    "Node to be updated could not be found."
-                )));
-            }
-
-            let md = u.try_borrow()?.mate_depth;
-            let n = current_node;
-
-            let n = Node::clone(n.try_borrow()?.deref());
-            let n = Rc::new(RefCell::new(n));
-
-            let mut u = self.update_node(depth, &n)?;
-
-            if u.pn.is_zero() && u.dn == Number::INFINITE && u.mate_depth < md + 1 {
-                u.mate_depth = md + 1;
-            }
-
-            let u = Rc::new(RefCell::new(u));
-
-            if !u.try_borrow()?.sennichite {
-                node_map.insert(teban, mhash, shash, Rc::clone(&u));
-            }
-
-            if u.try_borrow()?.pn == Number::INFINITE {
-                let a = 1;
-            }
-            println!("info string pn {:?}, dn {:?}",u.try_borrow()?.pn,u.try_borrow()?.dn);
-            return Ok(MaybeMate::Continuation(u));
         }
 
         fn send_seldepth(&mut self, depth:u32) -> Result<(),SendSelDepthError>{
