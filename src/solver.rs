@@ -855,7 +855,8 @@ pub mod checkmate {
                                 MaybeMate::Continuation(u) => {
                                     let mut u = u;
 
-                                    if u.try_borrow()?.pn == n.try_borrow()?.pn &&
+                                    if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE &&
+                                       u.try_borrow()?.pn == n.try_borrow()?.pn &&
                                        u.try_borrow()?.dn == n.try_borrow()?.dn &&
                                        u.try_borrow()?.mate_depth == n.try_borrow()?.mate_depth {
 
