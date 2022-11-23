@@ -694,6 +694,7 @@ pub mod checkmate {
                 for n in children.try_borrow()?.iter() {
                     pn = pn.min(n.try_borrow()?.pn);
                     dn += n.try_borrow()?.dn;
+                    println!("pn {:?}, dn {:?}",pn,dn);
                 }
 
                 n.pn = pn / n.ref_count;
@@ -708,6 +709,7 @@ pub mod checkmate {
                 for n in children.try_borrow()?.iter() {
                     pn += n.try_borrow()?.pn;
                     dn = dn.min(n.try_borrow()?.dn);
+                    println!("pn {:?}, dn {:?}",pn,dn);
                 }
 
                 n.pn = pn / n.ref_count;
@@ -794,6 +796,8 @@ pub mod checkmate {
                 }).ok_or(ApplicationError::LogicError(String::from(
                     "None of the child nodes exist."
                 )))?;
+
+                println!("oute pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
 
                 if n.try_borrow()?.decided || n.try_borrow()?.pn == Number::INFINITE {
                     break;
@@ -920,6 +924,7 @@ pub mod checkmate {
                 let u = update_node;
 
                 if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
+                    println!("peek mut pn {:?}, dn {:?}",u.try_borrow()?.pn,u.try_borrow()?.dn);
                     *p = Rc::clone(&u);
                 } else {
                     return Err(ApplicationError::LogicError(String::from(
@@ -931,6 +936,7 @@ pub mod checkmate {
 
                 if let Some(n) = current_node.as_ref() {
                     let n = Node::clone(n.try_borrow()?.deref());
+
                     let n = Rc::new(RefCell::new(n));
 
                     let mut u = self.update_node(depth, &n)?;
@@ -1197,6 +1203,9 @@ pub mod checkmate {
                 node_map.insert(teban, mhash, shash, Rc::clone(&u));
             }
 
+            if u.try_borrow()?.pn == Number::INFINITE {
+                let a = 1;
+            }
             println!("info string pn {:?}, dn {:?}",u.try_borrow()?.pn,u.try_borrow()?.dn);
             return Ok(MaybeMate::Continuation(u));
         }
