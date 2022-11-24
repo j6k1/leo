@@ -983,8 +983,8 @@ pub mod checkmate {
                 let md = u.try_borrow()?.mate_depth;
 
                 if let Some(c) = current_node.as_ref() {
-                    let pn = u.try_borrow()?.pn;
-                    let dn = u.try_borrow()?.dn;
+                    let pn = c.try_borrow()?.pn;
+                    let dn = c.try_borrow()?.dn;
 
                     c.try_borrow_mut()?.update(&n,&u)?;
 
@@ -1243,8 +1243,8 @@ pub mod checkmate {
                 let md = u.try_borrow()?.mate_depth;
                 let c = Rc::clone(&current_node);
 
-                let pn = u.try_borrow()?.pn;
-                let dn = u.try_borrow()?.dn;
+                let pn = c.try_borrow()?.pn;
+                let dn = c.try_borrow()?.dn;
 
                 c.try_borrow_mut()?.update(&n,&u)?;
 
