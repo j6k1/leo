@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{VecDeque};
 use std::fmt::{Debug, Formatter};
-use std::ops::{Add, AddAssign, Sub, SubAssign, Div, DivAssign};
+use std::ops::{Add, AddAssign, Sub, SubAssign, Div, DivAssign, Mul, MulAssign};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool};
@@ -167,6 +167,25 @@ impl DivAssign<u64> for Fraction {
         *self = *self / rhs;
     }
 }
+impl Mul<u64> for Fraction {
+    type Output = Fraction;
+    fn mul(self, rhs: u64) -> Self::Output {
+        let n = self.n * rhs;
+        let d = self.d;
+
+        let g = gcd(n,d);
+
+        Fraction {
+            n:n / g,
+            d:d / g
+        }
+    }
+}
+impl MulAssign<u64> for Fraction {
+    fn mul_assign(&mut self, rhs: u64) {
+        *self = *self * rhs;
+    }
+}
 impl Ord for Fraction {
     fn cmp(&self, other: &Self) -> Ordering {
         let ad = self.d;
@@ -247,7 +266,7 @@ pub mod checkmate {
     use std::cell::{RefCell};
     use std::cmp::Ordering;
     use std::collections::{BinaryHeap, VecDeque};
-    use std::ops::{Add, AddAssign, Sub, SubAssign, Deref, Div};
+    use std::ops::{Add, AddAssign, Sub, SubAssign, Deref, Div, Mul};
     use std::rc::{Rc};
     use std::sync::atomic::{AtomicBool};
     use std::sync::{Arc, atomic, Mutex};
@@ -340,6 +359,16 @@ pub mod checkmate {
         }
     }
 
+    impl Mul<u64> for Number {
+        type Output = Number;
+        fn mul(self, rhs: u64) -> Self::Output {
+            match self {
+                Number::INFINITE => Number::INFINITE,
+                Number::Value(f) => Number::Value(f * rhs)
+            }
+        }
+    }
+
     pub struct Node {
         id:u64,
         pn:Number,
@@ -414,8 +443,8 @@ pub mod checkmate {
 
             match self.comparator {
                 Comparator::AndNodeComparator => {
-                    let pn = self.pn;
-                    let dn = self.dn;
+                    let pn = self.pn * self.ref_count;
+                    let dn = self.dn * self.ref_count;
 
                     let pn = pn.min(u.try_borrow()?.pn);
                     let dn = dn - n.try_borrow()?.dn + u.try_borrow()?.dn;
@@ -424,8 +453,8 @@ pub mod checkmate {
                     self.dn = dn / self.ref_count;
                 },
                 Comparator::OrNodeComparator | Comparator::DecidedNNodeComparator => {
-                    let pn = self.pn;
-                    let dn = self.dn;
+                    let pn = self.pn * self.ref_count;
+                    let dn = self.dn * self.ref_count;
 
                     let pn = pn - n.try_borrow()?.pn + u.try_borrow()?.pn;
                     let dn = dn.min(u.try_borrow()?.dn);
