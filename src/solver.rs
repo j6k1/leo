@@ -432,7 +432,7 @@ pub mod checkmate {
             }
         }
 
-        pub fn update(&mut self,n:&Rc<RefCell<Node>>,u:&Rc<RefCell<Node>>) -> Result<(),ApplicationError> {
+        pub fn update(&mut self,u:&Rc<RefCell<Node>>) -> Result<(),ApplicationError> {
             if let Some(mut p) = self.children.try_borrow_mut()?.peek_mut() {
                 *p = Rc::clone(u);
             } else {
@@ -443,22 +443,25 @@ pub mod checkmate {
 
             match self.comparator {
                 Comparator::AndNodeComparator => {
-                    let pn = self.pn * self.ref_count;
-                    let dn = self.dn * self.ref_count;
+                    let mut pn = Number::INFINITE;
+                    let mut dn = Number::Value(Fraction::new(0));
 
-                    let pn = pn.min(u.try_borrow()?.pn);
-                    let dn = dn - n.try_borrow()?.dn + u.try_borrow()?.dn;
+                    for n in self.children.try_borrow()?.iter() {
+                        pn = pn.min(n.try_borrow()?.pn);
+                        dn = dn + n.try_borrow()?.dn;
+                    }
 
                     self.pn = pn / self.ref_count;
                     self.dn = dn / self.ref_count;
                 },
                 Comparator::OrNodeComparator | Comparator::DecidedNNodeComparator => {
-                    let pn = self.pn * self.ref_count;
-                    let dn = self.dn * self.ref_count;
+                    let mut pn = Number::Value(Fraction::new(0));
+                    let mut dn = Number::INFINITE;
 
-                    let pn = pn - n.try_borrow()?.pn + u.try_borrow()?.pn;
-                    let dn = dn.min(u.try_borrow()?.dn);
-
+                    for n in self.children.try_borrow()?.iter() {
+                        pn = pn + n.try_borrow()?.pn;
+                        dn = dn.min(n.try_borrow()?.dn);
+                    }
                     self.pn = pn / self.ref_count;
                     self.dn = dn / self.ref_count;
                 }
@@ -919,7 +922,7 @@ pub mod checkmate {
 
                     let u = Rc::new(RefCell::new(u));
 
-                    update_node = (Rc::clone(&n),u);
+                    update_node = u;
                 } else {
                     let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
@@ -949,7 +952,7 @@ pub mod checkmate {
                                         let u = Rc::new(RefCell::new(u));
 
                                         if let Some(c) = current_node.as_ref() {
-                                            c.try_borrow_mut()?.update(&n,&u)?;
+                                            c.try_borrow_mut()?.update(&u)?;
                                         } else {
                                             if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
                                                 *p = u;
@@ -963,7 +966,7 @@ pub mod checkmate {
                                         continue;
                                     }
 
-                                    update_node = (Rc::clone(&n),u);
+                                    update_node = u;
                                 },
                                 r @ MaybeMate::MaxNodes => {
                                     return Ok(r);
@@ -986,7 +989,7 @@ pub mod checkmate {
                                         u.try_borrow_mut()?.pn = Number::INFINITE;
                                     }
 
-                                    update_node = (Rc::clone(&n),u);
+                                    update_node = u;
                                 },
                                 MaybeMate::MateMoves(_) => {
                                     return Err(ApplicationError::LogicError(String::from(
@@ -1007,7 +1010,7 @@ pub mod checkmate {
                     return Ok(MaybeMate::Aborted)
                 }
 
-                let (n,u) = update_node;
+                let u = update_node;
 
                 let md = u.try_borrow()?.mate_depth;
 
@@ -1015,7 +1018,7 @@ pub mod checkmate {
                     let pn = c.try_borrow()?.pn;
                     let dn = c.try_borrow()?.dn;
 
-                    c.try_borrow_mut()?.update(&n,&u)?;
+                    c.try_borrow_mut()?.update(&u)?;
 
                     let u = c;
 
@@ -1197,7 +1200,7 @@ pub mod checkmate {
 
                     let u = Rc::new(RefCell::new(u));
 
-                    update_node = (Rc::clone(&n),u);
+                    update_node = u;
                 } else if s {
                     let mut u = Node::clone(n.try_borrow()?.deref());
 
@@ -1206,7 +1209,7 @@ pub mod checkmate {
 
                     let u = Rc::new(RefCell::new(u));
 
-                    update_node = (Rc::clone(&n),u);
+                    update_node = u;
                 } else {
                     let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
@@ -1228,7 +1231,7 @@ pub mod checkmate {
                                                      &mc
                             )? {
                                 MaybeMate::Continuation(u) => {
-                                    update_node = (Rc::clone(&n),u);
+                                    update_node = u;
                                 },
                                 r @ MaybeMate::MaxNodes => {
                                     return Ok(r);
@@ -1246,7 +1249,7 @@ pub mod checkmate {
 
                                     let u = Rc::new(RefCell::new(u));
 
-                                    update_node = (Rc::clone(&n),u);
+                                    update_node = u;
                                 },
                                 MaybeMate::MateMoves(_) => {
                                     return Err(ApplicationError::LogicError(String::from(
@@ -1267,7 +1270,7 @@ pub mod checkmate {
                     return Ok(MaybeMate::Aborted)
                 }
 
-                let (n,u) = update_node;
+                let u = update_node;
 
                 let md = u.try_borrow()?.mate_depth;
                 let c = Rc::clone(&current_node);
@@ -1275,7 +1278,7 @@ pub mod checkmate {
                 let pn = c.try_borrow()?.pn;
                 let dn = c.try_borrow()?.dn;
 
-                c.try_borrow_mut()?.update(&n,&u)?;
+                c.try_borrow_mut()?.update(&u)?;
 
                 let u = c;
 
