@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{VecDeque};
 use std::fmt::{Debug, Formatter};
-use std::ops::{Add, AddAssign, Div, DivAssign};
+use std::ops::{Add, AddAssign, Sub, SubAssign, Div, DivAssign};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool};
@@ -125,6 +125,29 @@ impl AddAssign for Fraction {
         *self = *self + rhs;
     }
 }
+impl Sub for Fraction {
+    type Output = Fraction;
+    fn sub(self, rhs: Self) -> Self::Output {
+        let ad = self.d;
+        let bd = rhs.d;
+        let an = self.n * bd;
+        let bn = rhs.n * ad;
+        let d = ad * bd;
+        let n = an - bn;
+
+        let g = gcd(n,d);
+
+        Fraction {
+            n:n / g,
+            d:d / g
+        }
+    }
+}
+impl SubAssign for Fraction {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
 impl Div<u64> for Fraction {
     type Output = Fraction;
     fn div(self, rhs: u64) -> Self::Output {
@@ -224,7 +247,7 @@ pub mod checkmate {
     use std::cell::{RefCell};
     use std::cmp::Ordering;
     use std::collections::{BinaryHeap, VecDeque};
-    use std::ops::{Add, AddAssign, Deref, Div};
+    use std::ops::{Add, AddAssign, Sub, SubAssign, Deref, Div};
     use std::rc::{Rc};
     use std::sync::atomic::{AtomicBool};
     use std::sync::{Arc, atomic, Mutex};
@@ -274,6 +297,32 @@ pub mod checkmate {
                 },
                 (Number::Value(l),Number::Value(r)) => {
                     Number::Value(*l + r)
+                }
+            };
+
+            *self = v;
+        }    
+    }
+
+    impl Sub for Number {
+        type Output = Number;
+
+        fn sub(self, rhs: Self) -> Self::Output {
+            match (self,rhs) {
+                (Number::INFINITE,_) | (_,Number::INFINITE) => Number::INFINITE,
+                (Number::Value(l),Number::Value(r)) => Number::Value(l-r)
+            }
+        }
+    }
+  
+    impl SubAssign for Number {
+        fn sub_assign(&mut self, rhs: Self) {
+            let v = match (&self,rhs) {
+                (Number::INFINITE,_) | (_,Number::INFINITE) => {
+                    Number::INFINITE
+                },
+                (Number::Value(l),Number::Value(r)) => {
+                    Number::Value(*l - r)
                 }
             };
 
@@ -352,6 +401,41 @@ pub mod checkmate {
                 children: Rc::clone(&self.children),
                 comparator: Comparator::DecidedNNodeComparator
             }
+        }
+
+        pub fn update(&mut self,n:&Rc<RefCell<Node>>,u:&Rc<RefCell<Node>>) -> Result<(),ApplicationError> {
+            if let Some(mut p) = self.children.try_borrow_mut()?.peek_mut() {
+                *p = Rc::clone(u);
+            } else {
+                return Err(ApplicationError::LogicError(String::from(
+                    "Node to be updated could not be found."
+                )));
+            }
+
+            match self.comparator {
+                Comparator::AndNodeComparator => {
+                    let pn = self.pn;
+                    let dn = self.dn;
+
+                    let pn = pn.min(u.try_borrow()?.pn);
+                    let dn = dn - n.try_borrow()?.dn + u.try_borrow()?.dn;
+
+                    self.pn = pn / self.ref_count;
+                    self.dn = dn / self.ref_count;
+                },
+                Comparator::OrNodeComparator | Comparator::DecidedNNodeComparator => {
+                    let pn = self.pn;
+                    let dn = self.dn;
+
+                    let pn = pn - n.try_borrow()?.pn + u.try_borrow()?.pn;
+                    let dn = dn.min(u.try_borrow()?.dn);
+
+                    self.pn = pn / self.ref_count;
+                    self.dn = dn / self.ref_count;
+                }
+            }
+
+            Ok(())
         }
     }
 
@@ -674,54 +758,6 @@ pub mod checkmate {
             Ok(mvs)
         }
 
-        pub fn update_node(&mut self, depth:u32, n:&Rc<RefCell<Node>>) -> Result<(),ApplicationError> {
-            let children = {
-                let mut children = Rc::new(RefCell::new(BinaryHeap::new()));
-
-                std::mem::swap(&mut n.try_borrow_mut()?.children, &mut children);
-
-                children
-            };
-
-            n.try_borrow_mut()?.children = Rc::clone(&children);
-
-            if depth % 2 == 0 {
-                let mut pn = Number::INFINITE;
-                let mut dn = Number::Value(Fraction::new(0));
-
-                for n in children.try_borrow()?.iter() {
-                    pn = pn.min(n.try_borrow()?.pn);
-                    dn += n.try_borrow()?.dn;
-                    println!("pn {:?}, dn {:?}",pn,dn);
-                }
-
-                let ref_count = n.try_borrow()?.ref_count;
-
-                n.try_borrow_mut()?.pn = pn / ref_count;
-                n.try_borrow_mut()?.dn = dn / ref_count;
-                n.try_borrow_mut()?.children = children;
-
-                Ok(())
-            } else {
-                let mut pn = Number::Value(Fraction::new(0));
-                let mut dn = Number::INFINITE;
-
-                for n in children.try_borrow()?.iter() {
-                    pn += n.try_borrow()?.pn;
-                    dn = dn.min(n.try_borrow()?.dn);
-                    println!("pn {:?}, dn {:?}",pn,dn);
-                }
-
-                let ref_count = n.try_borrow()?.ref_count;
-
-                n.try_borrow_mut()?.pn = pn / ref_count;
-                n.try_borrow_mut()?.dn = dn / ref_count;
-                n.try_borrow_mut()?.children = children;
-
-                Ok(())
-            }
-        }
-
         pub fn oute_process<'a,L: Logger>(&mut self,
                                        depth:u32,
                                        mhash:u64,
@@ -796,6 +832,9 @@ pub mod checkmate {
                 (None,children)
             };
 
+            current_node.as_ref().map(|n| {
+                println!("current_node pn {:?}, dn {:?}",n.try_borrow().unwrap().pn,n.try_borrow().unwrap().dn);
+            });
             assert!(children.try_borrow()?.len()>0);
             loop {
                 let n = children.try_borrow_mut()?.peek().map(|n| {
@@ -804,6 +843,13 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
+                if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
+                    for n in children.try_borrow()?.iter() {
+                        println!("child pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
+                    }
+                    let a = 1;
+                }
+                println!("depth {}",depth);
                 println!("oute pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
 
                 if n.try_borrow()?.decided || n.try_borrow()?.pn == Number::INFINITE {
@@ -844,7 +890,7 @@ pub mod checkmate {
 
                     let u = Rc::new(RefCell::new(u));
 
-                    update_node = u;
+                    update_node = (Rc::clone(&n),u);
                 } else {
                     let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
@@ -873,18 +919,22 @@ pub mod checkmate {
 
                                         let u = Rc::new(RefCell::new(u));
 
-                                        if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
-                                            *p = u;
+                                        if let Some(c) = current_node.as_ref() {
+                                            c.try_borrow_mut()?.update(&n,&u)?;
                                         } else {
-                                            return Err(ApplicationError::LogicError(String::from(
-                                                "Node to be updated could not be found."
-                                            )));
+                                            if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
+                                                *p = u;
+                                            } else {
+                                                return Err(ApplicationError::LogicError(String::from(
+                                                    "Node to be updated could not be found."
+                                                )));
+                                            }
                                         }
 
                                         continue;
                                     }
 
-                                    update_node = u;
+                                    update_node = (Rc::clone(&n),u);
                                 },
                                 r @ MaybeMate::MaxNodes => {
                                     return Ok(r);
@@ -907,7 +957,7 @@ pub mod checkmate {
                                         u.try_borrow_mut()?.pn = Number::INFINITE;
                                     }
 
-                                    update_node = u;
+                                    update_node = (Rc::clone(&n),u);
                                 },
                                 MaybeMate::MateMoves(_) => {
                                     return Err(ApplicationError::LogicError(String::from(
@@ -928,24 +978,17 @@ pub mod checkmate {
                     return Ok(MaybeMate::Aborted)
                 }
 
-                let u = update_node;
-
-                if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
-                    println!("peek mut pn {:?}, dn {:?}",u.try_borrow()?.pn,u.try_borrow()?.dn);
-                    *p = Rc::clone(&u);
-                } else {
-                    return Err(ApplicationError::LogicError(String::from(
-                        "Node to be updated could not be found."
-                    )));
-                }
+                let (n,u) = update_node;
 
                 let md = u.try_borrow()?.mate_depth;
 
-                if let Some(u) = current_node.as_ref() {
+                if let Some(c) = current_node.as_ref() {
                     let pn = u.try_borrow()?.pn;
                     let dn = u.try_borrow()?.dn;
 
-                    self.update_node(depth, u)?;
+                    c.try_borrow_mut()?.update(&n,&u)?;
+
+                    let u = c;
 
                     let update_mate_depth = u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE &&
                         (u.try_borrow()?.mate_depth == 0 || md + 1 < u.try_borrow()?.mate_depth);
@@ -958,6 +1001,9 @@ pub mod checkmate {
                         node_map.insert(teban, mhash, shash, Rc::clone(&u));
                     }
 
+                    if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
+                        let a = 1;
+                    }
                     if u.try_borrow()?.pn != pn || u.try_borrow()?.dn != dn {
                         return Ok(MaybeMate::Continuation(Rc::clone(u)));
                     }
@@ -1084,7 +1130,10 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                println!("pn {:?} dn {:?}", n.try_borrow()?.pn, n.try_borrow()?.dn);
+                for n in children.try_borrow()?.iter() {
+                    println!("child response pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
+                }
+                println!("respond oute pn {:?} dn {:?}", n.try_borrow()?.pn, n.try_borrow()?.dn);
 
                 let update_node;
 
@@ -1119,7 +1168,7 @@ pub mod checkmate {
 
                     let u = Rc::new(RefCell::new(u));
 
-                    update_node = u;
+                    update_node = (Rc::clone(&n),u);
                 } else if s {
                     let mut u = Node::clone(n.try_borrow()?.deref());
 
@@ -1128,7 +1177,7 @@ pub mod checkmate {
 
                     let u = Rc::new(RefCell::new(u));
 
-                    update_node = u;
+                    update_node = (Rc::clone(&n),u);
                 } else {
                     let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
@@ -1150,7 +1199,7 @@ pub mod checkmate {
                                                      &mc
                             )? {
                                 MaybeMate::Continuation(u) => {
-                                    update_node = u;
+                                    update_node = (Rc::clone(&n),u);
                                 },
                                 r @ MaybeMate::MaxNodes => {
                                     return Ok(r);
@@ -1168,7 +1217,7 @@ pub mod checkmate {
 
                                     let u = Rc::new(RefCell::new(u));
 
-                                    update_node = u;
+                                    update_node = (Rc::clone(&n),u);
                                 },
                                 MaybeMate::MateMoves(_) => {
                                     return Err(ApplicationError::LogicError(String::from(
@@ -1189,23 +1238,17 @@ pub mod checkmate {
                     return Ok(MaybeMate::Aborted)
                 }
 
-                let u = update_node;
-
-                if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
-                    *p = Rc::clone(&u);
-                } else {
-                    return Err(ApplicationError::LogicError(String::from(
-                        "Node to be updated could not be found."
-                    )));
-                }
+                let (n,u) = update_node;
 
                 let md = u.try_borrow()?.mate_depth;
-                let u = Rc::clone(&current_node);
+                let c = Rc::clone(&current_node);
 
                 let pn = u.try_borrow()?.pn;
                 let dn = u.try_borrow()?.dn;
 
-                self.update_node(depth, &u)?;
+                c.try_borrow_mut()?.update(&n,&u)?;
+
+                let u = c;
 
                 let update_mate_depth = u.try_borrow()?.pn.is_zero() &&
                                               u.try_borrow()?.dn == Number::INFINITE &&
