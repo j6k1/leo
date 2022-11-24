@@ -449,11 +449,6 @@ pub mod checkmate {
                     for n in self.children.try_borrow()?.iter() {
                         pn = pn.min(n.try_borrow()?.pn);
                         dn = dn + n.try_borrow()?.dn;
-                        println!("update child pn {:?}, dn {:?}, pn {:?}, dn {:?}",pn,dn,u.try_borrow()?.pn,u.try_borrow()?.dn);
-                    }
-
-                    if pn.is_zero() && dn == Number::INFINITE {
-                        println!("checkmate!");
                     }
                     self.pn = pn / self.ref_count;
                     self.dn = dn / self.ref_count;
@@ -465,7 +460,6 @@ pub mod checkmate {
                     for n in self.children.try_borrow()?.iter() {
                         pn = pn + n.try_borrow()?.pn;
                         dn = dn.min(n.try_borrow()?.dn);
-                        println!("update child pn {:?}, dn {:?}, pn {:?}, dn {:?}",pn,dn,u.try_borrow()?.pn,u.try_borrow()?.dn);
                     }
                     self.pn = pn / self.ref_count;
                     self.dn = dn / self.ref_count;
@@ -836,7 +830,19 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let (current_node,children) = if let Some(n) = current_node.as_ref() {
+                let pn = n.try_borrow()?.pn;
+                let dn = n.try_borrow()?.dn;
+
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
+
+                if pn != n.try_borrow()?.pn || dn !=  n.try_borrow()?.dn {
+                    let n = Node::clone(n.try_borrow()?.deref());
+
+                    let n = Rc::new(RefCell::new(n));
+                    node_map.insert(teban,mhash,shash,Rc::clone(&n));
+
+                    return Ok(MaybeMate::Continuation(n));
+                }
 
                 let expanded = n.try_borrow()?.expanded;
 
@@ -857,6 +863,7 @@ pub mod checkmate {
                     return Ok(MaybeMate::Continuation(n));
                 } else {
                     let n = Node::clone(n.try_borrow()?.deref());
+
                     let n = Rc::new(RefCell::new(n));
 
                     let children = Rc::clone(&n.try_borrow()?.children);
@@ -869,25 +876,12 @@ pub mod checkmate {
                 (None,children)
             };
 
-            current_node.as_ref().map(|n| {
-                println!("current_node pn {:?}, dn {:?}",n.try_borrow().unwrap().pn,n.try_borrow().unwrap().dn);
-            });
-            assert!(children.try_borrow()?.len()>0);
             loop {
                 let n = children.try_borrow_mut()?.peek().map(|n| {
                     Rc::clone(n)
                 }).ok_or(ApplicationError::LogicError(String::from(
                     "None of the child nodes exist."
                 )))?;
-
-                if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
-                    for n in children.try_borrow()?.iter() {
-                        println!("child pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
-                    }
-                    let a = 1;
-                }
-                println!("depth {}",depth);
-                println!("oute pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
 
                 if n.try_borrow()?.decided || n.try_borrow()?.pn == Number::INFINITE {
                     break;
@@ -1136,7 +1130,19 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let current_node = if let Some(n) = current_node.as_ref() {
+                let pn = n.try_borrow()?.pn;
+                let dn = n.try_borrow()?.dn;
+
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
+
+                if pn != n.try_borrow()?.pn || dn !=  n.try_borrow()?.dn {
+                    let n = Node::clone(n.try_borrow()?.deref());
+
+                    let n = Rc::new(RefCell::new(n));
+                    node_map.insert(teban,mhash,shash,Rc::clone(&n));
+
+                    return Ok(MaybeMate::Continuation(n));
+                }
 
                 let expanded = n.try_borrow()?.expanded;
 
@@ -1169,17 +1175,11 @@ pub mod checkmate {
             let children = Rc::clone(&current_node.try_borrow()?.children);
 
             loop {
-                assert!(children.try_borrow()?.len() > 0);
                 let n = children.try_borrow_mut()?.peek().map(|n| {
                     Rc::clone(n)
                 }).ok_or(ApplicationError::LogicError(String::from(
                     "None of the child nodes exist."
                 )))?;
-
-                for n in children.try_borrow()?.iter() {
-                    println!("child response pn {:?}, dn {:?}",n.try_borrow()?.pn,n.try_borrow()?.dn);
-                }
-                println!("respond oute pn {:?} dn {:?}", n.try_borrow()?.pn, n.try_borrow()?.dn);
 
                 let update_node;
 
@@ -1310,10 +1310,6 @@ pub mod checkmate {
                     node_map.insert(teban, mhash, shash, Rc::clone(&u));
                 }
 
-                if u.try_borrow()?.pn == Number::INFINITE {
-                    let a = 1;
-                }
-                println!("info string pn {:?}, dn {:?}", u.try_borrow()?.pn, u.try_borrow()?.dn);
                 if u.try_borrow()?.pn != pn || u.try_borrow()?.dn != dn {
                     return Ok(MaybeMate::Continuation(Rc::clone(&u)));
                 }
