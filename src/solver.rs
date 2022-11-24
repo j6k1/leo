@@ -1039,13 +1039,23 @@ pub mod checkmate {
                     if u.try_borrow()?.pn != pn || u.try_borrow()?.dn != dn {
                         return Ok(MaybeMate::Continuation(Rc::clone(u)));
                     }
-                } else if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
-                    *mate_depth = Some(md + 1);
-                    return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
-                } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE && mate_depth.map(|d| {
-                    md + 1 < d
-                }).unwrap_or(false) {
-                    *mate_depth = Some(md + 1);
+                } else {
+                    if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
+                        *p = Rc::clone(&u);
+                    } else {
+                        return Err(ApplicationError::LogicError(String::from(
+                            "Node to be updated could not be found."
+                        )));
+                    }
+
+                    if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
+                        *mate_depth = Some(md + 1);
+                        return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
+                    } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE && mate_depth.map(|d| {
+                        md + 1 < d
+                    }).unwrap_or(false) {
+                        *mate_depth = Some(md + 1);
+                    }
                 }
             }
 
