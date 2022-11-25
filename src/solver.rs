@@ -839,7 +839,6 @@ pub mod checkmate {
                     let n = Node::clone(n.try_borrow()?.deref());
 
                     let n = Rc::new(RefCell::new(n));
-                    node_map.insert(teban,mhash,shash,Rc::clone(&n));
 
                     return Ok(MaybeMate::Continuation(n));
                 }
@@ -1134,12 +1133,11 @@ pub mod checkmate {
                 let dn = n.try_borrow()?.dn;
 
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
-
+f
                 if pn != n.try_borrow()?.pn || dn !=  n.try_borrow()?.dn {
                     let n = Node::clone(n.try_borrow()?.deref());
 
                     let n = Rc::new(RefCell::new(n));
-                    node_map.insert(teban,mhash,shash,Rc::clone(&n));
 
                     return Ok(MaybeMate::Continuation(n));
                 }
