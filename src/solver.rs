@@ -417,18 +417,37 @@ pub mod checkmate {
         }
 
         pub fn to_decided_node(&self,id:u64) -> Node {
-            Node {
-                id: id,
-                pn: self.pn,
-                dn: self.pn,
-                mate_depth: self.mate_depth,
-                ref_count: self.ref_count,
-                sennichite: self.sennichite,
-                expanded: self.expanded,
-                decided: true,
-                m: self.m,
-                children: Rc::clone(&self.children),
-                comparator: Comparator::DecidedNNodeComparator
+            match self.comparator {
+                Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
+                    Node {
+                        id: id,
+                        pn: self.pn,
+                        dn: self.pn,
+                        mate_depth: self.mate_depth,
+                        ref_count: self.ref_count,
+                        sennichite: self.sennichite,
+                        expanded: self.expanded,
+                        decided: true,
+                        m: self.m,
+                        children: Rc::clone(&self.children),
+                        comparator: Comparator::DecidedOrNodeComparator
+                    }
+                },
+                Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
+                    Node {
+                        id: id,
+                        pn: self.pn,
+                        dn: self.pn,
+                        mate_depth: self.mate_depth,
+                        ref_count: self.ref_count,
+                        sennichite: self.sennichite,
+                        expanded: self.expanded,
+                        decided: true,
+                        m: self.m,
+                        children: Rc::clone(&self.children),
+                        comparator: Comparator::DecidedAndNodeComparator
+                    }
+                }
             }
         }
 
@@ -442,7 +461,7 @@ pub mod checkmate {
             }
 
             match self.comparator {
-                Comparator::AndNodeComparator => {
+                Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
                     let mut pn = Number::INFINITE;
                     let mut dn = Number::Value(Fraction::new(0));
 
@@ -453,7 +472,7 @@ pub mod checkmate {
                     self.pn = pn / self.ref_count;
                     self.dn = dn / self.ref_count;
                 },
-                Comparator::OrNodeComparator | Comparator::DecidedNNodeComparator => {
+                Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
                     let mut pn = Number::Value(Fraction::new(0));
                     let mut dn = Number::INFINITE;
 
@@ -531,26 +550,51 @@ pub mod checkmate {
     pub enum Comparator {
         OrNodeComparator,
         AndNodeComparator,
-        DecidedNNodeComparator
+        DecidedOrNodeComparator,
+        DecidedAndNodeComparator
     }
 
     impl Comparator {
         pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             match self {
                 &Comparator::OrNodeComparator => {
-                    l.pn.cmp(&r.pn)
-                        .then(l.mate_depth.cmp(&r.mate_depth))
-                        .then(l.id.cmp(&r.id)).reverse()
+                    if r.decided {
+                        l.pn.cmp(&Number::INFINITE)
+                            .then(l.mate_depth.cmp(&r.mate_depth))
+                            .then(l.id.cmp(&r.id)).reverse()
+                    } else {
+                        l.pn.cmp(&r.pn)
+                            .then(l.mate_depth.cmp(&r.mate_depth))
+                            .then(l.id.cmp(&r.id)).reverse()
+                    }
                 },
                 &Comparator::AndNodeComparator => {
-                    l.dn.cmp(&r.dn)
-                        .then(r.mate_depth.cmp(&l.mate_depth))
-                        .then(l.id.cmp(&r.id)).reverse()
+                    if r.decided {
+                        l.dn.cmp(&Number::INFINITE)
+                            .then(l.pn.cmp(&r.pn))
+                            .then(r.mate_depth.cmp(&l.mate_depth))
+                            .then(l.id.cmp(&r.id)).reverse()
+                    } else {
+                        l.dn.cmp(&r.dn)
+                            .then(l.pn.cmp(&r.pn))
+                            .then(r.mate_depth.cmp(&l.mate_depth))
+                            .then(l.id.cmp(&r.id)).reverse()
+                    }
                 },
-                &Comparator::DecidedNNodeComparator => {
+                &Comparator::DecidedOrNodeComparator => {
                     Number::INFINITE.cmp(&r.pn)
                         .then(l.mate_depth.cmp(&r.mate_depth))
                         .then(l.id.cmp(&r.id)).reverse()
+                },
+                &Comparator::DecidedAndNodeComparator => {
+                    Number::INFINITE.cmp(&r.dn)
+                        .then(if !r.decided {
+                            Ordering::Less
+                        } else {
+                            Ordering::Equal
+                        })
+                        .then(r.mate_depth.cmp(&l.mate_depth))
+                        .then(l.id.cmp(&r.id))
                 }
             }
         }
@@ -835,11 +879,7 @@ pub mod checkmate {
 
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
-                if pn != n.try_borrow()?.pn || dn !=  n.try_borrow()?.dn {
-                    let n = Node::clone(n.try_borrow()?.deref());
-
-                    let n = Rc::new(RefCell::new(n));
-
+                if pn != n.try_borrow()?.pn || dn != n.try_borrow()?.dn {
                     return Ok(MaybeMate::Continuation(n));
                 }
 
@@ -1133,12 +1173,8 @@ pub mod checkmate {
                 let dn = n.try_borrow()?.dn;
 
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
-f
-                if pn != n.try_borrow()?.pn || dn !=  n.try_borrow()?.dn {
-                    let n = Node::clone(n.try_borrow()?.deref());
 
-                    let n = Rc::new(RefCell::new(n));
-
+                if pn != n.try_borrow()?.pn || dn != n.try_borrow()?.dn {
                     return Ok(MaybeMate::Continuation(n));
                 }
 
