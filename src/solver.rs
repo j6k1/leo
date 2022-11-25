@@ -560,7 +560,7 @@ pub mod checkmate {
                 &Comparator::OrNodeComparator => {
                     if r.decided {
                         l.pn.cmp(&r.pn)
-                            .then(Ordering::Less)
+                            .then(Ordering::Less).reverse()
                     } else {
                         l.pn.cmp(&r.pn)
                             .then(l.mate_depth.cmp(&r.mate_depth))
@@ -570,11 +570,9 @@ pub mod checkmate {
                 &Comparator::AndNodeComparator => {
                     if r.decided {
                         l.dn.cmp(&r.dn)
-                            .then(l.pn.cmp(&r.pn))
-                            .then(Ordering::Less)
+                            .then(Ordering::Less).reverse()
                     } else {
                         l.dn.cmp(&r.dn)
-                            .then(l.pn.cmp(&r.pn))
                             .then(r.mate_depth.cmp(&l.mate_depth))
                             .then(l.id.cmp(&r.id)).reverse()
                     }
@@ -585,16 +583,16 @@ pub mod checkmate {
                             .then(l.id.cmp(&r.id)).reverse()
                     } else {
                         l.pn.cmp(&r.pn)
-                            .then(Ordering::Greater)
+                            .then(Ordering::Greater).reverse()
                     }
                 },
                 &Comparator::DecidedAndNodeComparator => {
                     if r.decided {
                         r.mate_depth.cmp(&l.mate_depth)
-                            .then(l.id.cmp(&r.id))
+                            .then(l.id.cmp(&r.id)).reverse()
                     } else {
                         l.dn.cmp(&r.dn)
-                            .then(Ordering::Greater)
+                            .then(Ordering::Greater).reverse()
                     }
                 }
             }
