@@ -559,9 +559,8 @@ pub mod checkmate {
             match self {
                 &Comparator::OrNodeComparator => {
                     if r.decided {
-                        l.pn.cmp(&Number::INFINITE)
-                            .then(l.mate_depth.cmp(&r.mate_depth))
-                            .then(l.id.cmp(&r.id)).reverse()
+                        l.pn.cmp(&r.pn)
+                            .then(Ordering::Less)
                     } else {
                         l.pn.cmp(&r.pn)
                             .then(l.mate_depth.cmp(&r.mate_depth))
@@ -570,10 +569,9 @@ pub mod checkmate {
                 },
                 &Comparator::AndNodeComparator => {
                     if r.decided {
-                        l.dn.cmp(&Number::INFINITE)
+                        l.dn.cmp(&r.dn)
                             .then(l.pn.cmp(&r.pn))
-                            .then(r.mate_depth.cmp(&l.mate_depth))
-                            .then(l.id.cmp(&r.id)).reverse()
+                            .then(Ordering::Less)
                     } else {
                         l.dn.cmp(&r.dn)
                             .then(l.pn.cmp(&r.pn))
@@ -582,19 +580,22 @@ pub mod checkmate {
                     }
                 },
                 &Comparator::DecidedOrNodeComparator => {
-                    Number::INFINITE.cmp(&r.pn)
-                        .then(l.mate_depth.cmp(&r.mate_depth))
-                        .then(l.id.cmp(&r.id)).reverse()
+                    if r.decided {
+                        l.mate_depth.cmp(&r.mate_depth)
+                            .then(l.id.cmp(&r.id)).reverse()
+                    } else {
+                        l.pn.cmp(&r.pn)
+                            .then(Ordering::Greater)
+                    }
                 },
                 &Comparator::DecidedAndNodeComparator => {
-                    Number::INFINITE.cmp(&r.dn)
-                        .then(if !r.decided {
-                            Ordering::Less
-                        } else {
-                            Ordering::Equal
-                        })
-                        .then(r.mate_depth.cmp(&l.mate_depth))
-                        .then(l.id.cmp(&r.id))
+                    if r.decided {
+                        r.mate_depth.cmp(&l.mate_depth)
+                            .then(l.id.cmp(&r.id))
+                    } else {
+                        l.dn.cmp(&r.dn)
+                            .then(Ordering::Greater)
+                    }
                 }
             }
         }
