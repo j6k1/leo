@@ -527,6 +527,48 @@ pub mod checkmate {
         }
     }
 
+    pub struct MapNode {
+        pn:Number,
+        dn:Number,
+        mate_depth:u32,
+        ref_count:u64,
+        expanded:bool,
+        decided:bool,
+        children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
+    }
+
+    impl MapNode {
+        pub fn reflect_to(&self,n:&Node) -> Node {
+            Node {
+                id: n.id,
+                pn: self.pn,
+                dn: self.dn,
+                mate_depth: self.mate_depth,
+                ref_count: self.ref_count,
+                sennichite: n.sennichite,
+                expanded: self.expanded,
+                decided: self.decided,
+                m: n.m,
+                children: Rc::clone(&self.children),
+                comparator: n.comparator
+            }
+        }
+    }
+
+    impl<'a> From<&'a Node> for MapNode {
+        fn from(n: &'a Node) -> Self {
+            MapNode {
+                pn: n.pn,
+                dn: n.dn,
+                mate_depth: n.mate_depth,
+                ref_count: n.ref_count,
+                expanded: n.expanded,
+                decided: n.decided,
+                children: Rc::clone(&n.children)
+            }
+        }
+    }
+
     pub struct UniqID {
         last_id:u64
     }
