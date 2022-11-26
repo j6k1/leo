@@ -614,9 +614,10 @@ pub mod checkmate {
         pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             match self {
                 &Comparator::OrNodeComparator => {
-                    if r.decided {
-                        l.pn.cmp(&r.pn)
-                            .then(Ordering::Less).reverse()
+                    if r.decided && l.pn != Number::INFINITE {
+                        Ordering::Less.reverse()
+                    } else if r.decided {
+                        Ordering::Greater.reverse()
                     } else {
                         l.pn.cmp(&r.pn)
                             .then(l.mate_depth.cmp(&r.mate_depth))
@@ -624,9 +625,10 @@ pub mod checkmate {
                     }
                 },
                 &Comparator::AndNodeComparator => {
-                    if r.decided {
-                        l.dn.cmp(&r.dn)
-                            .then(Ordering::Less).reverse()
+                    if r.decided && l.pn.is_zero() && l.dn == Number::INFINITE {
+                        Ordering::Less.reverse()
+                    } else if r.decided && l.dn == Number::INFINITE {
+                        Ordering::Greater.reverse()
                     } else {
                         l.dn.cmp(&r.dn)
                             .then(r.mate_depth.cmp(&l.mate_depth))
@@ -637,18 +639,24 @@ pub mod checkmate {
                     if r.decided {
                         l.mate_depth.cmp(&r.mate_depth)
                             .then(l.id.cmp(&r.id)).reverse()
+                    } else if r.pn != Number::INFINITE {
+                        Ordering::Greater.reverse()
                     } else {
-                        l.pn.cmp(&r.pn)
-                            .then(Ordering::Greater).reverse()
+                        Ordering::Less.reverse()
                     }
                 },
                 &Comparator::DecidedAndNodeComparator => {
                     if r.decided {
                         r.mate_depth.cmp(&l.mate_depth)
                             .then(l.id.cmp(&r.id)).reverse()
+                    } else if r.pn.is_zero() && r.dn == Number::INFINITE {
+                        Ordering::Greater.reverse()
+                    } else if r.dn == Number::INFINITE {
+                        Ordering::Less.reverse()
                     } else {
                         l.dn.cmp(&r.dn)
-                            .then(Ordering::Greater).reverse()
+                            .then(r.mate_depth.cmp(&l.mate_depth))
+                            .then (l.id.cmp(&r.id)).reverse()
                     }
                 }
             }
