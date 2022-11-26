@@ -927,7 +927,9 @@ pub mod checkmate {
 
                         let u = Rc::new(RefCell::new(u));
 
-                        node_map.insert(teban,mhash,shash,Rc::clone(&u));
+                        if !u.try_borrow()?.sennichite {
+                            node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                        }
 
                         return Ok(MaybeMate::Continuation(u));
                     } else {
@@ -1190,7 +1192,9 @@ pub mod checkmate {
 
                         let u = Rc::new(RefCell::new(u));
 
-                        node_map.insert(teban,mhash,shash,Rc::clone(&u));
+                        if !u.try_borrow()?.sennichite {
+                            node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                        }
 
                         return Ok(MaybeMate::Continuation(u));
                     }
@@ -1221,8 +1225,10 @@ pub mod checkmate {
 
                     let u = Rc::new(RefCell::new(u));
 
-                    node_map.insert(teban,mhash,shash,Rc::clone(&u));
-
+                    if !u.try_borrow()?.sennichite {
+                        node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                    }
+                    
                     return Ok(MaybeMate::Continuation(u));
                 }
 
