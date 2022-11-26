@@ -31,6 +31,7 @@ pub const MAX_PLY:u32 = 200;
 pub const MAX_PLY_TIMELIMIT:u64 = 0;
 pub const TURN_COUNT:u32 = 50;
 pub const MIN_TURN_COUNT:u32 = 5;
+pub const DEFAULT_STRICT_MATE:bool = true;
 
 pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,

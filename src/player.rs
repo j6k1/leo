@@ -18,6 +18,7 @@ use crate::nn::Evalutor;
 use crate::search::{BASE_DEPTH,
                     DEFALUT_DISPLAY_EVALUTE_SCORE,
                     DEFAULT_ADJUST_DEPTH,
+                    DEFAULT_STRICT_MATE,
                     Environment,
                     EvaluationResult,
                     GameState,
@@ -83,7 +84,8 @@ pub struct Leo {
     network_delay:u32,
     turn_count:u32,
     min_turn_count:u32,
-    display_evalute_score:bool
+    display_evalute_score:bool,
+    strict_mate:bool
 }
 impl fmt::Debug for Leo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -117,7 +119,8 @@ impl Leo {
             network_delay:NETWORK_DELAY,
             turn_count:TURN_COUNT,
             min_turn_count:MIN_TURN_COUNT,
-            display_evalute_score:DEFALUT_DISPLAY_EVALUTE_SCORE
+            display_evalute_score:DEFALUT_DISPLAY_EVALUTE_SCORE,
+            strict_mate:DEFAULT_STRICT_MATE
         }
     }
 
@@ -150,6 +153,7 @@ impl USIPlayer<ApplicationError> for Leo {
         kinds.insert(String::from("NetworkDelay"),SysEventOptionKind::Num);
         kinds.insert(String::from("DispEvaluteScore"),SysEventOptionKind::Bool);
         kinds.insert(String::from("AdjustDepth"),SysEventOptionKind::Bool);
+        kinds.insert(String::from("StrictMate"),SysEventOptionKind::Bool);
 
         Ok(kinds)
     }
@@ -167,6 +171,7 @@ impl USIPlayer<ApplicationError> for Leo {
         options.insert(String::from("NetworkDelay"),UsiOptType::Spin(0,10000,Some(NETWORK_DELAY as i64)));
         options.insert(String::from("DispEvaluteScore"),UsiOptType::Check(Some(DEFALUT_DISPLAY_EVALUTE_SCORE)));
         options.insert(String::from("AdjustDepth"),UsiOptType::Check(Some(DEFAULT_ADJUST_DEPTH)));
+        options.insert(String::from("StrictMate"),UsiOptType::Check(Some(DEFAULT_STRICT_MATE)));
 
         Ok(options)
     }
@@ -247,6 +252,9 @@ impl USIPlayer<ApplicationError> for Leo {
             },
             "MIN_TURN_COUNT" => {
                 self.min_turn_count = u32::from_option(value).unwrap_or(MIN_TURN_COUNT);
+            },
+            "StrictMate" => {
+                self.strict_mate = bool::from_option(value).unwrap_or(DEFAULT_STRICT_MATE)
             },
             _ => ()
         }
@@ -523,7 +531,7 @@ impl USIPlayer<ApplicationError> for Leo {
         let solver = Solver::new();
 
         match solver.checkmate::<L,S>(
-            false,
+            self.strict_mate,
             env.limit.clone(),
             env.max_ply_timelimit.map(|l| Instant::now() + l),
             env.network_delay,
