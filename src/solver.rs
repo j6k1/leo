@@ -1408,7 +1408,12 @@ pub mod checkmate {
                 let u = update_node;
 
                 let md = u.try_borrow()?.mate_depth;
+
                 let c = Rc::clone(&current_node);
+
+                let update_mate_depth = u.try_borrow()?.pn.is_zero() &&
+                    u.try_borrow()?.dn == Number::INFINITE &&
+                    c.try_borrow()?.mate_depth < md + 1;
 
                 let pn = c.try_borrow()?.pn;
                 let dn = c.try_borrow()?.dn;
@@ -1416,10 +1421,6 @@ pub mod checkmate {
                 c.try_borrow_mut()?.update(&u)?;
 
                 let u = c;
-
-                let update_mate_depth = u.try_borrow()?.pn.is_zero() &&
-                                              u.try_borrow()?.dn == Number::INFINITE &&
-                                              u.try_borrow()?.mate_depth < md + 1;
 
                 if update_mate_depth {
                     u.try_borrow_mut()?.mate_depth = md + 1;
