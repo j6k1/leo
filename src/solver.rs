@@ -1142,7 +1142,7 @@ pub mod checkmate {
                         return Ok(MaybeMate::MateMoves(self.build_moves(&u)?));
                     } else if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE && mate_depth.map(|d| {
                         md + 1 < d
-                    }).unwrap_or(false) {
+                    }).unwrap_or(true) {
                         *mate_depth = Some(md + 1);
                     }
                 }
