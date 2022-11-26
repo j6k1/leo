@@ -422,7 +422,7 @@ pub mod checkmate {
                     Node {
                         id: id,
                         pn: self.pn,
-                        dn: self.pn,
+                        dn: self.dn,
                         mate_depth: self.mate_depth,
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
@@ -437,7 +437,7 @@ pub mod checkmate {
                     Node {
                         id: id,
                         pn: self.pn,
-                        dn: self.pn,
+                        dn: self.dn,
                         mate_depth: self.mate_depth,
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
