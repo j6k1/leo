@@ -555,6 +555,20 @@ pub mod checkmate {
         }
     }
 
+    impl Clone for MapNode {
+        fn clone(&self) -> Self {
+            MapNode {
+                pn: self.pn,
+                dn: self.dn,
+                mate_depth: self.mate_depth,
+                ref_count: self.ref_count,
+                expanded: self.expanded,
+                decided: self.decided,
+                children: Rc::clone(&self.children)
+            }
+        }
+    }
+
     impl<'a> From<&'a Node> for MapNode {
         fn from(n: &'a Node) -> Self {
             MapNode {
@@ -690,19 +704,19 @@ pub mod checkmate {
                              mhash:u64,
                              shash:u64,
                              teban:Teban,
-                             node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>)
+                             node_map:&mut KyokumenMap<u64,MapNode>)
             -> Result<Rc<RefCell<Node>>,ApplicationError> {
             if n.try_borrow()?.sennichite {
                 return Ok(Rc::clone(n))
             }
 
-            if let Some(c) = node_map.get(teban,&mhash,&shash) {
-                let expanded = c.try_borrow()?.expanded;
+            if let Some(c) = node_map.get_mut(teban,&mhash,&shash) {
+                let expanded = c.expanded;
 
                 if !expanded {
-                    c.try_borrow_mut()?.ref_count += 1;
+                    c.ref_count += 1;
                 }
-                Ok(Rc::clone(c))
+                Ok(Rc::new(RefCell::new(c.reflect_to(n.try_borrow()?.deref()))))
             } else {
                 Ok(Rc::clone(n))
             }
@@ -714,7 +728,7 @@ pub mod checkmate {
                                        shash:u64,
                                        uniq_id:&mut UniqID,
                                        mut n:Node,
-                                       node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
+                                       node_map:&mut KyokumenMap<u64,MapNode>,
                                        teban:Teban,
                                        state:&State,
                                        mc:&MochigomaCollections)
@@ -763,7 +777,7 @@ pub mod checkmate {
 
             let n = Rc::new(RefCell::new(n));
 
-            node_map.insert(teban,mhash,shash,Rc::clone(&n));
+            node_map.insert(teban,mhash,shash,n.try_borrow()?.deref().into());
 
             Ok(n)
         }
@@ -772,7 +786,9 @@ pub mod checkmate {
                                  uniq_id:&mut UniqID,
                                  teban:Teban,
                                  state:&State,
-                                 mc:&MochigomaCollections) -> Result<Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,ApplicationError> {
+                                 mc:&MochigomaCollections)
+            -> Result<Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,ApplicationError> {
+
             let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
             let nodes = mvs.into_iter().map(|m| {
@@ -797,7 +813,7 @@ pub mod checkmate {
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                                 uniq_id:&mut UniqID,
                                                 current_node:Option<Rc<RefCell<Node>>>,
-                                                node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
+                                                node_map:&mut KyokumenMap<u64,MapNode>,
                                                 mate_depth:&mut Option<u32>,
                                                 event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
                                                 event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
@@ -882,7 +898,7 @@ pub mod checkmate {
                                        current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                        uniq_id:&mut UniqID,
                                        current_node:Option<Rc<RefCell<Node>>>,
-                                       node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
+                                       node_map:&mut KyokumenMap<u64,MapNode>,
                                        mate_depth:&mut Option<u32>,
                                        event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
                                        event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
@@ -920,7 +936,12 @@ pub mod checkmate {
 
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
-                if pn != n.try_borrow()?.pn || dn != n.try_borrow()?.dn {
+                if n.try_borrow()?.decided {
+                    let n = n.try_borrow()?.to_decided_node(uniq_id.gen());
+                    let n = Rc::new(RefCell::new(n));
+
+                    return Ok(MaybeMate::Continuation(n));
+                } else if pn != n.try_borrow()?.pn || dn != n.try_borrow()?.dn {
                     return Ok(MaybeMate::Continuation(n));
                 }
 
@@ -938,7 +959,7 @@ pub mod checkmate {
                         n.try_borrow_mut()?.dn = Number::Value(Fraction::new(0));
                     }
 
-                    node_map.insert(teban,mhash,shash,Rc::clone(&n));
+                    node_map.insert(teban,mhash,shash,n.try_borrow()?.deref().into());
 
                     return Ok(MaybeMate::Continuation(n));
                 } else {
@@ -970,7 +991,7 @@ pub mod checkmate {
                         let u = Rc::new(RefCell::new(u));
 
                         if !u.try_borrow()?.sennichite {
-                            node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                            node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
                         }
 
                         return Ok(MaybeMate::Continuation(u));
@@ -1101,7 +1122,7 @@ pub mod checkmate {
                     }
 
                     if !u.try_borrow()?.sennichite {
-                        node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                        node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
                     }
 
                     if u.try_borrow()?.pn != pn || u.try_borrow()?.dn != dn {
@@ -1167,7 +1188,7 @@ pub mod checkmate {
                                                 current_kyokumen_map:&mut KyokumenMap<u64,u32>,
                                                 uniq_id:&mut UniqID,
                                                 current_node:Option<Rc<RefCell<Node>>>,
-                                                node_map:&mut KyokumenMap<u64,Rc<RefCell<Node>>>,
+                                                node_map:&mut KyokumenMap<u64,MapNode>,
                                                 mate_depth:&mut Option<u32>,
                                                 event_queue:&Arc<Mutex<EventQueue<UserEvent,UserEventKind>>>,
                                                 event_dispatcher:&mut USIEventDispatcher<UserEventKind, UserEvent,Self,L,ApplicationError>,
@@ -1205,7 +1226,12 @@ pub mod checkmate {
 
                 let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
-                if pn != n.try_borrow()?.pn || dn != n.try_borrow()?.dn {
+                if n.try_borrow()?.decided {
+                    let n = n.try_borrow()?.to_decided_node(uniq_id.gen());
+                    let n = Rc::new(RefCell::new(n));
+
+                    return Ok(MaybeMate::Continuation(n));
+                } else if pn != n.try_borrow()?.pn || dn != n.try_borrow()?.dn {
                     return Ok(MaybeMate::Continuation(n));
                 }
 
@@ -1223,7 +1249,7 @@ pub mod checkmate {
                         n.try_borrow_mut()?.dn = Number::INFINITE;
                     }
 
-                    node_map.insert(teban, mhash, shash, Rc::clone(&n));
+                    node_map.insert(teban, mhash, shash, n.try_borrow()?.deref().into());
 
                     return Ok(MaybeMate::Continuation(n));
                 } else {
@@ -1235,7 +1261,7 @@ pub mod checkmate {
                         let u = Rc::new(RefCell::new(u));
 
                         if !u.try_borrow()?.sennichite {
-                            node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                            node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
                         }
 
                         return Ok(MaybeMate::Continuation(u));
@@ -1268,7 +1294,7 @@ pub mod checkmate {
                     let u = Rc::new(RefCell::new(u));
 
                     if !u.try_borrow()?.sennichite {
-                        node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                        node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
                     }
                     
                     return Ok(MaybeMate::Continuation(u));
@@ -1400,7 +1426,7 @@ pub mod checkmate {
                 }
 
                 if !u.try_borrow()?.sennichite {
-                    node_map.insert(teban, mhash, shash, Rc::clone(&u));
+                    node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
                 }
 
                 if u.try_borrow()?.pn != pn || u.try_borrow()?.dn != dn {
