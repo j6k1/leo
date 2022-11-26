@@ -1071,14 +1071,9 @@ pub mod checkmate {
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
                                         let u = Node::clone(n.try_borrow()?.deref());
 
-                                        let pn = u.pn;
-                                        let dn = u.dn;
-
                                         let u = Rc::new(RefCell::new(u));
 
-                                        if !pn.is_zero() || dn != Number::INFINITE {
-                                            u.try_borrow_mut()?.pn = Number::INFINITE;
-                                        }
+                                        u.try_borrow_mut()?.pn = Number::INFINITE;
 
                                         update_node = u;
                                     },
