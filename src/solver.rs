@@ -1431,7 +1431,11 @@ pub mod checkmate {
 
                 let u = c;
 
-                if !self.strict_moves {
+                let update_mate_depth = u.try_borrow()?.pn.is_zero() &&
+                                              u.try_borrow()?.dn == Number::INFINITE &&
+                                              u.try_borrow()?.mate_depth < md + 1;
+
+                if !self.strict_moves && update_mate_depth {
                     u.try_borrow_mut()?.mate_depth = md + 1;
                 }
 
