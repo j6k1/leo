@@ -693,10 +693,10 @@ pub mod checkmate {
         pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             match self {
                 &Comparator::OrNodeComparator => {
-                    if r.decided && l.pn != Number::INFINITE {
-                        Ordering::Less.reverse()
-                    } else if r.decided {
+                    if r.decided && l.pn == Number::INFINITE {
                         Ordering::Greater.reverse()
+                    } else if r.decided {
+                        Ordering::Less.reverse()
                     } else {
                         l.pn.cmp(&r.pn)
                             .then(l.mate_depth.cmp(&r.mate_depth))
@@ -719,15 +719,16 @@ pub mod checkmate {
                         l.pn.cmp(&r.pn)
                             .then(l.mate_depth.cmp(&r.mate_depth))
                             .then(l.id.cmp(&r.id)).reverse()
-                    } else if r.pn != Number::INFINITE {
-                        Ordering::Greater.reverse()
-                    } else {
+                    } else if r.pn == Number::INFINITE {
                         Ordering::Less.reverse()
+                    } else {
+                        Ordering::Greater.reverse()
                     }
                 },
                 &Comparator::DecidedAndNodeComparator => {
                     if r.decided {
-                        l.pn.cmp(&r.pn)
+                        r.dn.cmp(&l.dn)
+                            .then(l.pn.cmp(&r.pn))
                             .then(r.mate_depth.cmp(&l.mate_depth))
                             .then(l.id.cmp(&r.id)).reverse()
                     } else if r.pn.is_zero() && r.dn == Number::INFINITE {
@@ -735,9 +736,7 @@ pub mod checkmate {
                     } else if r.dn == Number::INFINITE {
                         Ordering::Less.reverse()
                     } else {
-                        l.dn.cmp(&r.dn)
-                            .then(r.mate_depth.cmp(&l.mate_depth))
-                            .then (l.id.cmp(&r.id)).reverse()
+                        Ordering::Greater.reverse()
                     }
                 }
             }
