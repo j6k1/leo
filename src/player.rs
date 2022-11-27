@@ -441,7 +441,7 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Timeout) => {
-                        self.send_message_immediate(&mut env,"info string think timeout!")?;
+                        self.send_message_immediate(&mut env,"think timeout!")?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Async(_)) => {
@@ -455,7 +455,7 @@ impl USIPlayer<ApplicationError> for Leo {
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
-                        self.send_message_immediate(&mut env,"info string moves is empty!")?;
+                        self.send_message_immediate(&mut env,"moves is empty!")?;
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) => {
