@@ -721,7 +721,7 @@ pub mod checkmate {
             }
 
             if let Some(c) = node_map.get_mut(teban,&mhash,&shash) {
-                let expanded = c.expanded;
+                let expanded = n.try_borrow()?.expanded;
 
                 if !expanded {
                     c.ref_count += 1;
@@ -1291,7 +1291,7 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if  n.try_borrow()?.decided || n.try_borrow()?.dn == Number::INFINITE {
+                if n.try_borrow()?.decided || n.try_borrow()?.dn == Number::INFINITE {
                     let u = Rc::clone(&current_node);
 
                     let mut mate_depth = 0;
