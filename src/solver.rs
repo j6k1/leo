@@ -1291,10 +1291,18 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if n.try_borrow()?.dn == Number::INFINITE || n.try_borrow()?.decided {
+                if  n.try_borrow()?.decided || n.try_borrow()?.dn == Number::INFINITE {
                     let u = Rc::clone(&current_node);
 
-                    let u = u.try_borrow()?.to_decided_node(uniq_id.gen());
+                    let mut mate_depth = 0;
+
+                    for n in u.try_borrow()?.children.try_borrow()?.iter() {
+                        mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
+                    }
+
+                    let mut u = u.try_borrow()?.to_decided_node(uniq_id.gen());
+
+                    u.mate_depth = mate_depth;
 
                     let u = Rc::new(RefCell::new(u));
 
@@ -1416,10 +1424,6 @@ pub mod checkmate {
 
                 let c = Rc::clone(&current_node);
 
-                let update_mate_depth = u.try_borrow()?.pn.is_zero() &&
-                    u.try_borrow()?.dn == Number::INFINITE &&
-                    c.try_borrow()?.mate_depth < md + 1;
-
                 let pn = c.try_borrow()?.pn;
                 let dn = c.try_borrow()?.dn;
 
@@ -1427,7 +1431,7 @@ pub mod checkmate {
 
                 let u = c;
 
-                if !self.strict_moves || update_mate_depth {
+                if !self.strict_moves {
                     u.try_borrow_mut()?.mate_depth = md + 1;
                 }
 
