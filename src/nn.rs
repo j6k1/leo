@@ -127,6 +127,7 @@ impl<T,U,D,P,PT,I,O> BatchNeuralNetwork<U,D,P,PT,I,O> for T
              D: Device<U>,
              PT: PersistenceType {}
 pub struct Evalutor {
+    ref_count: Arc<AtomicUsize>,
     sender:Sender<Message>,
     transaction_sender_queue:Arc<ConcurrentQueue<Sender<()>>>,
     receiver:Arc<Mutex<Receiver<Result<Vec<(f32,f32)>,EvaluationThreadError>>>>,
@@ -273,6 +274,7 @@ impl Evalutor {
         ready_receiver.recv().map_err(|e| ApplicationError::from(e))??;
 
         Ok(Evalutor {
+            ref_count: Arc::new(AtomicUsize::new(1)),
             sender:s,
             transaction_sender_queue:Arc::new(ConcurrentQueue::unbounded()),
             active_threads:Arc::new(AtomicUsize::new(0)),
@@ -384,7 +386,10 @@ impl Evalutor {
 }
 impl Clone for Evalutor {
     fn clone(&self) -> Self {
+        self.ref_count.fetch_add(1,atomic::Ordering::Release);
+
         Evalutor {
+            ref_count: Arc::clone(&self.ref_count),
             sender:self.sender.clone(),
             transaction_sender_queue:Arc::clone(&self.transaction_sender_queue),
             active_threads:Arc::clone(&self.active_threads),
@@ -396,7 +401,9 @@ impl Clone for Evalutor {
 }
 impl Drop for Evalutor {
     fn drop(&mut self) {
-        self.sender.send(Message::Quit).expect("An error occurred during the termination process of Evalutor's calculation thread.");
+        if self.ref_count.fetch_sub(1,atomic::Ordering::Release) == 1 {
+            self.sender.send(Message::Quit).expect("An error occurred during the termination process of Evalutor's calculation thread.");
+        }
     }
 }
 pub struct Trainer<M>
