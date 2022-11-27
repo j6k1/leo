@@ -161,12 +161,12 @@ impl Sub for Fraction {
     fn sub(self, rhs: Self) -> Self::Output {
         if self.d == 1 && rhs.d == 1 {
             Fraction {
-                n: self.n + rhs.n,
+                n: self.n - rhs.n,
                 d: 1
             }
         } else if self.d == rhs.d {
             let d = self.d;
-            let n = self.n + rhs.n;
+            let n = self.n - rhs.n;
 
             let g = gcd(n,d);
 
