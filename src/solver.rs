@@ -297,7 +297,7 @@ impl Solver {
         }
     }
 
-    pub fn checkmate<'a,L,S>(&self,strict_moves:bool,
+    pub fn checkmate<L,S>(&self,strict_moves:bool,
                      limit:Option<Instant>,
                      checkmate_limit:Option<Instant>,
                      network_delay:u32,
@@ -332,7 +332,6 @@ impl Solver {
                               &mut uniq_id,
                               None,
                               &mut KyokumenMap::new(),
-
                               &mut None,
                               &ms.event_queue,
                               &mut event_dispatcher,
