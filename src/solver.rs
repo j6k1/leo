@@ -1282,8 +1282,6 @@ pub mod checkmate {
 
             let children = Rc::clone(&current_node.try_borrow()?.children);
 
-            let mut current_mate_depth = 0;
-
             loop {
                 let n = children.try_borrow_mut()?.peek().map(|n| {
                     Rc::clone(n)
@@ -1418,11 +1416,7 @@ pub mod checkmate {
 
                 let update_mate_depth = u.try_borrow()?.pn.is_zero() &&
                     u.try_borrow()?.dn == Number::INFINITE &&
-                    current_mate_depth < md + 1;
-
-                if update_mate_depth {
-                    current_mate_depth = md + 1;
-                }
+                    c.try_borrow()?.mate_depth < md + 1;
 
                 let pn = c.try_borrow()?.pn;
                 let dn = c.try_borrow()?.dn;
@@ -1431,8 +1425,8 @@ pub mod checkmate {
 
                 let u = c;
 
-                if u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
-                    u.try_borrow_mut()?.mate_depth = current_mate_depth;
+                if !self.strict_moves || update_mate_depth {
+                    u.try_borrow_mut()?.mate_depth = md + 1;
                 }
 
                 if !u.try_borrow()?.sennichite {
