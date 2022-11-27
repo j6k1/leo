@@ -984,6 +984,10 @@ pub mod checkmate {
             } else {
                 let children = self.expand_root_nodes(uniq_id,teban,state,mc)?;
 
+                if children.try_borrow()?.len() == 0 {
+                    return Ok(MaybeMate::Nomate);
+                }
+
                 (None,children)
             };
 
