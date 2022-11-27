@@ -637,7 +637,8 @@ pub mod checkmate {
                 },
                 &Comparator::DecidedOrNodeComparator => {
                     if r.decided {
-                        l.mate_depth.cmp(&r.mate_depth)
+                        l.pn.cmp(&r.pn)
+                            .then(l.mate_depth.cmp(&r.mate_depth))
                             .then(l.id.cmp(&r.id)).reverse()
                     } else if r.pn != Number::INFINITE {
                         Ordering::Greater.reverse()
@@ -647,7 +648,8 @@ pub mod checkmate {
                 },
                 &Comparator::DecidedAndNodeComparator => {
                     if r.decided {
-                        r.mate_depth.cmp(&l.mate_depth)
+                        l.pn.cmp(&r.pn)
+                            .then(r.mate_depth.cmp(&l.mate_depth))
                             .then(l.id.cmp(&r.id)).reverse()
                     } else if r.pn.is_zero() && r.dn == Number::INFINITE {
                         Ordering::Greater.reverse()
