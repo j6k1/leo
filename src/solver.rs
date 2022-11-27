@@ -105,18 +105,49 @@ impl Fraction {
 impl Add for Fraction {
     type Output = Fraction;
     fn add(self, rhs: Self) -> Self::Output {
-        let ad = self.d;
-        let bd = rhs.d;
-        let an = self.n * bd;
-        let bn = rhs.n * ad;
-        let d = ad * bd;
-        let n = an + bn;
+        if self.d == 1 && rhs.d == 1 {
+            Fraction {
+                n: self.n + rhs.n,
+                d: 1
+            }
+        } else if self.d == rhs.d {
+            let d = self.d;
+            let n = self.n ; rhs.n;
 
-        let g = gcd(n,d);
+            let g = gcd(n,d);
 
-        Fraction {
-            n:n / g,
-            d:d / g
+            if g == 1 {
+                Fraction {
+                    n: n,
+                    d: d
+                }
+            } else {
+                Fraction {
+                    n: n / g,
+                    d: d / g
+                }
+            }
+        } else {
+            let ad = self.d;
+            let bd = rhs.d;
+            let an = self.n * bd;
+            let bn = rhs.n * ad;
+            let d = ad * bd;
+            let n = an + bn;
+
+            let g = gcd(n, d);
+
+            if g == 1 {
+                Fraction {
+                    n: n,
+                    d: d
+                }
+            } else {
+                Fraction {
+                    n: n / g,
+                    d: d / g
+                }
+            }
         }
     }
 }
@@ -128,18 +159,49 @@ impl AddAssign for Fraction {
 impl Sub for Fraction {
     type Output = Fraction;
     fn sub(self, rhs: Self) -> Self::Output {
-        let ad = self.d;
-        let bd = rhs.d;
-        let an = self.n * bd;
-        let bn = rhs.n * ad;
-        let d = ad * bd;
-        let n = an - bn;
+        if self.d == 1 && rhs.d == 1 {
+            Fraction {
+                n: self.n + rhs.n,
+                d: 1
+            }
+        } else if self.d == rhs.d {
+            let d = self.d;
+            let n = self.n + rhs.n;
 
-        let g = gcd(n,d);
+            let g = gcd(n,d);
 
-        Fraction {
-            n:n / g,
-            d:d / g
+            if g == 1 {
+                Fraction {
+                    n: n,
+                    d: d
+                }
+            } else {
+                Fraction {
+                    n: n / g,
+                    d: d / g
+                }
+            }
+        } else {
+            let ad = self.d;
+            let bd = rhs.d;
+            let an = self.n * bd;
+            let bn = rhs.n * ad;
+            let d = ad * bd;
+            let n = an - bn;
+
+            let g = gcd(n, d);
+
+            if g == 1 {
+                Fraction {
+                    n: n,
+                    d: d
+                }
+            } else {
+                Fraction {
+                    n: n / g,
+                    d: d / g
+                }
+            }
         }
     }
 }
@@ -156,9 +218,16 @@ impl Div<u64> for Fraction {
 
         let g = gcd(n,d);
 
-        Fraction {
-            n:n / g,
-            d:d / g
+        if g == 1 {
+            Fraction {
+                n: n,
+                d: d
+            }
+        } else {
+            Fraction {
+                n: n / g,
+                d: d / g
+            }
         }
     }
 }
@@ -175,9 +244,16 @@ impl Mul<u64> for Fraction {
 
         let g = gcd(n,d);
 
-        Fraction {
-            n:n / g,
-            d:d / g
+        if g == 1 {
+            Fraction {
+                n: n,
+                d: d
+            }
+        } else {
+            Fraction {
+                n: n / g,
+                d: d / g
+            }
         }
     }
 }
@@ -188,15 +264,19 @@ impl MulAssign<u64> for Fraction {
 }
 impl Ord for Fraction {
     fn cmp(&self, other: &Self) -> Ordering {
-        let ad = self.d;
-        let bd = other.d;
-        let an = self.n;
-        let bn = other.n;
+        if self.d == other.d {
+            self.n.cmp(&other.n)
+        } else {
+            let ad = self.d;
+            let bd = other.d;
+            let an = self.n;
+            let bn = other.n;
 
-        let an = an * bd;
-        let bn = bn * ad;
+            let an = an * bd;
+            let bn = bn * ad;
 
-        an.cmp(&bn)
+            an.cmp(&bn)
+        }
     }
 }
 impl PartialOrd for Fraction {
