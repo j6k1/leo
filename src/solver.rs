@@ -717,6 +717,7 @@ pub mod checkmate {
                 &Comparator::DecidedOrNodeComparator => {
                     if r.decided {
                         l.pn.cmp(&r.pn)
+                            .then(r.dn.cmp(&l.dn))
                             .then(l.mate_depth.cmp(&r.mate_depth))
                             .then(l.id.cmp(&r.id)).reverse()
                     } else if r.pn == Number::INFINITE {
@@ -996,10 +997,6 @@ pub mod checkmate {
                 return Ok(MaybeMate::Aborted)
             }
 
-            if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
-                return Ok(MaybeMate::Skip);
-            }
-
             if self.max_depth.map(|d| depth > d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
@@ -1019,6 +1016,18 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let (current_node,children) = if let Some(n) = current_node.as_ref() {
+                if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
+                    let u = n.try_borrow()?.to_decided_node(uniq_id.gen());
+
+                    let u = Rc::new(RefCell::new(u));
+
+                    if !u.try_borrow()?.sennichite {
+                        node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
+                    }
+
+                    return Ok(MaybeMate::Continuation(u));
+                }
+
                 let pn = n.try_borrow()?.pn;
                 let dn = n.try_borrow()?.dn;
 
@@ -1285,10 +1294,6 @@ pub mod checkmate {
                 return Ok(MaybeMate::Aborted)
             }
 
-            if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
-                return Ok(MaybeMate::Skip);
-            }
-
             if self.max_depth.map(|d| depth > d).unwrap_or(false) {
                 return Ok(MaybeMate::MaxDepth);
             }
@@ -1308,6 +1313,28 @@ pub mod checkmate {
             self.send_seldepth(depth)?;
 
             let current_node = if let Some(n) = current_node.as_ref() {
+                if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
+                    let u = Rc::clone(n);
+
+                    let mut mate_depth = 0;
+
+                    for n in u.try_borrow()?.children.try_borrow()?.iter() {
+                        mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
+                    }
+
+                    let mut u = u.try_borrow()?.to_decided_node(uniq_id.gen());
+
+                    u.mate_depth = mate_depth;
+
+                    let u = Rc::new(RefCell::new(u));
+
+                    if !u.try_borrow()?.sennichite {
+                        node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
+                    }
+
+                    return Ok(MaybeMate::Continuation(u));
+                }
+
                 let pn = n.try_borrow()?.pn;
                 let dn = n.try_borrow()?.dn;
 
