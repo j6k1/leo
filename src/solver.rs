@@ -1013,8 +1013,6 @@ pub mod checkmate {
                 return Ok(MaybeMate::Timeout);
             }
 
-            self.send_seldepth(depth)?;
-
             let (current_node,children) = if let Some(n) = current_node.as_ref() {
                 if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
                     let u = n.try_borrow()?.to_decided_node(uniq_id.gen());
@@ -1049,6 +1047,8 @@ pub mod checkmate {
 
                     let n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_map, teban, state, mc)?;
 
+                    self.send_seldepth(depth)?;
+
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
@@ -1070,6 +1070,8 @@ pub mod checkmate {
                 }
             } else {
                 let children = self.expand_root_nodes(uniq_id,teban,state,mc)?;
+
+                self.send_seldepth(depth)?;
 
                 if children.try_borrow()?.len() == 0 {
                     return Ok(MaybeMate::Nomate);
@@ -1310,8 +1312,6 @@ pub mod checkmate {
                 return Ok(MaybeMate::Timeout);
             }
 
-            self.send_seldepth(depth)?;
-
             let current_node = if let Some(n) = current_node.as_ref() {
                 if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
                     let u = Rc::clone(n);
@@ -1347,6 +1347,8 @@ pub mod checkmate {
                     let n = Node::clone(n.try_borrow()?.deref());
 
                     let n = self.expand_nodes(depth, mhash, shash, uniq_id, n, node_map, teban, state, mc)?;
+
+                    self.send_seldepth(depth)?;
 
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
