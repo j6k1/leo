@@ -1316,15 +1316,7 @@ pub mod checkmate {
                 if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
                     let u = Rc::clone(n);
 
-                    let mut mate_depth = 0;
-
-                    for n in u.try_borrow()?.children.try_borrow()?.iter() {
-                        mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
-                    }
-
-                    let mut u = u.try_borrow()?.to_decided_node(uniq_id.gen());
-
-                    u.mate_depth = mate_depth;
+                    let u = u.try_borrow()?.to_decided_node(uniq_id.gen());
 
                     let u = Rc::new(RefCell::new(u));
 
