@@ -450,6 +450,8 @@ pub mod checkmate {
 
     pub struct Node {
         id:u64,
+        pn_base:Number,
+        dn_base:Number,
         pn:Number,
         dn:Number,
         mate_depth:u32,
@@ -466,6 +468,8 @@ pub mod checkmate {
         pub fn new_or_node(id:u64,m:LegalMove) -> Node {
             Node {
                 id: id,
+                pn_base: Number::Value(Fraction::new(1)),
+                dn_base: Number::Value(Fraction::new(1)),
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
                 mate_depth: 0,
@@ -482,6 +486,8 @@ pub mod checkmate {
         pub fn new_and_node(id:u64,m:LegalMove) -> Node {
             Node {
                 id: id,
+                pn_base: Number::Value(Fraction::new(1)),
+                dn_base: Number::Value(Fraction::new(1)),
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
                 mate_depth: 0,
@@ -500,6 +506,8 @@ pub mod checkmate {
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
                     Node {
                         id: id,
+                        pn_base: self.pn_base,
+                        dn_base: self.dn_base,
                         pn: self.pn,
                         dn: self.dn,
                         mate_depth: self.mate_depth,
@@ -515,6 +523,8 @@ pub mod checkmate {
                 Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
                     Node {
                         id: id,
+                        pn_base: self.pn_base,
+                        dn_base: self.dn_base,
                         pn: self.pn,
                         dn: self.dn,
                         mate_depth: self.mate_depth,
@@ -531,35 +541,37 @@ pub mod checkmate {
         }
 
         pub fn update(&mut self,u:&Rc<RefCell<Node>>) -> Result<(),ApplicationError> {
-            if let Some(mut p) = self.children.try_borrow_mut()?.peek_mut() {
+            let (pn,dn) = if let Some(mut p) = self.children.try_borrow_mut()?.peek_mut() {
+                let pn = p.try_borrow()?.pn;
+                let dn = p.try_borrow()?.dn;
+
                 *p = Rc::clone(u);
+                (pn,dn)
             } else {
                 return Err(ApplicationError::LogicError(String::from(
                     "Node to be updated could not be found."
                 )));
-            }
+            };
 
             match self.comparator {
                 Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
                     let mut pn = Number::INFINITE;
-                    let mut dn = Number::Value(Fraction::new(0));
 
                     for n in self.children.try_borrow()?.iter() {
                         pn = pn.min(n.try_borrow()?.pn);
-                        dn = dn + n.try_borrow()?.dn;
                     }
                     self.pn = pn;
-                    self.dn = dn / self.ref_count;
+                    self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
+                    self.dn = self.dn_base / self.ref_count;
                 },
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
-                    let mut pn = Number::Value(Fraction::new(0));
                     let mut dn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
-                        pn = pn + n.try_borrow()?.pn;
                         dn = dn.min(n.try_borrow()?.dn);
                     }
-                    self.pn = pn / self.ref_count;
+                    self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
+                    self.pn = self.pn_base / self.ref_count;
                     self.dn = dn;
                 }
             }
@@ -592,6 +604,8 @@ pub mod checkmate {
         fn clone(&self) -> Self {
             Node {
                 id: self.id,
+                pn_base: self.pn_base,
+                dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
                 mate_depth: self.mate_depth,
@@ -607,6 +621,8 @@ pub mod checkmate {
     }
 
     pub struct MapNode {
+        pn_base:Number,
+        dn_base:Number,
         pn:Number,
         dn:Number,
         mate_depth:u32,
@@ -620,6 +636,8 @@ pub mod checkmate {
         pub fn reflect_to(&self,n:&Node) -> Node {
             Node {
                 id: n.id,
+                pn_base: self.pn_base,
+                dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
                 mate_depth: self.mate_depth,
@@ -637,6 +655,8 @@ pub mod checkmate {
     impl Clone for MapNode {
         fn clone(&self) -> Self {
             MapNode {
+                pn_base: self.pn_base,
+                dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
                 mate_depth: self.mate_depth,
@@ -651,6 +671,8 @@ pub mod checkmate {
     impl<'a> From<&'a Node> for MapNode {
         fn from(n: &'a Node) -> Self {
             MapNode {
+                pn_base: n.pn_base,
+                dn_base: n.dn_base,
                 pn: n.pn,
                 dn: n.dn,
                 mate_depth: n.mate_depth,
@@ -858,8 +880,10 @@ pub mod checkmate {
 
             if depth % 2 == 0 {
                 n.pn = Number::Value(Fraction::new(1));
+                n.dn_base = Number::Value(Fraction::new(len as u64));
                 n.dn = Number::Value(Fraction::new(len as u64) / parent_count);
             } else {
+                n.pn_base = Number::Value(Fraction::new(len as u64));
                 n.pn = Number::Value(Fraction::new(len as u64) / parent_count);
                 n.dn = Number::Value(Fraction::new(1));
             }
@@ -1053,6 +1077,7 @@ pub mod checkmate {
 
                     if len == 0 {
                         n.try_borrow_mut()?.pn = Number::INFINITE;
+                        n.try_borrow_mut()?.dn_base = Number::Value(Fraction::new(0));
                         n.try_borrow_mut()?.dn = Number::Value(Fraction::new(0));
                     }
 
@@ -1138,6 +1163,7 @@ pub mod checkmate {
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(Fraction::new(0));
+                        u.dn_base = Number::Value(Fraction::new(0));
                         u.sennichite = true;
 
                         let u = Rc::new(RefCell::new(u));
@@ -1353,6 +1379,7 @@ pub mod checkmate {
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
+                        n.try_borrow_mut()?.pn_base = Number::Value(Fraction::new(0));
                         n.try_borrow_mut()?.pn = Number::Value(Fraction::new(0));
                         n.try_borrow_mut()?.dn = Number::INFINITE;
                     }
@@ -1448,6 +1475,7 @@ pub mod checkmate {
                     if sc {
                         let mut u = Node::clone(n.try_borrow()?.deref());
 
+                        u.pn_base = Number::Value(Fraction::new(0));
                         u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
                         u.sennichite = true;
