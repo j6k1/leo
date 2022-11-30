@@ -548,7 +548,7 @@ pub mod checkmate {
                         pn = pn.min(n.try_borrow()?.pn);
                         dn = dn + n.try_borrow()?.dn;
                     }
-                    self.pn = pn / self.ref_count;
+                    self.pn = pn;
                     self.dn = dn / self.ref_count;
                 },
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
@@ -560,7 +560,7 @@ pub mod checkmate {
                         dn = dn.min(n.try_borrow()?.dn);
                     }
                     self.pn = pn / self.ref_count;
-                    self.dn = dn / self.ref_count;
+                    self.dn = dn;
                 }
             }
 
@@ -857,11 +857,11 @@ pub mod checkmate {
             let parent_count = n.ref_count;
 
             if depth % 2 == 0 {
-                n.pn = Number::Value(Fraction::new(1) / parent_count);
+                n.pn = Number::Value(Fraction::new(1));
                 n.dn = Number::Value(Fraction::new(len as u64) / parent_count);
             } else {
                 n.pn = Number::Value(Fraction::new(len as u64) / parent_count);
-                n.dn = Number::Value(Fraction::new(1) / parent_count);
+                n.dn = Number::Value(Fraction::new(1));
             }
 
             let n = Rc::new(RefCell::new(n));
