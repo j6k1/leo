@@ -1626,20 +1626,15 @@ pub mod checkmate {
 
                 c.try_borrow_mut()?.update(&u)?;
 
-                {
-                    let pn = c.try_borrow()?.pn;
-                    let dn = c.try_borrow()?.dn;
+                if c.try_borrow()?.pn.is_zero() && c.try_borrow()?.dn == Number::INFINITE {
+                    if c.try_borrow()?.mate_depth == 0 || u.try_borrow()?.mate_depth != n.try_borrow()?.mate_depth {
+                        let mut mate_depth = 0;
 
-                    if pn.is_zero() && dn == Number::INFINITE {
-                        if c.try_borrow()?.mate_depth == 0 || u.try_borrow()?.mate_depth != n.try_borrow()?.mate_depth {
-                            let mut mate_depth = 0;
-
-                            for n in c.try_borrow()?.children.try_borrow()?.iter() {
-                                mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
-                            }
-
-                            c.try_borrow_mut()?.mate_depth = mate_depth;
+                        for n in c.try_borrow()?.children.try_borrow()?.iter() {
+                            mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
                         }
+
+                        c.try_borrow_mut()?.mate_depth = mate_depth;
                     }
                 }
 
