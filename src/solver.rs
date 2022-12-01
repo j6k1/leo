@@ -506,13 +506,36 @@ pub mod checkmate {
         }
 
         pub fn new_and_node(id:u64,m:LegalMove) -> Node {
+            let priority = match m {
+                LegalMove::Put(_) => 0,
+                LegalMove::To(m) => {
+                    let nari = m.is_nari();
+
+                    if let Some(o) = m.obtained() {
+                        if let Ok(k) = MochigomaKind::try_from(o) {
+                            k as usize * 2 + if nari {
+                                1
+                            } else {
+                                0
+                            } + 2
+                        } else {
+                            0
+                        }
+                    } else if nari {
+                        1
+                    } else {
+                        0
+                    }
+                }
+            };
+
             Node {
                 id: id,
                 pn_base: Number::Value(Fraction::new(1)),
                 dn_base: Number::Value(Fraction::new(1)),
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
-                priority: 0,
+                priority: priority,
                 mate_depth: 0,
                 ref_count:1,
                 sennichite: false,
