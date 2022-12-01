@@ -1111,6 +1111,11 @@ pub mod checkmate {
             }
 
             let (current_node,children) = if let Some(n) = current_node.as_ref() {
+                let pn = n.try_borrow()?.pn;
+                let dn = n.try_borrow()?.dn;
+
+                let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
+
                 if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
                     let u = n.try_borrow()?.to_decided_node(uniq_id.gen());
 
@@ -1122,11 +1127,6 @@ pub mod checkmate {
 
                     return Ok(MaybeMate::Continuation(u));
                 }
-
-                let pn = n.try_borrow()?.pn;
-                let dn = n.try_borrow()?.dn;
-
-                let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
                 if n.try_borrow()?.decided {
                     let n = n.try_borrow()?.to_decided_node(uniq_id.gen());
@@ -1410,12 +1410,15 @@ pub mod checkmate {
             }
 
             let current_node = if let Some(n) = current_node.as_ref() {
+                let pn = n.try_borrow()?.pn;
+                let dn = n.try_borrow()?.dn;
+
+                let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
+
                 let max_mate_depth = n.try_borrow()?.mate_depth + depth;
 
                 if mate_depth.map(|d|  max_mate_depth >= d).unwrap_or(false) {
-                    let u = Rc::clone(n);
-
-                    let u = u.try_borrow()?.to_decided_node(uniq_id.gen());
+                    let u = n.try_borrow()?.to_decided_node(uniq_id.gen());
 
                     let u = Rc::new(RefCell::new(u));
 
@@ -1425,11 +1428,6 @@ pub mod checkmate {
 
                     return Ok(MaybeMate::Continuation(u));
                 }
-
-                let pn = n.try_borrow()?.pn;
-                let dn = n.try_borrow()?.dn;
-
-                let n = self.normalize_node(&n,mhash,shash,teban,node_map)?;
 
                 if n.try_borrow()?.decided {
                     let n = n.try_borrow()?.to_decided_node(uniq_id.gen());
