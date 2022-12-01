@@ -1631,20 +1631,15 @@ pub mod checkmate {
                     let dn = c.try_borrow()?.dn;
 
                     if pn.is_zero() && dn == Number::INFINITE {
-                        let mate_depth = if c.try_borrow()?.mate_depth == 0 {
+                        if c.try_borrow()?.mate_depth == 0 || u.try_borrow()?.mate_depth != n.try_borrow()?.mate_depth {
                             let mut mate_depth = 0;
 
                             for n in c.try_borrow()?.children.try_borrow()?.iter() {
                                 mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
                             }
 
-                            mate_depth
-                        } else {
-                            let mate_depth = c.try_borrow()?.mate_depth;
-                            mate_depth.max(u.try_borrow()?.mate_depth.min(n.try_borrow()?.mate_depth) + 1)
-                        };
-
-                        c.try_borrow_mut()?.mate_depth = mate_depth;
+                            c.try_borrow_mut()?.mate_depth = mate_depth;
+                        }
                     }
                 }
 
