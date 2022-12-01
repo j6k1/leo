@@ -994,9 +994,6 @@ pub mod checkmate {
                                                 teban:Teban, state:&State, mc:&MochigomaCollections)
                                                 -> Result<MaybeMate,ApplicationError> where S: InfoSender + Send {
 
-            let mut ignore_kyokumen_map = ignore_kyokumen_map.clone();
-            let mut current_kyokumen_map = current_kyokumen_map.clone();
-
             ignore_kyokumen_map.insert(teban.opposite(), mhash, shash, ());
 
             match current_kyokumen_map.get(teban.opposite(), &mhash, &shash).unwrap_or(&0) {
@@ -1004,9 +1001,6 @@ pub mod checkmate {
                     current_kyokumen_map.insert(teban.opposite(), mhash, shash, c + 1);
                 }
             }
-
-            let ignore_kyokumen_map = &mut ignore_kyokumen_map;
-            let current_kyokumen_map = &mut current_kyokumen_map;
 
             let r = if depth % 2 == 0 {
                 match self.oute_process(depth,
@@ -1024,25 +1018,43 @@ pub mod checkmate {
                                         state,
                                         mc) {
                     r => {
+                        ignore_kyokumen_map.remove(teban.opposite(),&mhash,&shash);
+
+                        if let Some(&c) = current_kyokumen_map.get(teban.opposite(),&mhash,&shash) {
+                            if c <= 1 {
+                                current_kyokumen_map.remove(teban.opposite(), &mhash, &shash);
+                            } else {
+                                current_kyokumen_map.insert(teban.opposite(),mhash,shash,c-1);
+                            }
+                        }
                         r
                     }
                 }
             } else {
                 match self.response_oute_process(depth,
-                                        mhash,
-                                        shash,
-                                        ignore_kyokumen_map,
-                                        current_kyokumen_map,
-                                        uniq_id,
-                                        current_node,
-                                        node_map,
-                                        mate_depth,
-                                        event_queue,
-                                        event_dispatcher,
-                                        teban,
-                                        state,
-                                        mc) {
+                                                 mhash,
+                                                 shash,
+                                                 ignore_kyokumen_map,
+                                                 current_kyokumen_map,
+                                                 uniq_id,
+                                                 current_node,
+                                                 node_map,
+                                                 mate_depth,
+                                                 event_queue,
+                                                 event_dispatcher,
+                                                 teban,
+                                                 state,
+                                                 mc) {
                     r => {
+                        ignore_kyokumen_map.remove(teban.opposite(),&mhash,&shash);
+
+                        if let Some(&c) = current_kyokumen_map.get(teban.opposite(),&mhash,&shash) {
+                            if c <= 1 {
+                                current_kyokumen_map.remove(teban.opposite(), &mhash, &shash);
+                            } else {
+                                current_kyokumen_map.insert(teban.opposite(),mhash,shash,c-1);
+                            }
+                        }
                         r
                     }
                 }
