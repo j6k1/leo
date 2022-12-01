@@ -532,6 +532,8 @@ impl USIPlayer<ApplicationError> for Leo {
 
         let mut info_sender = env.info_sender.clone();
 
+        let think_start_time = Instant::now();
+
         match solver.checkmate::<L,S>(
             self.strict_mate,
             env.limit.clone(),
@@ -546,6 +548,13 @@ impl USIPlayer<ApplicationError> for Leo {
             Arc::clone(&env.quited),
             Some(Box::new(move |node_count| {
                 let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
+
+                let nanos = (Instant::now() - think_start_time).as_nanos();
+
+                if nanos > 0 {
+                    commands.push(UsiInfoSubCommand::Nps((node_count as u128 *  1000 * 1000 * 1000 / nanos) as u64));
+                }
+
                 commands.push(UsiInfoSubCommand::Nodes(node_count));
 
 //            Ok(self.info_sender.send(commands)?)
