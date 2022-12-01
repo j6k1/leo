@@ -13,7 +13,7 @@ use usiagent::output::USIOutputWriter;
 use usiagent::player::{InfoSender, OnKeepAlive, PeriodicallyInfo, USIPlayer};
 use usiagent::rule::{AppliedMove, Kyokumen, Rule, State};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, Move, Teban};
-use crate::error::{ApplicationError, SendSelDepthError};
+use crate::error::{ApplicationError};
 use crate::nn::Evalutor;
 use crate::search::{BASE_DEPTH,
                     DEFALUT_DISPLAY_EVALUTE_SCORE,
@@ -131,7 +131,7 @@ impl Leo {
         let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
         commands.push(UsiInfoSubCommand::Str(String::from(message)));
 
-        Ok(env.info_sender.send_immediate(commands).map_err(|e| SendSelDepthError::from(e))?)
+        Ok(env.info_sender.send_immediate(commands)?)
     }
 }
 impl USIPlayer<ApplicationError> for Leo {
@@ -530,6 +530,8 @@ impl USIPlayer<ApplicationError> for Leo {
 
         let solver = Solver::new();
 
+        let mut info_sender = env.info_sender.clone();
+
         match solver.checkmate::<L,S>(
             self.strict_mate,
             env.limit.clone(),
@@ -542,6 +544,13 @@ impl USIPlayer<ApplicationError> for Leo {
             Arc::clone(&env.hasher),
             Arc::clone(&env.stop),
             Arc::clone(&env.quited),
+            Some(Box::new(move |node_count| {
+                let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
+                commands.push(UsiInfoSubCommand::Nodes(node_count));
+
+//            Ok(self.info_sender.send(commands)?)
+                Ok(info_sender.send_immediate(commands)?)
+            })),
             ms
         ) {
             Ok(MaybeMate::MateMoves(ref mvs)) => {

@@ -1,8 +1,6 @@
 use std::{error, fmt, io};
 use std::cell::{BorrowError, BorrowMutError};
 use std::collections::VecDeque;
-use std::error::Error;
-use std::fmt::Formatter;
 use std::num::{ParseFloatError, ParseIntError};
 use std::sync::mpsc::{Receiver, RecvError, RecvTimeoutError, Sender, SendError};
 use std::sync::{MutexGuard, PoisonError};
@@ -47,7 +45,7 @@ pub enum ApplicationError {
     TransactionPushError(PushError<Sender<()>>),
     BatchItemPushError(PushError<BatchItem>),
     ConcurrentQueuePopError(PopError),
-    SendSelDepthError(SendSelDepthError),
+    InfoSendError(InfoSendError),
     UsiProtocolError(UsiProtocolError),
     BorrowError(BorrowError),
     BorrowMutError(BorrowMutError)
@@ -85,7 +83,7 @@ impl fmt::Display for ApplicationError {
             ApplicationError::TransactionPushError(ref e) => write!(f,"{}",e),
             ApplicationError::BatchItemPushError(ref e) => write!(f,"{}",e),
             ApplicationError::ConcurrentQueuePopError(ref e) => write!(f,"{}",e),
-            ApplicationError::SendSelDepthError(ref e) => write!(f,"{}",e),
+            ApplicationError::InfoSendError(ref e) => write!(f,"{}",e),
             ApplicationError::UsiProtocolError(ref e) => write!(f,"{}",e),
             ApplicationError::BorrowError(ref e) => write!(f,"{}",e),
             ApplicationError::BorrowMutError(ref e) => write!(f,"{}",e),
@@ -126,7 +124,7 @@ impl error::Error for ApplicationError {
             ApplicationError::TransactionPushError(_) => "An error occurred in adding the transaction to the queue.",
             ApplicationError::BatchItemPushError(_) => "An error occurred while adding a batch item to the queue.",
             ApplicationError::ConcurrentQueuePopError(_) => "Error retrieving element from concurrent queue.",
-            ApplicationError::SendSelDepthError(_) => "An error occurred when sending the seldepth of the info command.",
+            ApplicationError::InfoSendError(_) => "An error occurred when sending info command.",
             ApplicationError::UsiProtocolError(_) => "An error occurred in the parsing or string generation process of string processing according to the USI protocol.",
             ApplicationError::BorrowError(_) => "already borrowed.",
             ApplicationError::BorrowMutError(_) => "already mutably borrowed.",
@@ -165,7 +163,7 @@ impl error::Error for ApplicationError {
             ApplicationError::TransactionPushError(ref e) => Some(e),
             ApplicationError::BatchItemPushError(ref e) => Some(e),
             ApplicationError::ConcurrentQueuePopError(ref e) => Some(e),
-            ApplicationError::SendSelDepthError(ref e) => Some(e),
+            ApplicationError::InfoSendError(ref e) => Some(e),
             ApplicationError::UsiProtocolError(ref e) => Some(e),
             ApplicationError::BorrowError(ref e) => Some(e),
             ApplicationError::BorrowMutError(ref e) => Some(e),
@@ -304,9 +302,9 @@ impl From<PopError> for ApplicationError {
         ApplicationError::ConcurrentQueuePopError(err)
     }
 }
-impl From<SendSelDepthError> for ApplicationError {
-    fn from(err: SendSelDepthError) -> ApplicationError {
-        ApplicationError::SendSelDepthError(err)
+impl From<InfoSendError> for ApplicationError {
+    fn from(err: InfoSendError) -> ApplicationError {
+        ApplicationError::InfoSendError(err)
     }
 }
 impl From<UsiProtocolError> for ApplicationError {
@@ -332,28 +330,6 @@ pub enum EvaluationError {
 impl From<ApplicationError> for EvaluationError {
     fn from(err: ApplicationError) -> EvaluationError {
         EvaluationError::InternalError(err)
-    }
-}
-#[derive(Debug)]
-pub struct SendSelDepthError(pub InfoSendError);
-
-impl fmt::Display for SendSelDepthError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f,"{}",self)
-    }
-}
-impl error::Error for SendSelDepthError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.0)
-    }
-
-    fn description(&self) -> &str {
-        "An error occurred when sending the seldepth of the info command."
-    }
-}
-impl From<InfoSendError> for SendSelDepthError {
-    fn from(err: InfoSendError) -> SendSelDepthError {
-        SendSelDepthError(err)
     }
 }
 #[derive(Debug)]

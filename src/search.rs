@@ -15,7 +15,7 @@ use usiagent::OnErrorHandler;
 use usiagent::player::InfoSender;
 use usiagent::rule::{LegalMove, Rule, State};
 use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
-use crate::error::{ApplicationError, SendSelDepthError};
+use crate::error::{ApplicationError};
 use crate::nn::Evalutor;
 use crate::search::Score::{INFINITE, NEGINFINITE};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
@@ -54,7 +54,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
         commands.push(UsiInfoSubCommand::Str(String::from(message)));
 
-        Ok(env.info_sender.send(commands).map_err(|e| SendSelDepthError::from(e))?)
+        Ok(env.info_sender.send(commands)?)
     }
 
     fn send_message_immediate(&self, env:&mut Environment<L,S>, message:&str) -> Result<(),ApplicationError>
@@ -62,7 +62,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
         commands.push(UsiInfoSubCommand::Str(String::from(message)));
 
-        Ok(env.info_sender.send_immediate(commands).map_err(|e| SendSelDepthError::from(e))?)
+        Ok(env.info_sender.send_immediate(commands)?)
     }
 
     fn send_seldepth(&self, env:&mut Environment<L,S>,
@@ -72,7 +72,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         commands.push(UsiInfoSubCommand::Depth(depth));
         commands.push(UsiInfoSubCommand::SelDepth(seldepth));
 
-        Ok(env.info_sender.send(commands).map_err(|e| SendSelDepthError::from(e))?)
+        Ok(env.info_sender.send(commands)?)
     }
 
     fn send_info(&self, env:&mut Environment<L,S>,
@@ -103,7 +103,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
         commands.push(UsiInfoSubCommand::Time((Instant::now() - env.think_start_time).as_millis() as u64));
 
-        Ok(env.info_sender.send_immediate(commands).map_err(|e| SendSelDepthError::from(e))?)
+        Ok(env.info_sender.send_immediate(commands)?)
     }
 
     fn send_score(&self,env:&mut Environment<L,S>,
@@ -284,6 +284,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     Arc::clone(&env.hasher),
                     Arc::clone(&env.stop),
                     Arc::clone(&env.quited),
+                    None,
                     ms
                 )? {
                     MaybeMate::MateMoves(mvs) => {

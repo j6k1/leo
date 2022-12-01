@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool};
 use std::time::Instant;
+use usiagent::error::InfoSendError;
 
 use usiagent::event::{EventQueue, UserEvent, UserEventKind};
 use usiagent::hash::{KyokumenHash, KyokumenMap};
@@ -308,7 +309,9 @@ impl Solver {
                      hasher:Arc<KyokumenHash<u64>>,
                      stop:Arc<AtomicBool>,
                      quited:Arc<AtomicBool>,
-                     ms: GameStateForMate) -> Result<MaybeMate,ApplicationError> where L: Logger + Send + 'static, S: InfoSender {
+                     on_complete:Option<Box<dyn FnOnce(u64) -> Result<(),InfoSendError>>>,
+                     ms: GameStateForMate) -> Result<MaybeMate,ApplicationError>
+        where L: Logger + Send + 'static, S: InfoSender {
         let mut strategy = CheckmateStrategy::<S>::new(hasher,
                                                   strict_moves,
                                                   limit,
@@ -324,7 +327,7 @@ impl Solver {
 
         let mut uniq_id = UniqID::new();
 
-        strategy.oute_process(0,
+        let r = strategy.oute_process(0,
                               ms.mhash,
                               ms.shash,
                               &mut KyokumenMap::new(),
@@ -337,7 +340,14 @@ impl Solver {
                               &mut event_dispatcher,
                               ms.teban,
                               &ms.state,
-                              &ms.mc)
+                              &ms.mc);
+
+
+        if let Some(on_complete) = on_complete {
+            on_complete(strategy.node_count() as u64)?;
+        }
+
+        r
     }
 }
 
@@ -351,13 +361,14 @@ pub mod checkmate {
     use std::sync::{Arc, atomic, Mutex};
     use std::time::{Duration, Instant};
     use usiagent::command::UsiInfoSubCommand;
+    use usiagent::error::InfoSendError;
     use usiagent::event::{EventDispatcher, EventQueue, UserEvent, UserEventKind, USIEventDispatcher};
     use usiagent::hash::{KyokumenHash, KyokumenMap};
     use usiagent::logger::Logger;
     use usiagent::player::InfoSender;
     use usiagent::rule::{LegalMove, Rule, State};
     use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
-    use crate::error::{ApplicationError, SendSelDepthError};
+    use crate::error::{ApplicationError};
     use crate::search::{TIMELIMIT_MARGIN};
     use crate::solver::{Fraction, MaybeMate};
 
@@ -454,6 +465,7 @@ pub mod checkmate {
         dn_base:Number,
         pn:Number,
         dn:Number,
+        priority:usize,
         mate_depth:u32,
         ref_count:u64,
         sennichite:bool,
@@ -466,12 +478,22 @@ pub mod checkmate {
 
     impl Node {
         pub fn new_or_node(id:u64,m:LegalMove) -> Node {
+            let priority = match m {
+                LegalMove::Put(m) => {
+                    MochigomaKind::Hisha as usize - m.kind() as usize
+                },
+                _ => {
+                    0
+                }
+            };
+
             Node {
                 id: id,
                 pn_base: Number::Value(Fraction::new(1)),
                 dn_base: Number::Value(Fraction::new(1)),
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
+                priority: priority,
                 mate_depth: 0,
                 ref_count:1,
                 sennichite: false,
@@ -490,6 +512,7 @@ pub mod checkmate {
                 dn_base: Number::Value(Fraction::new(1)),
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
+                priority: 0,
                 mate_depth: 0,
                 ref_count:1,
                 sennichite: false,
@@ -510,6 +533,7 @@ pub mod checkmate {
                         dn_base: self.dn_base,
                         pn: self.pn,
                         dn: self.dn,
+                        priority: self.priority,
                         mate_depth: self.mate_depth,
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
@@ -527,6 +551,7 @@ pub mod checkmate {
                         dn_base: self.dn_base,
                         pn: self.pn,
                         dn: self.dn,
+                        priority: self.priority,
                         mate_depth: self.mate_depth,
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
@@ -608,6 +633,7 @@ pub mod checkmate {
                 dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
+                priority: self.priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 sennichite: self.sennichite,
@@ -625,6 +651,7 @@ pub mod checkmate {
         dn_base:Number,
         pn:Number,
         dn:Number,
+        priority:usize,
         mate_depth:u32,
         ref_count:u64,
         expanded:bool,
@@ -640,6 +667,7 @@ pub mod checkmate {
                 dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
+                priority: self.priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 sennichite: n.sennichite,
@@ -659,6 +687,7 @@ pub mod checkmate {
                 dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
+                priority: self.priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 expanded: self.expanded,
@@ -675,6 +704,7 @@ pub mod checkmate {
                 dn_base: n.dn_base,
                 pn: n.pn,
                 dn: n.dn,
+                priority: n.priority,
                 mate_depth: n.mate_depth,
                 ref_count: n.ref_count,
                 expanded: n.expanded,
@@ -722,6 +752,7 @@ pub mod checkmate {
                     } else {
                         l.pn.cmp(&r.pn)
                             .then(l.mate_depth.cmp(&r.mate_depth))
+                            .then(r.priority.cmp(&l.priority))
                             .then(l.id.cmp(&r.id)).reverse()
                     }
                 },
@@ -733,6 +764,7 @@ pub mod checkmate {
                     } else {
                         l.dn.cmp(&r.dn)
                             .then(r.mate_depth.cmp(&l.mate_depth))
+                            .then(r.priority.cmp(&l.priority))
                             .then(l.id.cmp(&r.id)).reverse()
                     }
                 },
@@ -741,6 +773,7 @@ pub mod checkmate {
                         l.pn.cmp(&r.pn)
                             .then(r.dn.cmp(&l.dn))
                             .then(l.mate_depth.cmp(&r.mate_depth))
+                            .then(r.priority.cmp(&l.priority))
                             .then(l.id.cmp(&r.id)).reverse()
                     } else if r.pn == Number::INFINITE {
                         Ordering::Less.reverse()
@@ -753,6 +786,7 @@ pub mod checkmate {
                         r.dn.cmp(&l.dn)
                             .then(l.pn.cmp(&r.pn))
                             .then(r.mate_depth.cmp(&l.mate_depth))
+                            .then(r.priority.cmp(&l.priority))
                             .then(l.id.cmp(&r.id)).reverse()
                     } else if r.pn.is_zero() && r.dn == Number::INFINITE {
                         Ordering::Greater.reverse()
@@ -808,6 +842,10 @@ pub mod checkmate {
                 current_depth:current_depth,
                 node_count:0,
             }
+        }
+
+        pub fn node_count(&self) -> i64 {
+            self.node_count
         }
 
         pub fn normalize_node(&mut self,
@@ -1583,7 +1621,7 @@ pub mod checkmate {
             }
         }
 
-        fn send_seldepth(&mut self, depth:u32) -> Result<(),SendSelDepthError>{
+        fn send_seldepth(&mut self, depth:u32) -> Result<(),InfoSendError>{
             let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
             commands.push(UsiInfoSubCommand::Depth(self.base_depth));
             commands.push(UsiInfoSubCommand::SelDepth(self.current_depth + depth));
