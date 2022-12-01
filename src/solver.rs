@@ -836,6 +836,7 @@ pub mod checkmate {
         base_depth:u32,
         current_depth:u32,
         node_count:i64,
+        attempt_check_timelimit:u32
     }
 
     impl<S> CheckmateStrategy<S> where S: InfoSender {
@@ -864,6 +865,7 @@ pub mod checkmate {
                 base_depth:base_depth,
                 current_depth:current_depth,
                 node_count:0,
+                attempt_check_timelimit:0
             }
         }
 
@@ -1648,13 +1650,27 @@ pub mod checkmate {
             Ok(self.info_sender.send(commands)?)
         }
 
-        fn check_timelimit(&self) -> bool {
-            self.limit.map_or(false,|l| {
-                let now = Instant::now();
-                l < now ||
-                    l - now <= Duration::from_millis(self.network_delay as u64 + TIMELIMIT_MARGIN) ||
-                    self.checkmate_limit.map(|l| l < now).unwrap_or(false)
-            })
+        fn check_timelimit(&mut self) -> bool {
+            const CHECK_TIMELIMIT_BOUNDARY:u32 = 4096;
+
+            self.attempt_check_timelimit = self.attempt_check_timelimit % CHECK_TIMELIMIT_BOUNDARY;
+
+            let r;
+
+            if self.attempt_check_timelimit == 0 {
+                r = self.limit.map_or(false, |l| {
+                    let now = Instant::now();
+                    l < now ||
+                        l - now <= Duration::from_millis(self.network_delay as u64 + TIMELIMIT_MARGIN) ||
+                        self.checkmate_limit.map(|l| l < now).unwrap_or(false)
+                });
+            } else {
+                r = false;
+            }
+
+            self.attempt_check_timelimit += 1;
+
+            r
         }
     }
 }
