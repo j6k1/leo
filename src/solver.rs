@@ -1645,8 +1645,7 @@ pub mod checkmate {
             commands.push(UsiInfoSubCommand::Depth(self.base_depth));
             commands.push(UsiInfoSubCommand::SelDepth(self.current_depth + depth));
 
-//            Ok(self.info_sender.send(commands)?)
-            Ok(self.info_sender.send_immediate(commands)?)
+            Ok(self.info_sender.send(commands)?)
         }
 
         fn check_timelimit(&self) -> bool {
