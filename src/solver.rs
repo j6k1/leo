@@ -1150,7 +1150,6 @@ pub mod checkmate {
 
                     if len == 0 {
                         n.try_borrow_mut()?.pn = Number::INFINITE;
-                        n.try_borrow_mut()?.dn_base = Number::Value(Fraction::new(0));
                         n.try_borrow_mut()?.dn = Number::Value(Fraction::new(0));
                     }
 
@@ -1236,7 +1235,6 @@ pub mod checkmate {
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(Fraction::new(0));
-                        u.dn_base = Number::Value(Fraction::new(0));
                         u.sennichite = true;
 
                         let u = Rc::new(RefCell::new(u));
@@ -1454,29 +1452,22 @@ pub mod checkmate {
                     let len = n.try_borrow()?.children.try_borrow()?.len();
 
                     if len == 0 {
-                        n.try_borrow_mut()?.pn_base = Number::Value(Fraction::new(0));
-                        n.try_borrow_mut()?.pn = Number::Value(Fraction::new(0));
-                        n.try_borrow_mut()?.dn = Number::INFINITE;
-                    }
+                        let mut u = n.try_borrow()?.to_decided_node(uniq_id.gen());
 
-                    node_map.insert(teban, mhash, shash, n.try_borrow()?.deref().into());
-
-                    return Ok(MaybeMate::Continuation(n));
-                } else {
-                    let len = n.try_borrow()?.children.try_borrow()?.len();
-
-                    if len == 0 {
-                        let u = n.try_borrow()?.to_decided_node(uniq_id.gen());
+                        u.pn = Number::Value(Fraction::new(0));
+                        u.dn = Number::INFINITE;
 
                         let u = Rc::new(RefCell::new(u));
 
-                        if !u.try_borrow()?.sennichite {
-                            node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
-                        }
+                        node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
 
                         return Ok(MaybeMate::Continuation(u));
-                    }
+                    } else {
+                        node_map.insert(teban, mhash, shash, n.try_borrow()?.deref().into());
 
+                        return Ok(MaybeMate::Continuation(n));
+                    }
+                } else {
                     let n = Node::clone(n.try_borrow()?.deref());
 
                     Rc::new(RefCell::new(n))
@@ -1541,7 +1532,6 @@ pub mod checkmate {
                     if sc {
                         let mut u = Node::clone(n.try_borrow()?.deref());
 
-                        u.pn_base = Number::Value(Fraction::new(0));
                         u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
                         u.sennichite = true;
