@@ -1500,17 +1500,8 @@ pub mod checkmate {
 
                 if n.try_borrow()?.decided || n.try_borrow()?.dn == Number::INFINITE {
                     let u = Rc::clone(&current_node);
-
-                    let mut mate_depth = 0;
-
-                    for n in u.try_borrow()?.children.try_borrow()?.iter() {
-                        mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
-                    }
-
-                    let mut u = u.try_borrow()?.to_decided_node(uniq_id.gen());
-
-                    u.mate_depth = mate_depth;
-
+                    let u = u.try_borrow()?.to_decided_node(uniq_id.gen());
+                    
                     let u = Rc::new(RefCell::new(u));
 
                     if !u.try_borrow()?.sennichite {
@@ -1635,16 +1626,19 @@ pub mod checkmate {
 
                 c.try_borrow_mut()?.update(&u)?;
 
-                let u = c;
+                {
+                    let pn = c.try_borrow()?.pn;
+                    let dn = c.try_borrow()?.dn;
 
-                if !self.strict_moves && u.try_borrow()?.pn.is_zero() && u.try_borrow()?.dn == Number::INFINITE {
-                    let mut mate_depth = 0;
+                    if pn.is_zero() && dn == Number::INFINITE {
+                        let mate_depth = u.try_borrow()?.mate_depth.min(n.try_borrow()?.mate_depth) + 1;
+                        let mate_depth = c.try_borrow()?.mate_depth.max(mate_depth);
 
-                    for n in u.try_borrow()?.children.try_borrow()?.iter() {
-                        mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
+                        c.try_borrow_mut()?.mate_depth = mate_depth;
                     }
-                    u.try_borrow_mut()?.mate_depth = mate_depth;
                 }
+
+                let u = c;
 
                 if !u.try_borrow()?.sennichite {
                     node_map.insert(teban, mhash, shash, u.try_borrow()?.deref().into());
