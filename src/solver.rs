@@ -1412,7 +1412,9 @@ pub mod checkmate {
             }
 
             let current_node = if let Some(n) = current_node.as_ref() {
-                if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
+                let max_mate_depth = n.try_borrow()?.mate_depth + depth;
+
+                if mate_depth.map(|d|  max_mate_depth >= d).unwrap_or(false) {
                     let u = Rc::clone(n);
 
                     let u = u.try_borrow()?.to_decided_node(uniq_id.gen());
