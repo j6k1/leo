@@ -549,10 +549,10 @@ impl USIPlayer<ApplicationError> for Leo {
             Some(Box::new(move |node_count| {
                 let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
 
-                let nanos = (Instant::now() - think_start_time).as_nanos();
+                let micros = (Instant::now() - think_start_time).as_micros();
 
-                if nanos > 0 {
-                    commands.push(UsiInfoSubCommand::Nps((node_count as u128 *  1000 * 1000 * 1000 / nanos) as u64));
+                if micros > 0 {
+                    commands.push(UsiInfoSubCommand::Nps((node_count as u128 *  1000 * 1000 / micros) as u64));
                 }
 
                 commands.push(UsiInfoSubCommand::Nodes(node_count));
