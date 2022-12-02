@@ -469,6 +469,7 @@ pub mod checkmate {
     }
 
     const GENERATION_BOUND:u32 = 1024u32;
+    const GC_PERCENTAGE:usize = 80usize;
 
     impl NodeRepository {
         pub fn new(max_size:usize) -> NodeRepository {
@@ -511,26 +512,27 @@ pub mod checkmate {
 
                 Ok(node.try_borrow()?.reflect_to(n.try_borrow()?.deref()).into())
             } else {
-                let node = self.add(teban,mhash,shash,n)?;
+                let node = n.try_borrow()?.deref().into();
+                self.add(teban,mhash,shash,&node)?;
 
-                Ok(node.reflect_to(n.try_borrow()?.deref()).into())
+                Ok(node)
             }
         }
 
-        pub fn add(&mut self,teban:Teban,mhash:u64,shash:u64,n:&Rc<RefCell<Node>>) -> Result<MapNode,ApplicationError> {
+        pub fn add(&mut self,teban:Teban,mhash:u64,shash:u64,n:&NormalizedNode) -> Result<(),ApplicationError> {
             let gc_entry = GCEntry {
                 teban:teban,
                 mhash:mhash,
                 shash:shash,
                 frequency:1,
                 generation:self.generation,
-                mate:false
+                mate:n.pn.is_zero() && n.dn == Number::INFINITE
             };
 
             let gc_entry = Rc::new(RefCell::new(gc_entry));
 
             let item = NodeRepositoryItem {
-                node: Rc::new(RefCell::new(n.try_borrow()?.deref().into())),
+                node: Rc::new(RefCell::new(n.into())),
                 gc_entry:Rc::clone(&gc_entry)
             };
 
@@ -540,19 +542,58 @@ pub mod checkmate {
 
             self.insert_gc_entry(gc_entry);
 
-            let node = item.node.try_borrow()?.deref().clone();
-
             self.map.insert(teban,mhash,shash,item);
 
             self.current_size += std::mem::size_of::<NodeRepositoryItem>();
 
-            Ok(node)
+            Ok(())
+        }
+
+        pub fn update(&mut self,teban:Teban,mhash:u64,shash:u64,n:&NormalizedNode) -> Result<(),ApplicationError> {
+            if let Some(&mut NodeRepositoryItem { ref mut node, ref mut gc_entry }) = self.map.get_mut(teban,&mhash,&shash) {
+                self.referenced_count += 1;
+
+                if self.referenced_count == GENERATION_BOUND {
+                    self.generation += 1;
+                    self.referenced_count = 0;
+                }
+
+                gc_entry.try_borrow_mut()?.mate = node.try_borrow()?.pn.is_zero() && node.try_borrow()?.dn == Number::INFINITE;
+                gc_entry.try_borrow_mut()?.generation = self.generation;
+
+                {
+                    let mut node = node.try_borrow_mut()?;
+
+                    node.pn_base = n.pn_base;
+                    node.dn_base = n.dn_base;
+                    node.pn = n.pn;
+                    node.dn = n.dn;
+                    node.priority = n.priority;
+                    node.mate_depth = n.mate_depth;
+                    node.ref_count = n.ref_count;
+                    node.expanded = n.expanded;
+                    node.decided = n.decided;
+                }
+
+                Ok(())
+            } else {
+                self.add(teban,mhash,shash,n)?;
+
+                Ok(())
+            }
         }
 
         pub fn gc(&mut self) -> Result<(),ApplicationError> {
             let size = std::mem::size_of::<NodeRepositoryItem>();
+            let rs = self.max_size * GC_PERCENTAGE / 100;
 
-            while self.current_size <= self.max_size {
+            while self.current_size <= rs {
+                if let Some(gc_entry) = self.list.last() {
+                    if gc_entry.try_borrow()?.mate {
+                        break;
+                    }
+                }
+
                 if let Some(gc_entry) = self.list.pop() {
                     self.map.remove(gc_entry.try_borrow()?.teban,&gc_entry.try_borrow()?.mhash,&gc_entry.try_borrow()?.shash);
                     self.current_size -= size;
@@ -596,7 +637,7 @@ pub mod checkmate {
             } else if self.mate && !other.mate {
                 Ordering::Less
             } else {
-                self.generation.cmp(&other.generation).then(self.frequency.cmp(&other.frequency))
+                other.generation.cmp(&self.generation).then(other.frequency.cmp(&self.frequency))
             }
         }
     }
@@ -817,6 +858,32 @@ pub mod checkmate {
         }
     }
 
+    impl<'a> From<&'a NormalizedNode> for Node {
+        fn from(n: &'a NormalizedNode) -> Self {
+            Node {
+                id: n.id,
+                pn_base: n.pn_base,
+                dn_base: n.dn_base,
+                pn: n.pn,
+                dn: n.dn,
+                priority: n.priority,
+                mate_depth: n.mate_depth,
+                ref_count: n.ref_count,
+                sennichite: n.sennichite,
+                expanded: n.expanded,
+                decided: n.decided,
+                m: n.m,
+                children: Rc::clone(&n.children),
+                comparator: n.comparator.clone()
+            }
+        }
+    }
+
+    impl From<NormalizedNode> for Node {
+        fn from(n: NormalizedNode) -> Self {
+            Node::from(&n)
+        }
+    }
     pub struct MapNode {
         pn_base:Number,
         dn_base:Number,
@@ -869,7 +936,24 @@ pub mod checkmate {
     }
 
     impl<'a> From<&'a Node> for MapNode {
-        fn from(n: &'a Node) -> Self {
+        fn from(n: &'a Node) -> MapNode {
+            MapNode {
+                pn_base: n.pn_base,
+                dn_base: n.dn_base,
+                pn: n.pn,
+                dn: n.dn,
+                priority: n.priority,
+                mate_depth: n.mate_depth,
+                ref_count: n.ref_count,
+                expanded: n.expanded,
+                decided: n.decided,
+                children: Rc::clone(&n.children)
+            }
+        }
+    }
+
+    impl<'a> From<&'a NormalizedNode> for MapNode {
+        fn from(n: &'a NormalizedNode) -> MapNode {
             MapNode {
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
