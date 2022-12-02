@@ -462,8 +462,8 @@ pub mod checkmate {
     pub struct NodeRepository {
         map:KyokumenMap<u64,NodeRepositoryItem>,
         list:Vec<Rc<RefCell<GCEntry>>>,
-        max_size:u64,
-        current_size:u64,
+        max_size:usize,
+        current_size:usize,
         referenced_count:u32,
         generation:u64,
     }
@@ -471,7 +471,7 @@ pub mod checkmate {
     const GENERATION_BOUND:u32 = 1024u32;
 
     impl NodeRepository {
-        pub fn new(max_size:u64) -> NodeRepository {
+        pub fn new(max_size:usize) -> NodeRepository {
             NodeRepository {
                 map:KyokumenMap::new(),
                 list:Vec::new(),
@@ -511,27 +511,57 @@ pub mod checkmate {
 
                 Ok(node.try_borrow()?.reflect_to(n.try_borrow()?.deref()).into())
             } else {
-                let gc_entry = GCEntry {
-                    mhash:mhash,
-                    shash:shash,
-                    frequency:1,
-                    generation:self.generation,
-                    mate:false
-                };
-
-                let gc_entry = Rc::new(RefCell::new(gc_entry));
-
-                let item = NodeRepositoryItem {
-                    node: Rc::new(RefCell::new(n.try_borrow()?.deref().into())),
-                    gc_entry:Rc::clone(&gc_entry)
-                };
-
-                let node = item.node.try_borrow()?.deref().clone();
-
-                self.map.insert(teban,mhash,shash,item);
+                let node = self.add(teban,mhash,shash,n)?;
 
                 Ok(node.reflect_to(n.try_borrow()?.deref()).into())
             }
+        }
+
+        pub fn add(&mut self,teban:Teban,mhash:u64,shash:u64,n:&Rc<RefCell<Node>>) -> Result<MapNode,ApplicationError> {
+            let gc_entry = GCEntry {
+                teban:teban,
+                mhash:mhash,
+                shash:shash,
+                frequency:1,
+                generation:self.generation,
+                mate:false
+            };
+
+            let gc_entry = Rc::new(RefCell::new(gc_entry));
+
+            let item = NodeRepositoryItem {
+                node: Rc::new(RefCell::new(n.try_borrow()?.deref().into())),
+                gc_entry:Rc::clone(&gc_entry)
+            };
+
+            if self.current_size + std::mem::size_of::<NodeRepositoryItem>() > self.max_size {
+                self.gc()?;
+            }
+
+            self.insert_gc_entry(gc_entry);
+
+            let node = item.node.try_borrow()?.deref().clone();
+
+            self.map.insert(teban,mhash,shash,item);
+
+            self.current_size += std::mem::size_of::<NodeRepositoryItem>();
+
+            Ok(node)
+        }
+
+        pub fn gc(&mut self) -> Result<(),ApplicationError> {
+            let size = std::mem::size_of::<NodeRepositoryItem>();
+
+            while self.current_size <= self.max_size {
+                if let Some(gc_entry) = self.list.pop() {
+                    self.map.remove(gc_entry.try_borrow()?.teban,&gc_entry.try_borrow()?.mhash,&gc_entry.try_borrow()?.shash);
+                    self.current_size -= size;
+                } else {
+                    break;
+                }
+            }
+
+            Ok(())
         }
     }
 
@@ -551,6 +581,7 @@ pub mod checkmate {
 
     #[derive(Clone,PartialEq,Eq)]
     pub struct GCEntry {
+        teban:Teban,
         mhash:u64,
         shash:u64,
         generation:u64,
