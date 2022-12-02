@@ -459,6 +459,123 @@ pub mod checkmate {
         }
     }
 
+    pub struct NodeRepository {
+        map:KyokumenMap<u64,NodeRepositoryItem>,
+        list:Vec<Rc<RefCell<GCEntry>>>,
+        max_size:u64,
+        current_size:u64,
+        referenced_count:u32,
+        generation:u64,
+    }
+
+    const GENERATION_BOUND:u32 = 1024u32;
+
+    impl NodeRepository {
+        pub fn new(max_size:u64) -> NodeRepository {
+            NodeRepository {
+                map:KyokumenMap::new(),
+                list:Vec::new(),
+                max_size:max_size,
+                current_size:0,
+                referenced_count:0,
+                generation:0
+
+            }
+        }
+
+        pub fn insert_gc_entry(&mut self,e:Rc<RefCell<GCEntry>>) {
+            self.list.push(e);
+
+            for i in (1..self.list.len()).rev() {
+                if self.list[i-1] > self.list[i] {
+                    let tmp = Rc::clone(&self.list[i-1]);
+
+                    self.list[i-1] = Rc::clone(&self.list[i]);
+                    self.list[i] = tmp;
+                }
+            }
+        }
+
+        pub fn get(&mut self,teban:Teban,mhash:u64,shash:u64,n:&Rc<RefCell<Node>>) -> Result<NormalizedNode,ApplicationError> {
+            if let Some(&mut NodeRepositoryItem { ref node, ref mut gc_entry }) = self.map.get_mut(teban,&mhash,&shash) {
+                gc_entry.try_borrow_mut()?.frequency += 1;
+
+                self.referenced_count += 1;
+
+                if self.referenced_count == GENERATION_BOUND {
+                    self.generation += 1;
+                    self.referenced_count = 0;
+                }
+
+                gc_entry.try_borrow_mut()?.generation = self.generation;
+
+                Ok(node.try_borrow()?.reflect_to(n.try_borrow()?.deref()).into())
+            } else {
+                let gc_entry = GCEntry {
+                    mhash:mhash,
+                    shash:shash,
+                    frequency:1,
+                    generation:self.generation,
+                    mate:false
+                };
+
+                let gc_entry = Rc::new(RefCell::new(gc_entry));
+
+                let item = NodeRepositoryItem {
+                    node: Rc::new(RefCell::new(n.try_borrow()?.deref().into())),
+                    gc_entry:Rc::clone(&gc_entry)
+                };
+
+                let node = item.node.try_borrow()?.deref().clone();
+
+                self.map.insert(teban,mhash,shash,item);
+
+                Ok(node.reflect_to(n.try_borrow()?.deref()).into())
+            }
+        }
+    }
+
+    pub struct NodeRepositoryItem {
+        node:Rc<RefCell<MapNode>>,
+        gc_entry:Rc<RefCell<GCEntry>>
+    }
+
+    impl Clone for NodeRepositoryItem {
+        fn clone(&self) -> Self {
+            NodeRepositoryItem {
+                node: Rc::clone(&self.node),
+                gc_entry: self.gc_entry.clone()
+            }
+        }
+    }
+
+    #[derive(Clone,PartialEq,Eq)]
+    pub struct GCEntry {
+        mhash:u64,
+        shash:u64,
+        generation:u64,
+        frequency:u64,
+        mate:bool
+    }
+
+    impl Ord for GCEntry {
+        fn cmp(&self, other: &Self) -> Ordering {
+            if !self.mate && other.mate {
+                Ordering::Greater
+            } else if self.mate && !other.mate {
+                Ordering::Less
+            } else {
+                self.generation.cmp(&other.generation).then(self.frequency.cmp(&other.frequency))
+            }
+        }
+    }
+    
+    impl PartialOrd for GCEntry {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(&other))
+        }
+    }
+
     pub struct Node {
         id:u64,
         pn_base:Number,
@@ -734,6 +851,50 @@ pub mod checkmate {
                 decided: n.decided,
                 children: Rc::clone(&n.children)
             }
+        }
+    }
+
+    pub struct NormalizedNode {
+        id:u64,
+        pn_base:Number,
+        dn_base:Number,
+        pn:Number,
+        dn:Number,
+        priority:usize,
+        mate_depth:u32,
+        ref_count:u64,
+        sennichite:bool,
+        expanded:bool,
+        decided:bool,
+        m:LegalMove,
+        children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
+        comparator:Comparator
+    }
+
+    impl<'a> From<&'a Node> for NormalizedNode {
+        fn from(n: &'a Node) -> Self {
+            NormalizedNode {
+                id: n.id,
+                pn_base: n.pn_base,
+                dn_base: n.dn_base,
+                pn: n.pn,
+                dn: n.dn,
+                priority: n.priority,
+                mate_depth: n.mate_depth,
+                ref_count: n.ref_count,
+                sennichite: n.sennichite,
+                expanded: n.expanded,
+                decided: n.decided,
+                m: n.m,
+                children: Rc::clone(&n.children),
+                comparator: n.comparator
+            }
+        }
+    }
+
+    impl From<Node> for NormalizedNode {
+        fn from(n: Node) -> Self {
+            NormalizedNode::from(&n)
         }
     }
 

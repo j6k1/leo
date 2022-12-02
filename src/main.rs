@@ -14,6 +14,7 @@ extern crate nncombinator;
 extern crate csaparser;
 extern crate packedsfen;
 extern crate concurrent_fixed_hashmap;
+extern crate core;
 
 use std::env;
 use std::fs::{File, OpenOptions};
