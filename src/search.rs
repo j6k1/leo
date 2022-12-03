@@ -32,6 +32,7 @@ pub const MAX_PLY_TIMELIMIT:u64 = 0;
 pub const TURN_COUNT:u32 = 50;
 pub const MIN_TURN_COUNT:u32 = 5;
 pub const DEFAULT_STRICT_MATE:bool = true;
+pub const DEFAULT_MATE_HASH:usize = 8;
 
 pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
@@ -274,6 +275,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                 match solver.checkmate(
                     false,
+                    env.mate_hash,
                     env.limit.clone(),
                     env.max_ply_timelimit.map(|l| Instant::now() + l),
                     env.network_delay,
@@ -454,6 +456,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub network_delay:u32,
     pub display_evalute_score:bool,
     pub max_threads:u32,
+    pub mate_hash:usize,
     pub stop:Arc<AtomicBool>,
     pub quited:Arc<AtomicBool>,
     pub kyokumen_score_map:Arc<ConcurrentFixedHashMap<(Teban,u64,u64),(Score,u32)>>,
@@ -480,6 +483,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             network_delay:self.network_delay,
             display_evalute_score:self.display_evalute_score,
             max_threads:self.max_threads,
+            mate_hash:self.mate_hash,
             stop:Arc::clone(&self.stop),
             quited:Arc::clone(&self.quited),
             kyokumen_score_map:self.kyokumen_score_map.clone(),
@@ -506,7 +510,8 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                max_ply_timelimit:Option<Duration>,
                network_delay:u32,
                display_evalute_score:bool,
-               max_threads:u32
+               max_threads:u32,
+               mate_hash:usize
     ) -> Environment<L,S> {
         let stop = Arc::new(AtomicBool::new(false));
         let quited = Arc::new(AtomicBool::new(false));
@@ -530,6 +535,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             network_delay:network_delay,
             display_evalute_score:display_evalute_score,
             max_threads:max_threads,
+            mate_hash:mate_hash,
             stop:stop,
             quited:quited,
             kyokumen_score_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),

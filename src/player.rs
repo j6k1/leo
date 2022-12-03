@@ -15,23 +15,7 @@ use usiagent::rule::{AppliedMove, Kyokumen, Rule, State};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, Move, Teban};
 use crate::error::{ApplicationError};
 use crate::nn::Evalutor;
-use crate::search::{BASE_DEPTH,
-                    DEFALUT_DISPLAY_EVALUTE_SCORE,
-                    DEFAULT_ADJUST_DEPTH,
-                    DEFAULT_STRICT_MATE,
-                    Environment,
-                    EvaluationResult,
-                    GameState,
-                    MAX_DEPTH,
-                    MAX_PLY,
-                    MAX_PLY_TIMELIMIT,
-                    MAX_THREADS,
-                    MIN_TURN_COUNT,
-                    NETWORK_DELAY,
-                    Root,
-                    Score,
-                    Search,
-                    TURN_COUNT};
+use crate::search::{BASE_DEPTH, DEFALUT_DISPLAY_EVALUTE_SCORE, DEFAULT_ADJUST_DEPTH, DEFAULT_MATE_HASH, DEFAULT_STRICT_MATE, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_PLY, MAX_PLY_TIMELIMIT, MAX_THREADS, MIN_TURN_COUNT, NETWORK_DELAY, Root, Score, Search, TURN_COUNT};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
 
 pub trait FromOption {
@@ -49,6 +33,14 @@ impl FromOption for u32 {
     fn from_option(option: SysEventOption) -> Option<u32> {
         match option {
             SysEventOption::Num(v) => Some(v as u32),
+            _ => None
+        }
+    }
+}
+impl FromOption for usize {
+    fn from_option(option: SysEventOption) -> Option<usize> {
+        match option {
+            SysEventOption::Num(v) => Some(v as usize),
             _ => None
         }
     }
@@ -85,7 +77,8 @@ pub struct Leo {
     turn_count:u32,
     min_turn_count:u32,
     display_evalute_score:bool,
-    strict_mate:bool
+    strict_mate:bool,
+    mate_hash:usize
 }
 impl fmt::Debug for Leo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -120,7 +113,8 @@ impl Leo {
             turn_count:TURN_COUNT,
             min_turn_count:MIN_TURN_COUNT,
             display_evalute_score:DEFALUT_DISPLAY_EVALUTE_SCORE,
-            strict_mate:DEFAULT_STRICT_MATE
+            strict_mate:DEFAULT_STRICT_MATE,
+            mate_hash:DEFAULT_MATE_HASH
         }
     }
 
@@ -154,6 +148,7 @@ impl USIPlayer<ApplicationError> for Leo {
         kinds.insert(String::from("DispEvaluteScore"),SysEventOptionKind::Bool);
         kinds.insert(String::from("AdjustDepth"),SysEventOptionKind::Bool);
         kinds.insert(String::from("StrictMate"),SysEventOptionKind::Bool);
+        kinds.insert(String::from("Mate_Hash"),SysEventOptionKind::Num);
 
         Ok(kinds)
     }
@@ -172,6 +167,7 @@ impl USIPlayer<ApplicationError> for Leo {
         options.insert(String::from("DispEvaluteScore"),UsiOptType::Check(Some(DEFALUT_DISPLAY_EVALUTE_SCORE)));
         options.insert(String::from("AdjustDepth"),UsiOptType::Check(Some(DEFAULT_ADJUST_DEPTH)));
         options.insert(String::from("StrictMate"),UsiOptType::Check(Some(DEFAULT_STRICT_MATE)));
+        options.insert(String::from("Mate_Hash"),UsiOptType::Spin(0,32768,Some(DEFAULT_MATE_HASH as i64)));
 
         Ok(options)
     }
@@ -255,6 +251,9 @@ impl USIPlayer<ApplicationError> for Leo {
             },
             "StrictMate" => {
                 self.strict_mate = bool::from_option(value).unwrap_or(DEFAULT_STRICT_MATE)
+            },
+            "Mate_Hash" => {
+                self.mate_hash = usize::from_option(value).unwrap_or(DEFAULT_MATE_HASH)
             },
             _ => ()
         }
@@ -383,7 +382,8 @@ impl USIPlayer<ApplicationError> for Leo {
             self.max_ply_timelimit.map(|l| Duration::from_micros(l)),
             self.network_delay,
             self.display_evalute_score,
-            self.max_threads
+            self.max_threads,
+            self.mate_hash
         );
 
         let (mhash,shash) = (self.mhash.clone(), self.shash.clone());
@@ -513,7 +513,8 @@ impl USIPlayer<ApplicationError> for Leo {
             self.max_ply_mate.clone(),
             self.max_ply_timelimit.map(|l| Duration::from_micros(l)), self.network_delay,
             self.display_evalute_score,
-            self.max_threads
+            self.max_threads,
+            self.mate_hash
         );
 
         let ms = GameStateForMate {
@@ -536,6 +537,7 @@ impl USIPlayer<ApplicationError> for Leo {
 
         match solver.checkmate::<L,S>(
             self.strict_mate,
+            env.mate_hash,
             env.limit.clone(),
             env.max_ply_timelimit.map(|l| Instant::now() + l),
             env.network_delay,
