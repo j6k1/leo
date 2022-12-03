@@ -496,6 +496,10 @@ pub mod checkmate {
             }
         }
 
+        pub fn contains(&self,teban:Teban,mhash:u64,shash:u64) -> bool {
+            self.map.get(teban,&mhash,&shash).is_some()
+        }
+
         pub fn get(&mut self,teban:Teban,mhash:u64,shash:u64,n:&Rc<RefCell<Node>>) -> Result<NormalizedNode,ApplicationError> {
             if let Some(&mut NodeRepositoryItem {
                     ref node, ref mut gc_entry
@@ -515,6 +519,8 @@ pub mod checkmate {
                 Ok(node.reflect_to(n.try_borrow()?.deref()).into())
             } else {
                 let node = n.try_borrow()?.deref().into();
+
+                self.add(teban,mhash,shash,&node)?;
 
                 Ok(node)
             }
@@ -1177,13 +1183,23 @@ pub mod checkmate {
 
             let expanded = n.try_borrow()?.expanded;
 
-            let mut n = node_repo.get(teban,mhash,shash,n)?;
+            if !node_repo.contains(teban,mhash,shash) {
+                {
+                    let mut n = n.try_borrow_mut()?;
+                    n.expanded = false;
+                }
+                let n = node_repo.get(teban,mhash,shash,n)?;
 
-            if !expanded {
-                n.ref_count += 1;
+                Ok(n)
+            } else {
+                let mut n = node_repo.get(teban,mhash,shash,n)?;
+
+                if !expanded {
+                    n.ref_count += 1;
+                }
+
+                Ok(n)
             }
-
-            Ok(n)
         }
 
         pub fn expand_nodes(&mut self,
@@ -1241,7 +1257,7 @@ pub mod checkmate {
                 n.dn = Number::Value(Fraction::new(1));
             }
 
-            node_repo.add(teban,mhash,shash,&n)?;
+            node_repo.update(teban,mhash,shash,&n)?;
 
             Ok(n)
         }
