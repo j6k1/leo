@@ -516,9 +516,9 @@ pub mod checkmate {
 
                 gc_entry.try_borrow_mut()?.generation = self.generation;
 
-                Ok(node.reflect_to(n.try_borrow()?.deref()).into())
+                Ok(node.reflect_to(n.try_borrow()?.deref()).try_into()?)
             } else {
-                let node = n.try_borrow()?.deref().into();
+                let node = n.try_borrow()?.deref().try_into()?;
 
                 self.add(teban,mhash,shash,&node)?;
 
@@ -1006,9 +1006,13 @@ pub mod checkmate {
         }
     }
 
-    impl<'a> From<&'a Node> for NormalizedNode {
-        fn from(n: &'a Node) -> Self {
-            NormalizedNode {
+    impl<'a> TryFrom<&'a Node> for NormalizedNode {
+        type Error = ApplicationError;
+        fn try_from(n: &'a Node) -> Result<NormalizedNode,ApplicationError>{
+            let children = n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new())));
+            let children = children.try_borrow()?.deref().clone();
+
+            Ok(NormalizedNode {
                 id: n.id,
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
@@ -1021,15 +1025,16 @@ pub mod checkmate {
                 expanded: n.expanded,
                 decided: n.decided,
                 m: n.m,
-                children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
+                children: Rc::new(RefCell::new(children)),
                 comparator: n.comparator
-            }
+            })
         }
     }
 
-    impl From<Node> for NormalizedNode {
-        fn from(n: Node) -> Self {
-            NormalizedNode::from(&n)
+    impl TryFrom<Node> for NormalizedNode {
+        type Error = ApplicationError;
+        fn try_from(n: Node) -> Result<NormalizedNode,ApplicationError> {
+            NormalizedNode::try_from(&n)
         }
     }
 
@@ -1177,7 +1182,7 @@ pub mod checkmate {
                              node_repo:&mut NodeRepository)
             -> Result<NormalizedNode,ApplicationError> {
             if n.try_borrow()?.sennichite {
-                return Ok(n.try_borrow()?.deref().into())
+                return Ok(n.try_borrow()?.deref().try_into()?)
             }
 
             let expanded = n.try_borrow()?.expanded;
@@ -1375,9 +1380,13 @@ pub mod checkmate {
 
             while let Some(c) = n {
                 mvs.push_back(c.try_borrow()?.m);
-                n = NormalizedNode::from(c.try_borrow()?.deref()).children.try_borrow()?.peek().map(|n| {
-                    Rc::clone(n)
-                });
+                n = if let Some(children) = c.try_borrow()?.children.upgrade() {
+                    children.try_borrow()?.peek().map(|n| {
+                        Rc::clone(n)
+                    })
+                } else {
+                    break;
+                }
             }
 
             Ok(mvs)
@@ -1527,7 +1536,7 @@ pub mod checkmate {
                     let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                     if s || sc {
-                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                        let mut u = NormalizedNode::try_from(n.try_borrow()?.deref())?;
 
                         u.pn = Number::INFINITE;
                         u.dn = Number::Value(Fraction::new(0));
@@ -1567,7 +1576,7 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                                        let mut u = NormalizedNode::try_from(n.try_borrow()?.deref())?;
 
                                         u.pn = Number::INFINITE;
 
@@ -1812,7 +1821,7 @@ pub mod checkmate {
                     let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
                     if sc {
-                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                        let mut u = NormalizedNode::try_from(n.try_borrow()?.deref())?;
 
                         u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
@@ -1820,7 +1829,7 @@ pub mod checkmate {
 
                         update_node = u;
                     } else if s {
-                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                        let mut u = NormalizedNode::try_from(n.try_borrow()?.deref())?;
 
                         u.dn = Number::INFINITE;
                         u.sennichite = true;
@@ -1859,7 +1868,7 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                                        let mut u = NormalizedNode::try_from(n.try_borrow()?.deref())?;
 
                                         u.dn = Number::INFINITE;
 
