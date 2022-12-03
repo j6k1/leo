@@ -486,7 +486,6 @@ pub mod checkmate {
         pub fn insert_gc_entry(&mut self,e:Rc<RefCell<GCEntry>>) {
             self.list.push(e);
 
-            /*
             for i in (1..self.list.len()).rev() {
                 if self.list[i-1] > self.list[i] {
                     let tmp = Rc::clone(&self.list[i-1]);
@@ -495,7 +494,6 @@ pub mod checkmate {
                     self.list[i] = tmp;
                 }
             }
-             */
         }
 
         pub fn contains(&self,teban:Teban,mhash:u64,shash:u64) -> bool {
@@ -541,7 +539,7 @@ pub mod checkmate {
             let gc_entry = Rc::new(RefCell::new(gc_entry));
 
             let item = NodeRepositoryItem {
-                node: n.try_into()?,
+                node: n.into(),
                 gc_entry:Rc::clone(&gc_entry)
             };
 
@@ -570,7 +568,7 @@ pub mod checkmate {
                 gc_entry.try_borrow_mut()?.mate = node.pn.is_zero() && node.dn == Number::INFINITE;
                 gc_entry.try_borrow_mut()?.generation = self.generation;
 
-                *node = n.try_into()?;
+                *node = n.into();
 
                 Ok(())
             } else {
@@ -583,8 +581,6 @@ pub mod checkmate {
         pub fn gc(&mut self) -> Result<(),ApplicationError> {
             let size = std::mem::size_of::<NodeRepositoryItem>();
             let rs = self.max_size * GC_PERCENTAGE / 100;
-
-            self.list.sort();
 
             while self.current_size > rs {
                 if let Some(gc_entry) = self.list.last() {
@@ -644,34 +640,6 @@ pub mod checkmate {
     impl PartialOrd for GCEntry {
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(&other))
-        }
-    }
-
-    pub enum Children {
-        Rc(Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>),
-        Weak(Weak<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>)
-    }
-
-    impl Children {
-        fn try_to_rc(&self) -> Result<Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,ApplicationError> {
-            match self {
-                &Children::Rc(ref children) => {
-                    Ok(Rc::clone(children))
-                },
-                &Children::Weak(ref children) => {
-                    children.upgrade().ok_or(ApplicationError::InvalidStateError(String::from(
-                        "Invalid reference to children."
-                    )))
-                }
-            }
-        }
-    }
-    impl Clone for Children {
-        fn clone(&self) -> Self {
-            match self {
-                &Children::Rc(ref children) => Children::Rc(Rc::clone(children)),
-                &Children::Weak(ref children) => Children::Weak(children.clone())
-            }
         }
     }
 
@@ -805,11 +773,9 @@ pub mod checkmate {
         }
     }
 
-    impl<'a> TryFrom<&'a NormalizedNode> for Node {
-        type Error = ApplicationError;
-
-        fn try_from(n: &'a NormalizedNode) -> Result<Node,ApplicationError> {
-            Ok(Node {
+    impl<'a> From<&'a NormalizedNode> for Node {
+        fn from(n: &'a NormalizedNode) -> Node {
+            Node {
                 id: n.id,
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
@@ -822,19 +788,17 @@ pub mod checkmate {
                 expanded: n.expanded,
                 decided: n.decided,
                 m: n.m,
-                children: Rc::downgrade(&n.children()?),
+                children: Rc::downgrade(&n.children),
                 comparator: n.comparator.clone()
-            })
+            }
         }
     }
 
-    impl TryFrom<NormalizedNode> for Node {
-        type Error = ApplicationError;
-        fn try_from(n: NormalizedNode) -> Result<Node,ApplicationError> {
-            Node::try_from(&n)
+    impl From<NormalizedNode> for Node {
+        fn from(n: NormalizedNode) -> Node {
+            Node::from(&n)
         }
     }
-
     pub struct MapNode {
         pn_base:Number,
         dn_base:Number,
@@ -903,10 +867,9 @@ pub mod checkmate {
         }
     }
 
-    impl<'a> TryFrom<&'a NormalizedNode> for MapNode {
-        type Error = ApplicationError;
-        fn try_from(n: &'a NormalizedNode) -> Result<MapNode,ApplicationError> {
-            Ok(MapNode {
+    impl<'a> From<&'a NormalizedNode> for MapNode {
+        fn from(n: &'a NormalizedNode) -> MapNode {
+            MapNode {
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
                 pn: n.pn,
@@ -916,8 +879,8 @@ pub mod checkmate {
                 ref_count: n.ref_count,
                 expanded: n.expanded,
                 decided: n.decided,
-                children: n.children()?,
-            })
+                children: Rc::clone(&n.children)
+            }
         }
     }
 
@@ -934,15 +897,11 @@ pub mod checkmate {
         expanded:bool,
         decided:bool,
         m:LegalMove,
-        children:Children,
+        children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
         comparator:Comparator
     }
 
     impl NormalizedNode {
-        pub fn children(&self) -> Result<Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,ApplicationError> {
-            (&self.children).try_to_rc()
-        }
-
         pub fn to_decided_node(&self,id:u64) -> NormalizedNode {
             match self.comparator {
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
@@ -959,7 +918,7 @@ pub mod checkmate {
                         expanded: self.expanded,
                         decided: true,
                         m: self.m,
-                        children: self.children.clone(),
+                        children: Rc::clone(&self.children),
                         comparator: Comparator::DecidedOrNodeComparator
                     }
                 },
@@ -977,7 +936,7 @@ pub mod checkmate {
                         expanded: self.expanded,
                         decided: true,
                         m: self.m,
-                        children: self.children.clone(),
+                        children: Rc::clone(&self.children),
                         comparator: Comparator::DecidedAndNodeComparator
                     }
                 }
@@ -985,9 +944,9 @@ pub mod checkmate {
         }
 
         pub fn update(&mut self,u:&NormalizedNode) -> Result<(),ApplicationError> {
-            let u = Rc::new(RefCell::new(u.try_into()?));
+            let u = Rc::new(RefCell::new(u.into()));
 
-            let (pn,dn) = if let Some(mut p) = self.children()?.try_borrow_mut()?.peek_mut() {
+            let (pn,dn) = if let Some(mut p) = self.children.try_borrow_mut()?.peek_mut() {
                 let pn = p.try_borrow()?.pn;
                 let dn = p.try_borrow()?.dn;
 
@@ -1003,7 +962,7 @@ pub mod checkmate {
                 Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
                     let mut pn = Number::INFINITE;
 
-                    for n in self.children()?.try_borrow()?.iter() {
+                    for n in self.children.try_borrow()?.iter() {
                         pn = pn.min(n.try_borrow()?.pn);
                     }
                     self.pn = pn;
@@ -1013,7 +972,7 @@ pub mod checkmate {
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
                     let mut dn = Number::INFINITE;
 
-                    for n in self.children()?.try_borrow()?.iter() {
+                    for n in self.children.try_borrow()?.iter() {
                         dn = dn.min(n.try_borrow()?.dn);
                     }
                     self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
@@ -1041,7 +1000,7 @@ pub mod checkmate {
                 expanded: self.expanded,
                 decided: self.decided,
                 m: self.m,
-                children: self.children.clone(),
+                children: Rc::clone(&self.children),
                 comparator: self.comparator.clone()
             }
         }
@@ -1062,7 +1021,7 @@ pub mod checkmate {
                 expanded: n.expanded,
                 decided: n.decided,
                 m: n.m,
-                children: Children::Weak(n.children.clone()),
+                children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
                 comparator: n.comparator
             }
         }
@@ -1254,8 +1213,7 @@ pub mod checkmate {
                                        mc:&MochigomaCollections)
                                        -> Result<NormalizedNode,ApplicationError> {
             {
-                let children = n.children()?;
-                let mut children = children.try_borrow_mut()?;
+                let mut children = n.children.try_borrow_mut()?;
 
                 if depth % 2 == 0 {
                     let mvs = Rule::oute_only_moves_all(teban, state, mc);
@@ -1284,7 +1242,7 @@ pub mod checkmate {
 
             n.expanded = true;
 
-            let len = n.children()?.try_borrow()?.len();
+            let len = n.children.try_borrow()?.len();
 
             let parent_count = n.ref_count;
 
@@ -1308,7 +1266,7 @@ pub mod checkmate {
                                  teban:Teban,
                                  state:&State,
                                  mc:&MochigomaCollections)
-            -> Result<Children,ApplicationError> {
+            -> Result<Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,ApplicationError> {
 
             let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
@@ -1323,7 +1281,7 @@ pub mod checkmate {
                 children.try_borrow_mut()?.push(Rc::clone(child));
             }
 
-            Ok(Children::Rc(children))
+            Ok(children)
         }
 
         pub fn inter_process<L: Logger>(&mut self,
@@ -1417,7 +1375,7 @@ pub mod checkmate {
 
             while let Some(c) = n {
                 mvs.push_back(c.try_borrow()?.m);
-                n = NormalizedNode::from(c.try_borrow()?.deref()).children()?.try_borrow()?.peek().map(|n| {
+                n = NormalizedNode::from(c.try_borrow()?.deref()).children.try_borrow()?.peek().map(|n| {
                     Rc::clone(n)
                 });
             }
@@ -1490,7 +1448,7 @@ pub mod checkmate {
 
                     self.send_seldepth(depth)?;
 
-                    let len = n.children()?.try_borrow()?.len();
+                    let len = n.children.try_borrow()?.len();
 
                     if len == 0 {
                         n.pn = Number::INFINITE;
@@ -1501,7 +1459,7 @@ pub mod checkmate {
 
                     return Ok(MaybeMate::Continuation(n));
                 } else {
-                    let children = n.children.clone();
+                    let children = Rc::clone(&n.children);
 
                     (Some(n),children)
                 }
@@ -1510,7 +1468,7 @@ pub mod checkmate {
 
                 self.send_seldepth(depth)?;
 
-                if children.try_to_rc()?.try_borrow()?.len() == 0 {
+                if children.try_borrow()?.len() == 0 {
                     return Ok(MaybeMate::Nomate);
                 }
 
@@ -1522,7 +1480,7 @@ pub mod checkmate {
             }
 
             loop {
-                let n = children.try_to_rc()?.try_borrow_mut()?.peek().map(|n| {
+                let n = children.try_borrow_mut()?.peek().map(|n| {
                     Rc::clone(n)
                 }).ok_or(ApplicationError::LogicError(String::from(
                     "None of the child nodes exist."
@@ -1646,7 +1604,7 @@ pub mod checkmate {
                     c.update(&u)?;
 
                     if c.pn.is_zero() && c.dn == Number::INFINITE {
-                        let n = c.children()?.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                        let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
                             ApplicationError::LogicError(String::from(
                                 "Failed get mate node. (children is empty)."
                             ))
@@ -1664,9 +1622,9 @@ pub mod checkmate {
                         return Ok(MaybeMate::Continuation(u.clone()));
                     }
                 } else {
-                    if let Some(mut p) = children.try_to_rc()?.try_borrow_mut()?.peek_mut() {
+                    if let Some(mut p) = children.try_borrow_mut()?.peek_mut() {
                         let u = u.clone();
-                        *p = Rc::new(RefCell::new(u.try_into()?));
+                        *p = Rc::new(RefCell::new(u.into()));
                     } else {
                         return Err(ApplicationError::LogicError(String::from(
                             "Node to be updated could not be found."
@@ -1675,7 +1633,7 @@ pub mod checkmate {
 
                     if !self.strict_moves && u.pn.is_zero() && u.dn == Number::INFINITE {
                         *mate_depth = Some(md + 1);
-                        return Ok(MaybeMate::MateMoves(self.build_moves(&Rc::new(RefCell::new(u.try_into()?)))?));
+                        return Ok(MaybeMate::MateMoves(self.build_moves(&Rc::new(RefCell::new(u.into())))?));
                     } else if u.pn.is_zero() && u.dn == Number::INFINITE && mate_depth.map(|d| {
                         md + 1 < d
                     }).unwrap_or(true) {
@@ -1685,7 +1643,7 @@ pub mod checkmate {
             }
 
             if depth == 0 {
-                if let Some(n) = children.try_to_rc()?
+                if let Some(n) = children
                     .try_borrow()?
                     .peek() {
 
@@ -1701,7 +1659,7 @@ pub mod checkmate {
                 let mut pn = Number::INFINITE;
                 let mut dn = Number::Value(Fraction::new(0));
 
-                for n in children.try_to_rc()?.try_borrow()?.iter() {
+                for n in children.try_borrow()?.iter() {
                     pn = pn.min(n.try_borrow()?.pn);
                     dn += n.try_borrow()?.dn;
                 }
@@ -1779,7 +1737,7 @@ pub mod checkmate {
 
                     self.send_seldepth(depth)?;
 
-                    let len = n.children()?.try_borrow()?.len();
+                    let len = n.children.try_borrow()?.len();
 
                     if len == 0 {
                         let mut u = n.to_decided_node(uniq_id.gen());
@@ -1808,10 +1766,10 @@ pub mod checkmate {
                 return Ok(MaybeMate::MaxDepth);
             }
 
-            let children = current_node.children.clone();
+            let children = Rc::clone(&current_node.children);
 
             loop {
-                let n = children.try_to_rc()?.try_borrow_mut()?.peek().map(|n| {
+                let n = children.try_borrow_mut()?.peek().map(|n| {
                     Rc::clone(n)
                 }).ok_or(ApplicationError::LogicError(String::from(
                     "None of the child nodes exist."
@@ -1937,7 +1895,7 @@ pub mod checkmate {
                 c.update(&u)?;
 
                 if c.pn.is_zero() && c.dn == Number::INFINITE {
-                    let n = c.children()?.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                    let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
                         ApplicationError::LogicError(String::from(
                         "Failed get mate node. (children is empty)."
                         ))
