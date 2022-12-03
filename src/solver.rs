@@ -553,6 +553,7 @@ pub mod checkmate {
 
             self.current_size += std::mem::size_of::<NodeRepositoryItem>();
 
+            //println!("info string current_size {}",self.current_size);
             Ok(())
         }
 
@@ -1894,15 +1895,12 @@ pub mod checkmate {
                 c.update(&u)?;
 
                 if c.pn.is_zero() && c.dn == Number::INFINITE {
-                    if c.mate_depth == 0 || u.mate_depth != n.try_borrow()?.mate_depth {
-                        let mut mate_depth = 0;
-
-                        for n in c.children.try_borrow()?.iter() {
-                            mate_depth = mate_depth.max(n.try_borrow()?.mate_depth + 1);
-                        }
-
-                        c.mate_depth = mate_depth;
-                    }
+                    let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                        ApplicationError::LogicError(String::from(
+                        "Failed get mate node. (children is empty)."
+                        ))
+                    )?;
+                    c.mate_depth = n.try_borrow()?.mate_depth + 1;
                 }
 
                 let u = c;
