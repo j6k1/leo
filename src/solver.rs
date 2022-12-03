@@ -1605,14 +1605,16 @@ pub mod checkmate {
 
                     c.update(&u)?;
 
-                    let u = c;
-
-                    let update_mate_depth = u.pn.is_zero() && u.dn == Number::INFINITE &&
-                        (u.mate_depth == 0 || md + 1 < u.mate_depth);
-
-                    if update_mate_depth {
-                        u.mate_depth = md + 1;
+                    if c.pn.is_zero() && c.dn == Number::INFINITE {
+                        let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                            ApplicationError::LogicError(String::from(
+                                "Failed get mate node. (children is empty)."
+                            ))
+                        )?;
+                        c.mate_depth = n.try_borrow()?.mate_depth + 1;
                     }
+
+                    let u = c;
 
                     if !u.sennichite {
                         node_repo.update(teban, mhash, shash, &u)?;
