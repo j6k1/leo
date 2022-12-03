@@ -543,11 +543,11 @@ pub mod checkmate {
                 gc_entry:Rc::clone(&gc_entry)
             };
 
-            //if self.current_size + std::mem::size_of::<NodeRepositoryItem>() > self.max_size {
-            //    self.gc()?;
-            //}
+            if self.current_size + std::mem::size_of::<NodeRepositoryItem>() > self.max_size {
+                self.gc()?;
+            }
 
-            //self.insert_gc_entry(gc_entry);
+            self.insert_gc_entry(gc_entry);
 
             self.map.insert(teban,mhash,shash,item);
 
