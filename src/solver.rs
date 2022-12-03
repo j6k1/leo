@@ -553,7 +553,6 @@ pub mod checkmate {
 
             self.current_size += std::mem::size_of::<NodeRepositoryItem>();
 
-            //println!("info string current_size {}",self.current_size);
             Ok(())
         }
 
@@ -583,7 +582,7 @@ pub mod checkmate {
             let size = std::mem::size_of::<NodeRepositoryItem>();
             let rs = self.max_size * GC_PERCENTAGE / 100;
 
-            while self.current_size <= rs {
+            while self.current_size > rs {
                 if let Some(gc_entry) = self.list.last() {
                     if gc_entry.try_borrow()?.mate {
                         break;
@@ -593,7 +592,6 @@ pub mod checkmate {
                 if let Some(gc_entry) = self.list.pop() {
                     self.map.remove(gc_entry.try_borrow()?.teban,&gc_entry.try_borrow()?.mhash,&gc_entry.try_borrow()?.shash);
                     self.current_size -= size;
-                    println!("info string gc current size {}",self.current_size);
                 } else {
                     break;
                 }
