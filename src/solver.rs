@@ -540,11 +540,8 @@ pub mod checkmate {
 
             let gc_entry = Rc::new(RefCell::new(gc_entry));
 
-            let mut n = n.clone();
-            n.init_children();
-
             let item = NodeRepositoryItem {
-                node: (&n).try_into()?,
+                node: n.try_into()?,
                 gc_entry:Rc::clone(&gc_entry)
             };
 
@@ -943,20 +940,7 @@ pub mod checkmate {
 
     impl NormalizedNode {
         pub fn children(&self) -> Result<Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,ApplicationError> {
-            self.children.try_to_rc()
-        }
-
-        pub fn init_children(&mut self) {
-            let children = match &self.children {
-                &Children::Weak(_) => {
-                    Rc::new(RefCell::new(BinaryHeap::new()))
-                },
-                _ => {
-                    return;
-                }
-            };
-
-            self.children = Children::Rc(children);
+            (&self.children).try_to_rc()
         }
 
         pub fn to_decided_node(&self,id:u64) -> NormalizedNode {
