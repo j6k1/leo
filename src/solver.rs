@@ -515,7 +515,6 @@ pub mod checkmate {
                 Ok(node.reflect_to(n.try_borrow()?.deref()).into())
             } else {
                 let node = n.try_borrow()?.deref().into();
-                self.add(teban,mhash,shash,&node)?;
 
                 Ok(node)
             }
@@ -563,15 +562,7 @@ pub mod checkmate {
                 gc_entry.try_borrow_mut()?.mate = node.pn.is_zero() && node.dn == Number::INFINITE;
                 gc_entry.try_borrow_mut()?.generation = self.generation;
 
-                node.pn_base = n.pn_base;
-                node.dn_base = n.dn_base;
-                node.pn = n.pn;
-                node.dn = n.dn;
-                node.priority = n.priority;
-                node.mate_depth = n.mate_depth;
-                node.ref_count = n.ref_count;
-                node.expanded = n.expanded;
-                node.decided = n.decided;
+                *node = n.into();
 
                 Ok(())
             } else {
