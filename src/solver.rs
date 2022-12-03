@@ -1777,7 +1777,17 @@ pub mod checkmate {
                 )))?;
 
                 if n.try_borrow()?.decided || n.try_borrow()?.dn == Number::INFINITE {
-                    let u = current_node;
+                    let mut u = current_node;
+
+                    if u.pn.is_zero() && u.dn == Number::INFINITE {
+                        let n = u.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                            ApplicationError::LogicError(String::from(
+                                "Failed get mate node. (children is empty)."
+                            ))
+                        )?;
+                        u.mate_depth = n.try_borrow()?.mate_depth + 1;
+                    }
+
                     let u = u.to_decided_node(uniq_id.gen());
 
                     if !u.sennichite {
