@@ -509,7 +509,7 @@ pub mod checkmate {
 
                 gc_entry.try_borrow_mut()?.generation = self.generation;
 
-                Ok(node.try_borrow()?.reflect_to(n.try_borrow()?.deref()).into())
+                Ok(node.reflect_to(n.try_borrow()?.deref()).into())
             } else {
                 let node = n.try_borrow()?.deref().into();
                 self.add(teban,mhash,shash,&node)?;
@@ -531,7 +531,7 @@ pub mod checkmate {
             let gc_entry = Rc::new(RefCell::new(gc_entry));
 
             let item = NodeRepositoryItem {
-                node: Rc::new(RefCell::new(n.into())),
+                node: n.into(),
                 gc_entry:Rc::clone(&gc_entry)
             };
 
@@ -557,22 +557,18 @@ pub mod checkmate {
                     self.referenced_count = 0;
                 }
 
-                gc_entry.try_borrow_mut()?.mate = node.try_borrow()?.pn.is_zero() && node.try_borrow()?.dn == Number::INFINITE;
+                gc_entry.try_borrow_mut()?.mate = node.pn.is_zero() && node.dn == Number::INFINITE;
                 gc_entry.try_borrow_mut()?.generation = self.generation;
 
-                {
-                    let mut node = node.try_borrow_mut()?;
-
-                    node.pn_base = n.pn_base;
-                    node.dn_base = n.dn_base;
-                    node.pn = n.pn;
-                    node.dn = n.dn;
-                    node.priority = n.priority;
-                    node.mate_depth = n.mate_depth;
-                    node.ref_count = n.ref_count;
-                    node.expanded = n.expanded;
-                    node.decided = n.decided;
-                }
+                node.pn_base = n.pn_base;
+                node.dn_base = n.dn_base;
+                node.pn = n.pn;
+                node.dn = n.dn;
+                node.priority = n.priority;
+                node.mate_depth = n.mate_depth;
+                node.ref_count = n.ref_count;
+                node.expanded = n.expanded;
+                node.decided = n.decided;
 
                 Ok(())
             } else {
@@ -606,14 +602,14 @@ pub mod checkmate {
     }
 
     pub struct NodeRepositoryItem {
-        node:Rc<RefCell<MapNode>>,
+        node:MapNode,
         gc_entry:Rc<RefCell<GCEntry>>
     }
 
     impl Clone for NodeRepositoryItem {
         fn clone(&self) -> Self {
             NodeRepositoryItem {
-                node: Rc::clone(&self.node),
+                node: self.node.clone(),
                 gc_entry: self.gc_entry.clone()
             }
         }
