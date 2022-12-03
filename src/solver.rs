@@ -497,7 +497,10 @@ pub mod checkmate {
         }
 
         pub fn get(&mut self,teban:Teban,mhash:u64,shash:u64,n:&Rc<RefCell<Node>>) -> Result<NormalizedNode,ApplicationError> {
-            if let Some(&mut NodeRepositoryItem { ref node, ref mut gc_entry }) = self.map.get_mut(teban,&mhash,&shash) {
+            if let Some(&mut NodeRepositoryItem {
+                    ref node, ref mut gc_entry
+                }) = self.map.get_mut(teban,&mhash,&shash) {
+
                 gc_entry.try_borrow_mut()?.frequency += 1;
 
                 self.referenced_count += 1;
@@ -535,11 +538,11 @@ pub mod checkmate {
                 gc_entry:Rc::clone(&gc_entry)
             };
 
-            if self.current_size + std::mem::size_of::<NodeRepositoryItem>() > self.max_size {
-                self.gc()?;
-            }
+            //if self.current_size + std::mem::size_of::<NodeRepositoryItem>() > self.max_size {
+            //    self.gc()?;
+            //}
 
-            self.insert_gc_entry(gc_entry);
+            //self.insert_gc_entry(gc_entry);
 
             self.map.insert(teban,mhash,shash,item);
 
@@ -592,6 +595,7 @@ pub mod checkmate {
                 if let Some(gc_entry) = self.list.pop() {
                     self.map.remove(gc_entry.try_borrow()?.teban,&gc_entry.try_borrow()?.mhash,&gc_entry.try_borrow()?.shash);
                     self.current_size -= size;
+                    println!("info string gc current size {}",self.current_size);
                 } else {
                     break;
                 }
@@ -1373,7 +1377,7 @@ pub mod checkmate {
             Ok(mvs)
         }
 
-        pub fn oute_process<'a,L: Logger>(&mut self,
+        pub fn oute_process<L: Logger>(&mut self,
                                        depth:u32,
                                        mhash:u64,
                                        shash:u64,
@@ -1424,6 +1428,8 @@ pub mod checkmate {
                 }
 
                 if n.decided {
+                    let n = n.to_decided_node(uniq_id.gen());
+
                     return Ok(MaybeMate::Continuation(n));
                 } else if pn != n.pn || dn != n.dn {
                     return Ok(MaybeMate::Continuation(n));
@@ -1432,8 +1438,6 @@ pub mod checkmate {
                 let expanded = n.expanded;
 
                 if !expanded {
-                    let n = n.clone();
-
                     let mut n = self.expand_nodes(depth, mhash,shash,uniq_id, n,node_repo, teban, state, mc)?;
 
                     self.send_seldepth(depth)?;
@@ -1711,6 +1715,8 @@ pub mod checkmate {
                 }
 
                 if n.decided {
+                    let n = n.to_decided_node(uniq_id.gen());
+
                     return Ok(MaybeMate::Continuation(n));
                 } else if pn != n.pn || dn != n.dn {
                     return Ok(MaybeMate::Continuation(n));
@@ -1719,8 +1725,6 @@ pub mod checkmate {
                 let expanded = n.expanded;
 
                 if !expanded {
-                    let n = n.clone();
-
                     let n = self.expand_nodes(depth, mhash, shash, uniq_id, n, node_repo, teban, state, mc)?;
 
                     self.send_seldepth(depth)?;
