@@ -1822,16 +1822,7 @@ pub mod checkmate {
                 )))?;
 
                 if n.try_borrow()?.decided || n.try_borrow()?.dn == Number::INFINITE {
-                    let mut u = current_node;
-
-                    if u.pn.is_zero() && u.dn == Number::INFINITE {
-                        let n = u.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
-                            ApplicationError::LogicError(String::from(
-                                "Failed get mate node. (children is empty)."
-                            ))
-                        )?;
-                        u.mate_depth = n.try_borrow()?.mate_depth + 1;
-                    }
+                    let u = current_node;
 
                     let u = u.to_decided_node(uniq_id.gen());
 
@@ -1951,14 +1942,13 @@ pub mod checkmate {
                 c.update(&u)?;
 
                 if c.pn.is_zero() && c.dn == Number::INFINITE {
-                    if !pn.is_zero() || dn != Number::INFINITE {
-                        let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
-                            ApplicationError::LogicError(String::from(
-                                "Failed get mate node. (children is empty)."
-                            ))
-                        )?;
-                        c.mate_depth = n.try_borrow()?.mate_depth + 1;
-                    }
+                    let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                        ApplicationError::LogicError(String::from(
+                            "Failed get mate node. (children is empty)."
+                        ))
+                    )?;
+
+                    c.mate_depth = n.try_borrow()?.mate_depth.max(u.mate_depth) + 1;
                 }
 
                 let u = c;
