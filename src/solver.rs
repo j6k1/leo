@@ -79,6 +79,7 @@ pub struct Fraction {
     n:u64,
     d:u64
 }
+#[inline]
 fn gcd(a:u64,b:u64) -> u64 {
     if b > a {
         gcd(b,a)
@@ -89,6 +90,7 @@ fn gcd(a:u64,b:u64) -> u64 {
     }
 }
 impl Fraction {
+    #[inline]
     pub fn new(n:u64) -> Fraction {
         Fraction {
             n:n,
@@ -96,6 +98,7 @@ impl Fraction {
         }
     }
 
+    #[inline]
     pub fn is_zero(&self) -> bool {
         self.n == 0
     }
@@ -103,6 +106,7 @@ impl Fraction {
 
 impl Add for Fraction {
     type Output = Fraction;
+    #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         if self.d == 1 && rhs.d == 1 {
             Fraction {
@@ -151,12 +155,14 @@ impl Add for Fraction {
     }
 }
 impl AddAssign for Fraction {
+    #[inline]
     fn add_assign(&mut self, rhs: Self) {
         *self = *self + rhs;
     }
 }
 impl Sub for Fraction {
     type Output = Fraction;
+    #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
         if self.d == 1 && rhs.d == 1 {
             Fraction {
@@ -205,12 +211,14 @@ impl Sub for Fraction {
     }
 }
 impl SubAssign for Fraction {
+    #[inline]
     fn sub_assign(&mut self, rhs: Self) {
         *self = *self - rhs;
     }
 }
 impl Div<u64> for Fraction {
     type Output = Fraction;
+    #[inline]
     fn div(self, rhs: u64) -> Self::Output {
         let n = self.n;
         let d = self.d * rhs;
@@ -231,12 +239,14 @@ impl Div<u64> for Fraction {
     }
 }
 impl DivAssign<u64> for Fraction {
+    #[inline]
     fn div_assign(&mut self, rhs: u64) {
         *self = *self / rhs;
     }
 }
 impl Mul<u64> for Fraction {
     type Output = Fraction;
+    #[inline]
     fn mul(self, rhs: u64) -> Self::Output {
         let n = self.n * rhs;
         let d = self.d;
@@ -257,11 +267,13 @@ impl Mul<u64> for Fraction {
     }
 }
 impl MulAssign<u64> for Fraction {
+    #[inline]
     fn mul_assign(&mut self, rhs: u64) {
         *self = *self * rhs;
     }
 }
 impl Ord for Fraction {
+    #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         if self.d == other.d {
             self.n.cmp(&other.n)
@@ -279,6 +291,7 @@ impl Ord for Fraction {
     }
 }
 impl PartialOrd for Fraction {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -378,6 +391,7 @@ pub mod checkmate {
     }
 
     impl Number {
+        #[inline]
         pub fn is_zero(&self) -> bool {
             match self {
                 &Number::INFINITE => false,
@@ -389,6 +403,7 @@ pub mod checkmate {
     impl Add for Number {
         type Output = Number;
 
+        #[inline]
         fn add(self, rhs: Self) -> Self::Output {
             match (self,rhs) {
                 (Number::INFINITE,_) | (_,Number::INFINITE) => Number::INFINITE,
@@ -398,6 +413,7 @@ pub mod checkmate {
     }
   
     impl AddAssign for Number {
+        #[inline]
         fn add_assign(&mut self, rhs: Self) {
             let v = match (&self,rhs) {
                 (Number::INFINITE,_) | (_,Number::INFINITE) => {
@@ -415,6 +431,7 @@ pub mod checkmate {
     impl Sub for Number {
         type Output = Number;
 
+        #[inline]
         fn sub(self, rhs: Self) -> Self::Output {
             match (self,rhs) {
                 (Number::INFINITE,_) | (_,Number::INFINITE) => Number::INFINITE,
@@ -424,6 +441,7 @@ pub mod checkmate {
     }
   
     impl SubAssign for Number {
+        #[inline]
         fn sub_assign(&mut self, rhs: Self) {
             let v = match (&self,rhs) {
                 (Number::INFINITE,_) | (_,Number::INFINITE) => {
@@ -440,6 +458,7 @@ pub mod checkmate {
 
     impl Div<u64> for Number {
         type Output = Number;
+        #[inline]
         fn div(self, rhs: u64) -> Self::Output {
             match self {
                 Number::INFINITE => Number::INFINITE,
@@ -450,6 +469,7 @@ pub mod checkmate {
 
     impl Mul<u64> for Number {
         type Output = Number;
+        #[inline]
         fn mul(self, rhs: u64) -> Self::Output {
             match self {
                 Number::INFINITE => Number::INFINITE,
@@ -483,10 +503,12 @@ pub mod checkmate {
             }
         }
 
+        #[inline]
         pub fn insert_gc_entry(&mut self,e:Rc<RefCell<GCEntry>>) {
             self.list.push(e);
         }
 
+        #[inline]
         pub fn contains(&self,teban:Teban,mhash:u64,shash:u64) -> bool {
             self.map.get(teban,&mhash,&shash).is_some()
         }
@@ -600,6 +622,7 @@ pub mod checkmate {
     }
 
     impl Clone for NodeRepositoryItem {
+        #[inline]
         fn clone(&self) -> Self {
             NodeRepositoryItem {
                 node: self.node.clone(),
@@ -619,6 +642,7 @@ pub mod checkmate {
     }
 
     impl Ord for GCEntry {
+        #[inline]
         fn cmp(&self, other: &Self) -> Ordering {
             if !self.mate && other.mate {
                 Ordering::Greater
@@ -631,6 +655,7 @@ pub mod checkmate {
     }
     
     impl PartialOrd for GCEntry {
+        #[inline]
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(&other))
         }
@@ -654,6 +679,7 @@ pub mod checkmate {
     }
 
     impl Node {
+        #[inline]
         pub fn new_or_node(id:u64,m:LegalMove) -> Node {
             let priority = match m {
                 LegalMove::Put(m) => {
@@ -682,6 +708,7 @@ pub mod checkmate {
             }
         }
 
+        #[inline]
         pub fn new_and_node(id:u64,m:LegalMove) -> Node {
             let priority = match m {
                 LegalMove::Put(_) => 0,
@@ -726,6 +753,7 @@ pub mod checkmate {
     }
 
     impl PartialEq for Node {
+        #[inline]
         fn eq(&self, other: &Self) -> bool {
             self.id == other.id
         }
@@ -734,18 +762,21 @@ pub mod checkmate {
     impl Eq for Node {}
 
     impl Ord for Node {
+        #[inline]
         fn cmp(&self, other: &Self) -> Ordering {
             self.comparator.cmp(self,other)
         }
     }
 
     impl PartialOrd for Node {
+        #[inline]
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(other))
         }
     }
 
     impl Clone for Node {
+        #[inline]
         fn clone(&self) -> Self {
             Node {
                 id: self.id,
@@ -767,6 +798,7 @@ pub mod checkmate {
     }
 
     impl<'a> From<&'a NormalizedNode> for Node {
+        #[inline]
         fn from(n: &'a NormalizedNode) -> Node {
             Node {
                 id: n.id,
@@ -788,6 +820,7 @@ pub mod checkmate {
     }
 
     impl From<NormalizedNode> for Node {
+        #[inline]
         fn from(n: NormalizedNode) -> Node {
             Node::from(&n)
         }
@@ -806,6 +839,7 @@ pub mod checkmate {
     }
 
     impl MapNode {
+        #[inline]
         pub fn reflect_to(&self,n:&Node) -> Node {
             Node {
                 id: n.id,
@@ -827,6 +861,7 @@ pub mod checkmate {
     }
 
     impl Clone for MapNode {
+        #[inline]
         fn clone(&self) -> Self {
             MapNode {
                 pn_base: self.pn_base,
@@ -844,6 +879,7 @@ pub mod checkmate {
     }
 
     impl<'a> From<&'a Node> for MapNode {
+        #[inline]
         fn from(n: &'a Node) -> MapNode {
             MapNode {
                 pn_base: n.pn_base,
@@ -861,6 +897,7 @@ pub mod checkmate {
     }
 
     impl<'a> From<&'a NormalizedNode> for MapNode {
+        #[inline]
         fn from(n: &'a NormalizedNode) -> MapNode {
             MapNode {
                 pn_base: n.pn_base,
@@ -895,6 +932,7 @@ pub mod checkmate {
     }
 
     impl NormalizedNode {
+        #[inline]
         pub fn to_decided_node(&self,id:u64) -> NormalizedNode {
             match self.comparator {
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
@@ -979,6 +1017,7 @@ pub mod checkmate {
     }
 
     impl Clone for NormalizedNode {
+        #[inline]
         fn clone(&self) -> Self {
             NormalizedNode {
                 id: self.id,
@@ -1000,6 +1039,7 @@ pub mod checkmate {
     }
 
     impl<'a> From<&'a Node> for NormalizedNode {
+        #[inline]
         fn from(n: &'a Node) -> Self {
             NormalizedNode {
                 id: n.id,
@@ -1021,6 +1061,7 @@ pub mod checkmate {
     }
 
     impl From<Node> for NormalizedNode {
+        #[inline]
         fn from(n: Node) -> Self {
             NormalizedNode::from(&n)
         }
@@ -1037,6 +1078,7 @@ pub mod checkmate {
             }
         }
 
+        #[inline]
         pub fn gen(&mut self) -> u64 {
             let id = self.last_id;
 
@@ -1054,6 +1096,7 @@ pub mod checkmate {
     }
 
     impl Comparator {
+        #[inline]
         pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             match self {
                 &Comparator::OrNodeComparator => {
