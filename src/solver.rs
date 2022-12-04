@@ -678,7 +678,8 @@ pub mod checkmate {
         decided:bool,
         m:LegalMove,
         children:Weak<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
-        comparator:Comparator
+        comparator:Comparator,
+        generation:u32
     }
 
     impl Node {
@@ -707,7 +708,8 @@ pub mod checkmate {
                 decided:false,
                 m:m,
                 children:Weak::new(),
-                comparator:Comparator::AndNodeComparator
+                comparator:Comparator::AndNodeComparator,
+                generation:0
             }
         }
 
@@ -750,7 +752,8 @@ pub mod checkmate {
                 decided:false,
                 m:m,
                 children:Weak::new(),
-                comparator:Comparator::OrNodeComparator
+                comparator:Comparator::OrNodeComparator,
+                generation:0
             }
         }
     }
@@ -795,7 +798,8 @@ pub mod checkmate {
                 decided: self.decided,
                 m: self.m,
                 children: self.children.clone(),
-                comparator: self.comparator.clone()
+                comparator: self.comparator.clone(),
+                generation: self.generation
             }
         }
     }
@@ -817,7 +821,8 @@ pub mod checkmate {
                 decided: n.decided,
                 m: n.m,
                 children: Rc::downgrade(&n.children),
-                comparator: n.comparator.clone()
+                comparator: n.comparator.clone(),
+                generation: n.generation
             }
         }
     }
@@ -839,6 +844,7 @@ pub mod checkmate {
         expanded:bool,
         decided:bool,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
+        generation:u32
     }
 
     impl MapNode {
@@ -858,7 +864,8 @@ pub mod checkmate {
                 decided: self.decided,
                 m: n.m,
                 children: Rc::downgrade(&self.children),
-                comparator: n.comparator
+                comparator: n.comparator,
+                generation: self.generation
             }
         }
     }
@@ -876,7 +883,8 @@ pub mod checkmate {
                 ref_count: self.ref_count,
                 expanded: self.expanded,
                 decided: self.decided,
-                children: Rc::clone(&self.children)
+                children: Rc::clone(&self.children),
+                generation: self.generation
             }
         }
     }
@@ -894,7 +902,8 @@ pub mod checkmate {
                 ref_count: n.ref_count,
                 expanded: n.expanded,
                 decided: n.decided,
-                children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new())))
+                children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
+                generation: n.generation
             }
         }
     }
@@ -912,7 +921,8 @@ pub mod checkmate {
                 ref_count: n.ref_count,
                 expanded: n.expanded,
                 decided: n.decided,
-                children: Rc::clone(&n.children)
+                children: Rc::clone(&n.children),
+                generation: n.generation
             }
         }
     }
@@ -931,7 +941,8 @@ pub mod checkmate {
         decided:bool,
         m:LegalMove,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
-        comparator:Comparator
+        comparator:Comparator,
+        generation:u32
     }
 
     impl NormalizedNode {
@@ -953,7 +964,8 @@ pub mod checkmate {
                         decided: true,
                         m: self.m,
                         children: Rc::clone(&self.children),
-                        comparator: Comparator::DecidedOrNodeComparator
+                        comparator: Comparator::DecidedOrNodeComparator,
+                        generation: self.generation
                     }
                 },
                 Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
@@ -971,7 +983,8 @@ pub mod checkmate {
                         decided: true,
                         m: self.m,
                         children: Rc::clone(&self.children),
-                        comparator: Comparator::DecidedAndNodeComparator
+                        comparator: Comparator::DecidedAndNodeComparator,
+                        generation: self.generation
                     }
                 }
             }
@@ -1036,7 +1049,8 @@ pub mod checkmate {
                 decided: self.decided,
                 m: self.m,
                 children: Rc::clone(&self.children),
-                comparator: self.comparator.clone()
+                comparator: self.comparator.clone(),
+                generation: self.generation
             }
         }
     }
@@ -1058,7 +1072,8 @@ pub mod checkmate {
                 decided: n.decided,
                 m: n.m,
                 children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
-                comparator: n.comparator
+                comparator: n.comparator,
+                generation: n.generation
             }
         }
     }
@@ -1219,26 +1234,28 @@ pub mod checkmate {
                 return Ok(n.try_borrow()?.deref().into())
             }
 
-            let expanded = n.try_borrow()?.expanded;
-
             if !node_repo.contains(teban,mhash,shash) {
                 {
                     let mut n = n.try_borrow_mut()?;
 
                     n.expanded = false;
+                    n.ref_count = 1;
                     n.pn_base = Number::Value(Fraction::new(1));
                     n.dn_base = Number::Value(Fraction::new(1));
                     n.pn = Number::Value(Fraction::new(1));
                     n.dn = Number::Value(Fraction::new(1));
+                    n.generation += 1;
                 }
 
                 let n = node_repo.get(teban,mhash,shash,n)?;
 
                 Ok(n)
             } else {
+                let generation = n.try_borrow()?.generation;
+
                 let mut n = node_repo.get(teban,mhash,shash,n)?;
 
-                if !expanded {
+                if generation < n.generation {
                     n.ref_count += 1;
                 }
 
