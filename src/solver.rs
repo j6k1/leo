@@ -485,15 +485,6 @@ pub mod checkmate {
 
         pub fn insert_gc_entry(&mut self,e:Rc<RefCell<GCEntry>>) {
             self.list.push(e);
-
-            for i in (1..self.list.len()).rev() {
-                if self.list[i-1] > self.list[i] {
-                    let tmp = Rc::clone(&self.list[i-1]);
-
-                    self.list[i-1] = Rc::clone(&self.list[i]);
-                    self.list[i] = tmp;
-                }
-            }
         }
 
         pub fn contains(&self,teban:Teban,mhash:u64,shash:u64) -> bool {
@@ -581,6 +572,8 @@ pub mod checkmate {
         pub fn gc(&mut self) -> Result<(),ApplicationError> {
             let size = std::mem::size_of::<NodeRepositoryItem>();
             let rs = self.max_size * GC_PERCENTAGE / 100;
+
+            self.list.sort();
 
             while self.current_size > rs {
                 if let Some(gc_entry) = self.list.last() {
