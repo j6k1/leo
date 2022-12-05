@@ -1097,7 +1097,6 @@ pub mod checkmate {
                     )))?;
                     self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
                     self.pn = self.pn_base / self.ref_count;
-                    self.dn = dn;
                 }
             }
 
