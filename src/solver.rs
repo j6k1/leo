@@ -597,8 +597,6 @@ pub mod checkmate {
 
             self.list.sort();
 
-            println!("info string run gc before memory size {}",self.current_size);
-
             while self.current_size > rs {
                 if let Some(gc_entry) = self.list.last() {
                     if gc_entry.try_borrow()?.mate {
@@ -613,7 +611,6 @@ pub mod checkmate {
                     break;
                 }
             }
-            println!("info string run gc after memory size {}",self.current_size);
 
             Ok(())
         }
