@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::{Debug, Formatter};
@@ -301,10 +302,11 @@ impl Debug for Fraction {
         write!(f,"{} / {}",self.n,self.d)
     }
 }
+#[derive(Clone)]
 pub struct MultiSet<T> {
     inner:BTreeMap<T,usize>
 }
-impl<T> MultiSet<T> where T: Ord {
+impl<T> MultiSet<T> where T: Ord + Debug {
     pub fn fill(value:T,size:usize) -> MultiSet<T> {
         let mut m = BTreeMap::new();
 
@@ -315,22 +317,32 @@ impl<T> MultiSet<T> where T: Ord {
         }
     }
 
-    pub fn remove(&mut self,value:T) -> bool {
-        let count = self.inner.get(&value).map(|&c| c).unwrap_or(0);
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    pub fn remove<Q>(&mut self,value:&Q) -> bool where T: Borrow<Q> + Ord, Q: Ord + ?Sized {
+        let count = self.inner.get(value).map(|&c| c).unwrap_or(0);
 
         if count == 0 {
             false
         } else if count == 1 {
-            self.inner.remove(&value);
+            self.inner.remove(value);
             true
         } else {
-            self.inner.insert(value,count - 1);
+            if let Some(count) = self.inner.get_mut(value) {
+                *count -= 1;
+            }
             true
         }
     }
 
     pub fn add(&mut self,value:T) {
-        **self.inner.get_mut(&value).get_or_insert(&mut 0) += 1;
+        if let Some(count) = self.inner.get_mut(&value) {
+            *count += 1;
+        } else {
+            self.inner.insert(value,1);
+        }
     }
 
     pub fn min(&self) -> Option<&T> {
@@ -418,7 +430,7 @@ pub mod checkmate {
     use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
     use crate::error::{ApplicationError};
     use crate::search::{TIMELIMIT_MARGIN};
-    use crate::solver::{Fraction, MaybeMate};
+    use crate::solver::{Fraction, MaybeMate, MultiSet};
 
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
     pub enum Number {
@@ -704,6 +716,8 @@ pub mod checkmate {
         id:u64,
         pn_base:Number,
         dn_base:Number,
+        pn_set:Rc<RefCell<MultiSet<Number>>>,
+        dn_set:Rc<RefCell<MultiSet<Number>>>,
         pn:Number,
         dn:Number,
         priority:usize,
@@ -734,6 +748,8 @@ pub mod checkmate {
                 id: id,
                 pn_base: Number::Value(Fraction::new(1)),
                 dn_base: Number::Value(Fraction::new(1)),
+                pn_set:Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),1))),
+                dn_set:Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),1))),
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
                 priority: priority,
@@ -778,6 +794,8 @@ pub mod checkmate {
                 id: id,
                 pn_base: Number::Value(Fraction::new(1)),
                 dn_base: Number::Value(Fraction::new(1)),
+                pn_set:Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),1))),
+                dn_set:Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),1))),
                 pn: Number::Value(Fraction::new(1)),
                 dn: Number::Value(Fraction::new(1)),
                 priority: priority,
@@ -824,6 +842,8 @@ pub mod checkmate {
                 id: self.id,
                 pn_base: self.pn_base,
                 dn_base: self.dn_base,
+                pn_set: Rc::clone(&self.pn_set),
+                dn_set: Rc::clone(&self.dn_set),
                 pn: self.pn,
                 dn: self.dn,
                 priority: self.priority,
@@ -847,6 +867,8 @@ pub mod checkmate {
                 id: n.id,
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
+                pn_set: Rc::clone(&n.pn_set),
+                dn_set: Rc::clone(&n.dn_set),
                 pn: n.pn,
                 dn: n.dn,
                 priority: n.priority,
@@ -872,6 +894,8 @@ pub mod checkmate {
     pub struct MapNode {
         pn_base:Number,
         dn_base:Number,
+        pn_set:Rc<RefCell<MultiSet<Number>>>,
+        dn_set:Rc<RefCell<MultiSet<Number>>>,
         pn:Number,
         dn:Number,
         priority:usize,
@@ -890,6 +914,8 @@ pub mod checkmate {
                 id: n.id,
                 pn_base: self.pn_base,
                 dn_base: self.dn_base,
+                pn_set: Rc::clone(&self.pn_set),
+                dn_set: Rc::clone(&self.dn_set),
                 pn: self.pn,
                 dn: self.dn,
                 priority: self.priority,
@@ -912,6 +938,8 @@ pub mod checkmate {
             MapNode {
                 pn_base: self.pn_base,
                 dn_base: self.dn_base,
+                pn_set: Rc::clone(&self.pn_set),
+                dn_set: Rc::clone(&self.dn_set),
                 pn: self.pn,
                 dn: self.dn,
                 priority: self.priority,
@@ -931,6 +959,8 @@ pub mod checkmate {
             MapNode {
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
+                pn_set: Rc::clone(&n.pn_set),
+                dn_set: Rc::clone(&n.dn_set),
                 pn: n.pn,
                 dn: n.dn,
                 priority: n.priority,
@@ -950,6 +980,8 @@ pub mod checkmate {
             MapNode {
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
+                pn_set: Rc::clone(&n.pn_set),
+                dn_set: Rc::clone(&n.dn_set),
                 pn: n.pn,
                 dn: n.dn,
                 priority: n.priority,
@@ -967,6 +999,8 @@ pub mod checkmate {
         id:u64,
         pn_base:Number,
         dn_base:Number,
+        pn_set:Rc<RefCell<MultiSet<Number>>>,
+        dn_set:Rc<RefCell<MultiSet<Number>>>,
         pn:Number,
         dn:Number,
         priority:usize,
@@ -990,6 +1024,8 @@ pub mod checkmate {
                         id: id,
                         pn_base: self.pn_base,
                         dn_base: self.dn_base,
+                        pn_set: Rc::clone(&self.pn_set),
+                        dn_set: Rc::clone(&self.dn_set),
                         pn: self.pn,
                         dn: self.dn,
                         priority: self.priority,
@@ -1009,6 +1045,8 @@ pub mod checkmate {
                         id: id,
                         pn_base: self.pn_base,
                         dn_base: self.dn_base,
+                        pn_set: Rc::clone(&self.pn_set),
+                        dn_set: Rc::clone(&self.dn_set),
                         pn: self.pn,
                         dn: self.dn,
                         priority: self.priority,
@@ -1043,21 +1081,20 @@ pub mod checkmate {
 
             match self.comparator {
                 Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
-                    let mut pn = Number::INFINITE;
-
-                    for n in self.children.try_borrow()?.iter() {
-                        pn = pn.min(n.try_borrow()?.pn);
-                    }
-                    self.pn = pn;
+                    self.pn_set.try_borrow_mut()?.remove(&pn);
+                    self.pn_set.try_borrow_mut()?.add(u.try_borrow()?.pn);
+                    self.pn = *self.pn_set.try_borrow()?.min().ok_or(ApplicationError::LogicError(String::from(
+                       "Failed to get minimum pn (no item)"
+                    )))?;
                     self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
                     self.dn = self.dn_base / self.ref_count;
                 },
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
-                    let mut dn = Number::INFINITE;
-
-                    for n in self.children.try_borrow()?.iter() {
-                        dn = dn.min(n.try_borrow()?.dn);
-                    }
+                    self.dn_set.try_borrow_mut()?.remove(&dn);
+                    self.dn_set.try_borrow_mut()?.add(u.try_borrow()?.dn);
+                    self.dn = *self.dn_set.try_borrow()?.min().ok_or(ApplicationError::LogicError(String::from(
+                        "Failed to get minimum dn (no item)"
+                    )))?;
                     self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
                     self.pn = self.pn_base / self.ref_count;
                     self.dn = dn;
@@ -1075,6 +1112,8 @@ pub mod checkmate {
                 id: self.id,
                 pn_base: self.pn_base,
                 dn_base: self.dn_base,
+                pn_set: Rc::clone(&self.pn_set),
+                dn_set: Rc::clone(&self.dn_set),
                 pn: self.pn,
                 dn: self.dn,
                 priority: self.priority,
@@ -1098,6 +1137,8 @@ pub mod checkmate {
                 id: n.id,
                 pn_base: n.pn_base,
                 dn_base: n.dn_base,
+                pn_set: Rc::clone(&n.pn_set),
+                dn_set: Rc::clone(&n.dn_set),
                 pn: n.pn,
                 dn: n.dn,
                 priority: n.priority,
@@ -1276,6 +1317,8 @@ pub mod checkmate {
 
                     n.expanded = false;
                     n.ref_count = 1;
+                    n.pn_set = Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),1)));
+                    n.dn_set = Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),1)));
                     n.pn_base = Number::Value(Fraction::new(1));
                     n.dn_base = Number::Value(Fraction::new(1));
                     n.pn = Number::Value(Fraction::new(1));
@@ -1346,11 +1389,13 @@ pub mod checkmate {
 
             if depth % 2 == 0 {
                 n.pn = Number::Value(Fraction::new(1));
+                n.pn_set = Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),len)));
                 n.dn_base = Number::Value(Fraction::new(len as u64));
                 n.dn = Number::Value(Fraction::new(len as u64) / parent_count);
             } else {
                 n.pn_base = Number::Value(Fraction::new(len as u64));
                 n.pn = Number::Value(Fraction::new(len as u64) / parent_count);
+                n.dn_set = Rc::new(RefCell::new(MultiSet::fill(Number::Value(Fraction::new(1)),len)));
                 n.dn = Number::Value(Fraction::new(1));
             }
 
