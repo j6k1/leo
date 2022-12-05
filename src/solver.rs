@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::ops::{Add, AddAssign, Sub, SubAssign, Div, DivAssign, Mul, MulAssign};
 use std::sync::{Arc, Mutex};
@@ -299,42 +299,6 @@ impl PartialOrd for Fraction {
 impl Debug for Fraction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f,"{} / {}",self.n,self.d)
-    }
-}
-pub struct MultiSet<T> {
-    inner:BTreeMap<T,usize>
-}
-impl<T> MultiSet<T> where T: Ord {
-    pub fn fill(value:T,size:usize) -> MultiSet<T> {
-        let mut m = BTreeMap::new();
-
-        m.insert(value,size);
-
-        MultiSet {
-            inner:m
-        }
-    }
-
-    pub fn remove(&mut self,value:T) -> bool {
-        let count = self.inner.get(&value).map(|&c| c).unwrap_or(0);
-
-        if count == 0 {
-            false
-        } else if count == 1 {
-            self.inner.remove(&value);
-            true
-        } else {
-            self.inner.insert(value,count - 1);
-            true
-        }
-    }
-
-    pub fn add(&mut self,value:T) {
-        **self.inner.get_mut(&value).get_or_insert(&mut 0) += 1;
-    }
-
-    pub fn min(&self) -> Option<&T> {
-        self.inner.keys().next()
     }
 }
 pub struct Solver {
