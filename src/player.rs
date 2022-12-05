@@ -69,6 +69,7 @@ pub struct Leo {
     base_depth:u32,
     max_depth:u32,
     max_nodes:Option<i64>,
+    mate_max_nodes:Option<i64>,
     max_threads:u32,
     max_ply:Option<u32>,
     max_ply_mate:Option<u32>,
@@ -105,6 +106,7 @@ impl Leo {
             base_depth:BASE_DEPTH,
             max_depth:MAX_DEPTH,
             max_nodes:None,
+            mate_max_nodes:None,
             max_threads:MAX_THREADS,
             max_ply:Some(MAX_PLY),
             max_ply_mate:None,
@@ -137,6 +139,7 @@ impl USIPlayer<ApplicationError> for Leo {
         kinds.insert(String::from("USI_Ponder"),SysEventOptionKind::Bool);
         kinds.insert(String::from("MaxDepth"),SysEventOptionKind::Num);
         kinds.insert(String::from("MaxNodes"),SysEventOptionKind::Num);
+        kinds.insert(String::from("MateMaxNodes"),SysEventOptionKind::Num);
         kinds.insert(String::from("MAX_PLY"),SysEventOptionKind::Num);
         kinds.insert(String::from("MAX_PLY_MATE"),SysEventOptionKind::Num);
         kinds.insert(String::from("MAX_PLY_TIMELIMIT"),SysEventOptionKind::Num);
@@ -156,6 +159,7 @@ impl USIPlayer<ApplicationError> for Leo {
         options.insert(String::from("BaseDepth"),UsiOptType::Spin(1,100,Some(BASE_DEPTH as i64)));
         options.insert(String::from("MaxDepth"),UsiOptType::Spin(1,100,Some(MAX_DEPTH as i64)));
         options.insert(String::from("MaxNodes"),UsiOptType::Spin(0,i64::MAX,Some(0)));
+        options.insert(String::from("MateMaxNodes"),UsiOptType::Spin(0,i64::MAX,Some(0)));
         options.insert(String::from("MAX_PLY"),UsiOptType::Spin(0,1000,Some(MAX_PLY as i64)));
         options.insert(String::from("MAX_PLY_MATE"),UsiOptType::Spin(0,10000,Some(0)));
         options.insert(String::from("MAX_PLY_TIMELIMIT"),UsiOptType::Spin(0,300000,Some(MAX_PLY_TIMELIMIT as i64)));
@@ -192,6 +196,17 @@ impl USIPlayer<ApplicationError> for Leo {
             },
             "MaxNodes" => {
                 self.max_nodes = match i64::from_option(value) {
+                    Some(0) => {
+                        None
+                    },
+                    Some(nodes) => {
+                        Some(nodes)
+                    },
+                    None => None,
+                };
+            },
+            "MateMaxNodes" => {
+                self.mate_max_nodes = match i64::from_option(value) {
                     Some(0) => {
                         None
                     },
@@ -506,7 +521,7 @@ impl USIPlayer<ApplicationError> for Leo {
             self.min_turn_count,
             self.base_depth,
             self.max_depth,
-            self.max_nodes.clone(),
+            self.mate_max_nodes.clone(),
             self.max_ply.clone(),
             self.max_ply_mate.clone(),
             self.max_ply_timelimit.map(|l| Duration::from_micros(l)), self.network_delay,
