@@ -15,7 +15,7 @@ use usiagent::rule::{AppliedMove, Kyokumen, Rule, State};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, Move, Teban};
 use crate::error::{ApplicationError};
 use crate::nn::Evalutor;
-use crate::search::{BASE_DEPTH, DEFALUT_DISPLAY_EVALUTE_SCORE, DEFAULT_ADJUST_DEPTH, DEFAULT_MATE_HASH, DEFAULT_STRICT_MATE, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_PLY, MAX_PLY_TIMELIMIT, MAX_THREADS, MIN_TURN_COUNT, NETWORK_DELAY, Root, Score, Search, TURN_COUNT};
+use crate::search::{BASE_DEPTH, DEFALUT_DISPLAY_EVALUTE_SCORE, DEFAULT_MATE_HASH, DEFAULT_STRICT_MATE, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_PLY, MAX_PLY_TIMELIMIT, MAX_THREADS, MIN_TURN_COUNT, NETWORK_DELAY, Root, Score, Search, TURN_COUNT};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
 
 pub trait FromOption {
@@ -146,7 +146,6 @@ impl USIPlayer<ApplicationError> for Leo {
         kinds.insert(String::from("BaseDepth"),SysEventOptionKind::Num);
         kinds.insert(String::from("NetworkDelay"),SysEventOptionKind::Num);
         kinds.insert(String::from("DispEvaluteScore"),SysEventOptionKind::Bool);
-        kinds.insert(String::from("AdjustDepth"),SysEventOptionKind::Bool);
         kinds.insert(String::from("StrictMate"),SysEventOptionKind::Bool);
         kinds.insert(String::from("Mate_Hash"),SysEventOptionKind::Num);
 
@@ -165,7 +164,6 @@ impl USIPlayer<ApplicationError> for Leo {
         options.insert(String::from("Threads"),UsiOptType::Spin(1,1024,Some(MAX_THREADS as i64)));
         options.insert(String::from("NetworkDelay"),UsiOptType::Spin(0,10000,Some(NETWORK_DELAY as i64)));
         options.insert(String::from("DispEvaluteScore"),UsiOptType::Check(Some(DEFALUT_DISPLAY_EVALUTE_SCORE)));
-        options.insert(String::from("AdjustDepth"),UsiOptType::Check(Some(DEFAULT_ADJUST_DEPTH)));
         options.insert(String::from("StrictMate"),UsiOptType::Check(Some(DEFAULT_STRICT_MATE)));
         options.insert(String::from("Mate_Hash"),UsiOptType::Spin(0,32768,Some(DEFAULT_MATE_HASH as i64)));
 

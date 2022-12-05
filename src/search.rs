@@ -25,7 +25,6 @@ pub const MAX_DEPTH:u32 = 6;
 pub const TIMELIMIT_MARGIN:u64 = 50;
 pub const NETWORK_DELAY:u32 = 1100;
 pub const DEFALUT_DISPLAY_EVALUTE_SCORE:bool = false;
-pub const DEFAULT_ADJUST_DEPTH:bool = true;
 pub const MAX_THREADS:u32 = 1;
 pub const MAX_PLY:u32 = 200;
 pub const MAX_PLY_TIMELIMIT:u64 = 0;
