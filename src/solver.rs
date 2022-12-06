@@ -1562,6 +1562,8 @@ pub mod checkmate {
                 return Ok(MaybeMate::MaxDepth);
             }
 
+            let mut mate_mvs = None;
+
             loop {
                 let n = children.try_borrow_mut()?.peek().map(|n| {
                     Rc::clone(n)
@@ -1718,40 +1720,30 @@ pub mod checkmate {
                     if !self.strict_moves && u.pn.is_zero() && u.dn == Number::INFINITE {
                         *mate_depth = Some(md + 1);
                         return Ok(MaybeMate::MateMoves(self.build_moves(&Rc::new(RefCell::new(u.into())))?));
-                    } else if u.pn.is_zero() && u.dn == Number::INFINITE && mate_depth.map(|d| {
-                        md + 1 < d
-                    }).unwrap_or(true) {
+                    } else if u.pn.is_zero() && u.dn == Number::INFINITE {
+                        mate_mvs = Some(self.build_moves(&Rc::new(RefCell::new(u.into())))?);
                         *mate_depth = Some(md + 1);
                     }
                 }
             }
 
             if depth == 0 {
-                if let Some(n) = children
-                    .try_borrow()?
-                    .peek() {
+                if let Some(mvs) = mate_mvs {
+                   Ok(MaybeMate::MateMoves(mvs))
+                } else {
+                    let mut pn = Number::INFINITE;
+                    let mut dn = Number::Value(Fraction::new(0));
 
-                    if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
-                        return Ok(MaybeMate::MateMoves(self.build_moves(n)?));
+                    for n in children.try_borrow()?.iter() {
+                        pn = pn.min(n.try_borrow()?.pn);
+                        dn += n.try_borrow()?.dn;
                     }
-                } else {
-                    return Err(ApplicationError::LogicError(String::from(
-                        "The legal move has not yet been set."
-                    )));
-                }
 
-                let mut pn = Number::INFINITE;
-                let mut dn = Number::Value(Fraction::new(0));
-
-                for n in children.try_borrow()?.iter() {
-                    pn = pn.min(n.try_borrow()?.pn);
-                    dn += n.try_borrow()?.dn;
-                }
-
-                if pn == Number::INFINITE && dn.is_zero() {
-                    Ok(MaybeMate::Nomate)
-                } else {
-                    Ok(MaybeMate::Unknown)
+                    if pn == Number::INFINITE && dn.is_zero() {
+                        Ok(MaybeMate::Nomate)
+                    } else {
+                        Ok(MaybeMate::Unknown)
+                    }
                 }
             } else {
                 Ok(MaybeMate::Skip)
