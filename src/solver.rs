@@ -1705,12 +1705,11 @@ pub mod checkmate {
                         c.update(&u)?;
 
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
+                            c.mate_depth = u.mate_depth + 1;
                             c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                        }
 
-                            if n.try_borrow()?.decided {
-                                return Ok(MaybeMate::Continuation(c.clone()));
-                            }
-
+                        if pn.is_zero() && dn == Number::INFINITE {
                             let mut pn = Number::INFINITE;
                             let mut dn = Number::Value(Fraction::new(0));
 
@@ -1719,7 +1718,7 @@ pub mod checkmate {
                                     continue;
                                 }
 
-                                pn = pn .min(n.try_borrow()?.pn);
+                                pn = pn.min(n.try_borrow()?.pn);
                                 dn += n.try_borrow()?.dn;
                             }
 
@@ -1816,9 +1815,7 @@ pub mod checkmate {
 
                 let mut n = self.normalize_node(n,mhash,shash,teban,node_repo)?;
 
-                let max_mate_depth = n.mate_depth + depth;
-
-                if mate_depth.map(|d|  max_mate_depth >= d).unwrap_or(false) {
+                if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
                     let u = n.to_decided_node(uniq_id.gen());
 
                     if !u.sennichite {
@@ -1902,7 +1899,7 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if n.try_borrow()?.decided || n.try_borrow()?.dn == Number::INFINITE {
+                if n.try_borrow()?.decided || (n.try_borrow()?.dn == Number::INFINITE && !n.try_borrow()?.pn.is_zero()) {
                     let u = current_node;
 
                     let u = u.to_decided_node(uniq_id.gen());
@@ -2022,15 +2019,13 @@ pub mod checkmate {
 
                 c.update(&u)?;
 
+                let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                    ApplicationError::LogicError(String::from(
+                        "Failed get mate node. (children is empty)."
+                    ))
+                )?;
+
                 if c.pn.is_zero() && c.dn == Number::INFINITE {
-                    let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
-                        ApplicationError::LogicError(String::from(
-                            "Failed get mate node. (children is empty)."
-                        ))
-                    )?;
-
-                    let decided = u.decided;
-
                     if u.mate_depth >= n.try_borrow()?.mate_depth {
                         c.mate_depth = u.mate_depth + 1;
                         c.mate_node = Some(Rc::new(RefCell::new(u.into())));
@@ -2038,13 +2033,9 @@ pub mod checkmate {
                         c.mate_depth = n.try_borrow()?.mate_depth + 1;
                         c.mate_node = Some(Rc::clone(&n));
                     }
+                }
 
-                    if decided {
-                        let u = c.to_decided_node(uniq_id.gen());
-
-                        return Ok(MaybeMate::Continuation(u));
-                    }
-
+                if pn.is_zero() && dn == Number::INFINITE {
                     let mut pn = Number::Value(Fraction::new(0));
                     let mut dn = Number::INFINITE;
 
@@ -2054,7 +2045,7 @@ pub mod checkmate {
                         }
 
                         pn += n.try_borrow()?.pn;
-                        dn = dn .min(n.try_borrow()?.dn);
+                        dn = dn.min(n.try_borrow()?.dn);
                     }
 
                     c.pn = pn;
