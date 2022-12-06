@@ -379,7 +379,7 @@ pub mod checkmate {
     use usiagent::logger::Logger;
     use usiagent::player::InfoSender;
     use usiagent::rule::{LegalMove, Rule, State};
-    use usiagent::shogi::{MochigomaCollections, MochigomaKind, Teban};
+    use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
     use crate::error::{ApplicationError};
     use crate::search::{TIMELIMIT_MARGIN};
     use crate::solver::{Fraction, MaybeMate};
@@ -1480,7 +1480,7 @@ pub mod checkmate {
                 let pn = n.try_borrow()?.pn;
                 let dn = n.try_borrow()?.dn;
 
-                let n = self.normalize_node(&n,mhash,shash,teban,node_repo)?;
+                let mut n = self.normalize_node(&n,mhash,shash,teban,node_repo)?;
 
                 if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
                     let u = n.to_decided_node(uniq_id.gen());
@@ -1498,6 +1498,20 @@ pub mod checkmate {
                     return Ok(MaybeMate::Continuation(n));
                 } else if pn != n.pn || dn != n.dn {
                     return Ok(MaybeMate::Continuation(n));
+                }
+
+                match n.m {
+                    LegalMove::To(m) => {
+                        if m.obtained() == Some(ObtainKind::Ou) {
+                            n.pn = Number::INFINITE;
+                            n.dn = Number::Value(Fraction::new(0));
+
+                            node_repo.update(teban,mhash,shash,&n)?;
+
+                            return Ok(MaybeMate::Continuation(n));
+                        }
+                    },
+                    _ => ()
                 }
 
                 let expanded = n.expanded;
@@ -1772,7 +1786,7 @@ pub mod checkmate {
                 let pn = n.try_borrow()?.pn;
                 let dn = n.try_borrow()?.dn;
 
-                let n = self.normalize_node(n,mhash,shash,teban,node_repo)?;
+                let mut n = self.normalize_node(n,mhash,shash,teban,node_repo)?;
 
                 let max_mate_depth = n.mate_depth + depth;
 
@@ -1794,6 +1808,19 @@ pub mod checkmate {
                     return Ok(MaybeMate::Continuation(n));
                 }
 
+                match n.m {
+                    LegalMove::To(m) => {
+                        if m.obtained() == Some(ObtainKind::Ou) {
+                            n.pn = Number::Value(Fraction::new(0));
+                            n.dn = Number::INFINITE;
+
+                            node_repo.update(teban, mhash, shash, &n)?;
+
+                            return Ok(MaybeMate::Continuation(n));
+                        }
+                    },
+                    _ => ()
+                }
                 let expanded = n.expanded;
 
                 if !expanded {
