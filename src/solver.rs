@@ -1020,19 +1020,37 @@ pub mod checkmate {
                     let mut pn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
+                        if n.try_borrow()?.decided {
+                            continue;
+                        }
                         pn = pn.min(n.try_borrow()?.pn);
                     }
                     self.pn = pn;
-                    self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
+
+                    if u.try_borrow()?.decided {
+                        self.dn_base = self.dn_base - dn;
+                    } else {
+                        self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
+                    }
+
                     self.dn = self.dn_base / self.ref_count;
                 },
                 Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
                     let mut dn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
+                        if n.try_borrow()?.decided {
+                            continue;
+                        }
                         dn = dn.min(n.try_borrow()?.dn);
                     }
-                    self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
+
+                    if u.try_borrow()?.decided {
+                        self.pn_base = self.pn_base - pn;
+                    } else {
+                        self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
+                    }
+
                     self.pn = self.pn_base / self.ref_count;
                     self.dn = dn;
                 }
@@ -1701,30 +1719,11 @@ pub mod checkmate {
                     let pn = c.pn;
                     let dn = c.dn;
 
-                    {
-                        c.update(&u)?;
+                    c.update(&u)?;
 
-                        if u.pn.is_zero() && u.dn == Number::INFINITE {
-                            c.mate_depth = u.mate_depth + 1;
-                            c.mate_node = Some(Rc::new(RefCell::new(u.into())));
-                        }
-
-                        if pn.is_zero() && dn == Number::INFINITE {
-                            let mut pn = Number::INFINITE;
-                            let mut dn = Number::Value(Fraction::new(0));
-
-                            for n in c.children.try_borrow()?.iter() {
-                                if n.try_borrow()?.decided {
-                                    continue;
-                                }
-
-                                pn = pn.min(n.try_borrow()?.pn);
-                                dn += n.try_borrow()?.dn;
-                            }
-
-                            c.pn = pn;
-                            c.dn = dn;
-                        }
+                    if u.pn.is_zero() && u.dn == Number::INFINITE {
+                        c.mate_depth = u.mate_depth + 1;
+                        c.mate_node = Some(Rc::new(RefCell::new(u.into())));
                     }
 
                     let u = c;
@@ -2033,23 +2032,6 @@ pub mod checkmate {
                         c.mate_depth = n.try_borrow()?.mate_depth + 1;
                         c.mate_node = Some(Rc::clone(&n));
                     }
-                }
-
-                if pn.is_zero() && dn == Number::INFINITE {
-                    let mut pn = Number::Value(Fraction::new(0));
-                    let mut dn = Number::INFINITE;
-
-                    for n in c.children.try_borrow()?.iter() {
-                        if n.try_borrow()?.decided {
-                            continue;
-                        }
-
-                        pn += n.try_borrow()?.pn;
-                        dn = dn.min(n.try_borrow()?.dn);
-                    }
-
-                    c.pn = pn;
-                    c.dn = dn;
                 }
 
                 let u = c;
