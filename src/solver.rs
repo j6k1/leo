@@ -1721,9 +1721,20 @@ pub mod checkmate {
 
                     c.update(&u)?;
 
-                    if u.pn.is_zero() && u.dn == Number::INFINITE {
-                        c.mate_depth = u.mate_depth + 1;
-                        c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                    let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                        ApplicationError::LogicError(String::from(
+                            "Failed get mate node. (children is empty)."
+                        ))
+                    )?;
+
+                    if c.pn.is_zero() && c.dn == Number::INFINITE {
+                        if u.mate_depth < n.try_borrow()?.mate_depth {
+                            c.mate_depth = u.mate_depth + 1;
+                            c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                        } else {
+                            c.mate_depth = n.try_borrow()?.mate_depth + 1;
+                            c.mate_node = Some(Rc::clone(&n));
+                        }
                     }
 
                     let u = c;
