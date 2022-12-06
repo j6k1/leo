@@ -1506,6 +1506,10 @@ pub mod checkmate {
                             n.pn = Number::INFINITE;
                             n.dn = Number::Value(Fraction::new(0));
 
+                            if pn == Number::INFINITE && dn.is_zero() {
+                                n = n.to_decided_node(uniq_id.gen());
+                            }
+
                             node_repo.update(teban,mhash,shash,&n)?;
 
                             return Ok(MaybeMate::Continuation(n));
@@ -1533,6 +1537,12 @@ pub mod checkmate {
                     return Ok(MaybeMate::Continuation(n));
                 } else {
                     let children = Rc::clone(&n.children);
+
+                    if pn == Number::INFINITE && dn.is_zero() && children.try_borrow()?.len() == 0 {
+                        n = n.to_decided_node(uniq_id.gen());
+
+                        return Ok(MaybeMate::Continuation(n));
+                    }
 
                     (Some(n),children)
                 }
@@ -1575,88 +1585,84 @@ pub mod checkmate {
 
                 let update_node;
 
-                if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
-                    update_node = NormalizedNode::from(n.try_borrow()?.deref()).to_decided_node(uniq_id.gen());
-                } else {
-                    let m = n.try_borrow()?.m;
+                let m = n.try_borrow()?.m;
 
-                    if self.stop.load(atomic::Ordering::Acquire) {
-                        return Ok(MaybeMate::Aborted)
-                    }
+                if self.stop.load(atomic::Ordering::Acquire) {
+                    return Ok(MaybeMate::Aborted)
+                }
 
-                    let o = match m {
-                        LegalMove::To(ref m) => {
-                            m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
-                        },
-                        _ => None,
-                    };
+                let o = match m {
+                    LegalMove::To(ref m) => {
+                        m.obtained().and_then(|o| MochigomaKind::try_from(o).ok())
+                    },
+                    _ => None,
+                };
 
-                    {
-                        let mhash = self.hasher.calc_main_hash(mhash, teban,
-                                                               state.get_banmen(),
-                                                               &mc, m.to_applied_move(), &o);
-                        let shash = self.hasher.calc_sub_hash(shash, teban,
-                                                              state.get_banmen(),
-                                                              &mc, m.to_applied_move(), &o);
+                {
+                    let mhash = self.hasher.calc_main_hash(mhash, teban,
+                                                           state.get_banmen(),
+                                                           &mc, m.to_applied_move(), &o);
+                    let shash = self.hasher.calc_sub_hash(shash, teban,
+                                                          state.get_banmen(),
+                                                          &mc, m.to_applied_move(), &o);
 
-                        let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
-                        let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
+                    let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
+                    let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
-                        if s || sc {
-                            let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                    if s || sc {
+                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
 
-                            u.pn = Number::INFINITE;
-                            u.dn = Number::Value(Fraction::new(0));
-                            u.sennichite = true;
+                        u.pn = Number::INFINITE;
+                        u.dn = Number::Value(Fraction::new(0));
+                        u.sennichite = true;
 
-                            update_node = u;
-                        } else {
-                            let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
+                        update_node = u;
+                    } else {
+                        let next = Rule::apply_move_none_check(state, teban, mc, m.to_applied_move());
 
-                            match next {
-                                (state, mc, _) => {
-                                    match self.inter_process(depth + 1,
-                                                             mhash,
-                                                             shash,
-                                                             ignore_kyokumen_map,
-                                                             current_kyokumen_map,
-                                                             uniq_id,
-                                                             Some(Rc::clone(&n)),
-                                                             node_repo,
-                                                             mate_depth,
-                                                             event_queue,
-                                                             event_dispatcher,
-                                                             teban.opposite(),
-                                                             &state,
-                                                             &mc
-                                    )? {
-                                        MaybeMate::Continuation(u) => {
-                                            update_node = u;
-                                        },
-                                        r @ MaybeMate::MaxNodes => {
-                                            return Ok(r);
-                                        },
-                                        r @ MaybeMate::Timeout => {
-                                            return Ok(r);
-                                        },
-                                        r @ MaybeMate::Aborted => {
-                                            return Ok(r);
-                                        },
-                                        MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                            let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                        match next {
+                            (state, mc, _) => {
+                                match self.inter_process(depth + 1,
+                                                         mhash,
+                                                         shash,
+                                                         ignore_kyokumen_map,
+                                                         current_kyokumen_map,
+                                                         uniq_id,
+                                                         Some(Rc::clone(&n)),
+                                                         node_repo,
+                                                         mate_depth,
+                                                         event_queue,
+                                                         event_dispatcher,
+                                                         teban.opposite(),
+                                                         &state,
+                                                         &mc
+                                )? {
+                                    MaybeMate::Continuation(u) => {
+                                        update_node = u;
+                                    },
+                                    r @ MaybeMate::MaxNodes => {
+                                        return Ok(r);
+                                    },
+                                    r @ MaybeMate::Timeout => {
+                                        return Ok(r);
+                                    },
+                                    r @ MaybeMate::Aborted => {
+                                        return Ok(r);
+                                    },
+                                    MaybeMate::Skip | MaybeMate::MaxDepth => {
+                                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
 
-                                            u.pn = Number::INFINITE;
+                                        u.pn = Number::INFINITE;
 
-                                            update_node = u;
-                                        },
-                                        MaybeMate::MateMoves(_) => {
-                                            return Err(ApplicationError::LogicError(String::from(
-                                                "It is an unexpected type MaybeMate::MateMoves"
-                                            )));
-                                        },
-                                        r => {
-                                            return Err(ApplicationError::LogicError(format!("It is an unexpected type {:?}", r)));
-                                        }
+                                        update_node = u;
+                                    },
+                                    MaybeMate::MateMoves(_) => {
+                                        return Err(ApplicationError::LogicError(String::from(
+                                            "It is an unexpected type MaybeMate::MateMoves"
+                                        )));
+                                    },
+                                    r => {
+                                        return Err(ApplicationError::LogicError(format!("It is an unexpected type {:?}", r)));
                                     }
                                 }
                             }
@@ -1814,6 +1820,10 @@ pub mod checkmate {
                             n.pn = Number::Value(Fraction::new(0));
                             n.dn = Number::INFINITE;
 
+                            if pn.is_zero() && dn == Number::INFINITE {
+                                n = n.to_decided_node(uniq_id.gen());
+                            }
+
                             node_repo.update(teban, mhash, shash, &n)?;
 
                             return Ok(MaybeMate::Continuation(n));
@@ -1843,6 +1853,12 @@ pub mod checkmate {
                         return Ok(MaybeMate::Continuation(n));
                     }
                 } else {
+                    if pn.is_zero() && dn == Number::INFINITE && n.children.try_borrow()?.len() == 0 {
+                        n = n.to_decided_node(uniq_id.gen());
+
+                        return Ok(MaybeMate::Continuation(n));
+                    }
+
                     n
                 }
             } else {
