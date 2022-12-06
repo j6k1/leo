@@ -675,6 +675,7 @@ pub mod checkmate {
         decided:bool,
         m:LegalMove,
         children:Weak<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
+        mate_node:Option<Rc<RefCell<Node>>>,
         comparator:Comparator,
         generation:u32
     }
@@ -705,6 +706,7 @@ pub mod checkmate {
                 decided:false,
                 m:m,
                 children:Weak::new(),
+                mate_node:None,
                 comparator:Comparator::AndNodeComparator,
                 generation:0
             }
@@ -749,6 +751,7 @@ pub mod checkmate {
                 decided:false,
                 m:m,
                 children:Weak::new(),
+                mate_node:None,
                 comparator:Comparator::OrNodeComparator,
                 generation:0
             }
@@ -795,6 +798,7 @@ pub mod checkmate {
                 decided: self.decided,
                 m: self.m,
                 children: self.children.clone(),
+                mate_node: self.mate_node.clone(),
                 comparator: self.comparator.clone(),
                 generation: self.generation
             }
@@ -818,6 +822,7 @@ pub mod checkmate {
                 decided: n.decided,
                 m: n.m,
                 children: Rc::downgrade(&n.children),
+                mate_node: n.mate_node.clone(),
                 comparator: n.comparator.clone(),
                 generation: n.generation
             }
@@ -841,6 +846,7 @@ pub mod checkmate {
         expanded:bool,
         decided:bool,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
+        mate_node:Option<Rc<RefCell<Node>>>,
         generation:u32
     }
 
@@ -861,6 +867,7 @@ pub mod checkmate {
                 decided: self.decided,
                 m: n.m,
                 children: Rc::downgrade(&self.children),
+                mate_node: self.mate_node.clone(),
                 comparator: n.comparator,
                 generation: self.generation
             }
@@ -881,6 +888,7 @@ pub mod checkmate {
                 expanded: self.expanded,
                 decided: self.decided,
                 children: Rc::clone(&self.children),
+                mate_node: self.mate_node.clone(),
                 generation: self.generation
             }
         }
@@ -900,6 +908,7 @@ pub mod checkmate {
                 expanded: n.expanded,
                 decided: n.decided,
                 children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
+                mate_node: n.mate_node.clone(),
                 generation: n.generation
             }
         }
@@ -919,6 +928,7 @@ pub mod checkmate {
                 expanded: n.expanded,
                 decided: n.decided,
                 children: Rc::clone(&n.children),
+                mate_node: n.mate_node.clone(),
                 generation: n.generation
             }
         }
@@ -938,6 +948,7 @@ pub mod checkmate {
         decided:bool,
         m:LegalMove,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
+        mate_node: Option<Rc<RefCell<Node>>>,
         comparator:Comparator,
         generation:u32
     }
@@ -961,6 +972,7 @@ pub mod checkmate {
                         decided: true,
                         m: self.m,
                         children: Rc::clone(&self.children),
+                        mate_node: self.mate_node.clone(),
                         comparator: Comparator::DecidedOrNodeComparator,
                         generation: self.generation
                     }
@@ -980,6 +992,7 @@ pub mod checkmate {
                         decided: true,
                         m: self.m,
                         children: Rc::clone(&self.children),
+                        mate_node: self.mate_node.clone(),
                         comparator: Comparator::DecidedAndNodeComparator,
                         generation: self.generation
                     }
@@ -1046,6 +1059,7 @@ pub mod checkmate {
                 decided: self.decided,
                 m: self.m,
                 children: Rc::clone(&self.children),
+                mate_node: self.mate_node.clone(),
                 comparator: self.comparator.clone(),
                 generation: self.generation
             }
@@ -1069,6 +1083,7 @@ pub mod checkmate {
                 decided: n.decided,
                 m: n.m,
                 children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
+                mate_node: n.mate_node.clone(),
                 comparator: n.comparator,
                 generation: n.generation
             }
@@ -1430,13 +1445,13 @@ pub mod checkmate {
         pub fn build_moves(&mut self,n:&Rc<RefCell<Node>>) -> Result<VecDeque<LegalMove>,ApplicationError> {
             let mut mvs = VecDeque::new();
 
-            let mut n = Some(Rc::clone(n));
+            mvs.push_back(n.try_borrow()?.m);
+
+            let mut n = n.try_borrow()?.mate_node.as_ref().map(|n| Rc::clone(n));
 
             while let Some(c) = n {
                 mvs.push_back(c.try_borrow()?.m);
-                n = NormalizedNode::from(c.try_borrow()?.deref()).children.try_borrow()?.peek().map(|n| {
-                    Rc::clone(n)
-                });
+                n = c.try_borrow()?.mate_node.as_ref().map(|n| Rc::clone(n))
             }
 
             Ok(mvs)
@@ -1687,14 +1702,29 @@ pub mod checkmate {
                     let dn = c.dn;
 
                     {
-                        let mate_depth = c.mate_depth;
-
                         c.update(&u)?;
 
                         if u.pn.is_zero() && u.dn == Number::INFINITE {
-                            if mate_depth == 0 || u.mate_depth + 1 < mate_depth {
-                                c.mate_depth = u.mate_depth + 1;
+                            c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+
+                            if n.try_borrow()?.decided {
+                                return Ok(MaybeMate::Continuation(c.clone()));
                             }
+
+                            let mut pn = Number::INFINITE;
+                            let mut dn = Number::Value(Fraction::new(0));
+
+                            for n in c.children.try_borrow()?.iter() {
+                                if n.try_borrow()?.decided {
+                                    continue;
+                                }
+
+                                pn = pn .min(n.try_borrow()?.pn);
+                                dn += n.try_borrow()?.dn;
+                            }
+
+                            c.pn = pn;
+                            c.dn = dn;
                         }
                     }
 
@@ -1999,7 +2029,36 @@ pub mod checkmate {
                         ))
                     )?;
 
-                    c.mate_depth = n.try_borrow()?.mate_depth.max(u.mate_depth) + 1;
+                    let decided = u.decided;
+
+                    if u.mate_depth >= n.try_borrow()?.mate_depth {
+                        c.mate_depth = u.mate_depth + 1;
+                        c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                    } else {
+                        c.mate_depth = n.try_borrow()?.mate_depth + 1;
+                        c.mate_node = Some(Rc::clone(&n));
+                    }
+
+                    if decided {
+                        let u = c.to_decided_node(uniq_id.gen());
+
+                        return Ok(MaybeMate::Continuation(u));
+                    }
+
+                    let mut pn = Number::Value(Fraction::new(0));
+                    let mut dn = Number::INFINITE;
+
+                    for n in c.children.try_borrow()?.iter() {
+                        if n.try_borrow()?.decided {
+                            continue;
+                        }
+
+                        pn += n.try_borrow()?.pn;
+                        dn = dn .min(n.try_borrow()?.dn);
+                    }
+
+                    c.pn = pn;
+                    c.dn = dn;
                 }
 
                 let u = c;
