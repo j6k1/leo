@@ -1792,7 +1792,7 @@ pub mod checkmate {
                             ))
                         )?;
 
-                        if !self.strict_moves {
+                        if !self.strict_moves || c.mate_node.is_none() {
                             c.mate_depth = s.try_borrow()?.mate_depth + 1;
                             c.mate_node = Some(Rc::clone(&s));
                         } else {
@@ -2122,7 +2122,7 @@ pub mod checkmate {
                         ))
                     )?;
 
-                    if !self.strict_moves {
+                    if !self.strict_moves || c.mate_node.is_none() {
                         c.mate_depth = s.try_borrow()?.mate_depth + 1;
                         c.mate_node = Some(Rc::clone(&s));
                     } else {
