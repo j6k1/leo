@@ -688,8 +688,24 @@ pub mod checkmate {
                 LegalMove::Put(m) => {
                     MochigomaKind::Hisha as usize - m.kind() as usize
                 },
-                _ => {
-                    0
+                LegalMove::To(m) => {
+                    let nari = m.is_nari();
+
+                    if let Some(o) = m.obtained() {
+                        if o == ObtainKind::Ou {
+                            MochigomaKind::Hisha as usize * 3 + 3
+                        } else if let Ok(k) = MochigomaKind::try_from(o) {
+                            k as usize * 2 + if nari {
+                                1
+                            } else {
+                                0
+                            } + MochigomaKind::Hisha as usize + 1
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    }
                 }
             };
 
@@ -1803,7 +1819,7 @@ pub mod checkmate {
                                         c.mate_node = Some(Rc::new(RefCell::new(u.into())));
                                     }
                                 },
-                                _ => {
+                                Some(_) if n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE => {
                                     if u.mate_depth <= n.try_borrow()?.mate_depth {
                                         c.mate_depth = u.mate_depth + 1;
                                         c.mate_node = Some(Rc::new(RefCell::new(u.into())));
@@ -1811,7 +1827,8 @@ pub mod checkmate {
                                         c.mate_depth = n.try_borrow()?.mate_depth + 1;
                                         c.mate_node = Some(Rc::clone(&n));
                                     }
-                                }
+                                },
+                                _ => ()
                             }
                         }
                     }
