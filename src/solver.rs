@@ -2017,9 +2017,16 @@ pub mod checkmate {
                     if s || sc {
                         let mut u = NormalizedNode::from(n.try_borrow()?.deref());
 
+                        let pn = u.pn;
+                        let dn = u.dn;
+
                         u.pn = Number::Value(Fraction::new(0));
                         u.dn = Number::INFINITE;
                         u.sennichite = true;
+
+                        if pn.is_zero() && dn == Number::INFINITE {
+                            u = u.to_decided_node(uniq_id.gen());
+                        }
 
                         update_node = u;
                     } else {
