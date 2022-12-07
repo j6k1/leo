@@ -1186,7 +1186,9 @@ pub mod checkmate {
         pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             match self {
                 &Comparator::OrNodeComparator => {
-                    if r.decided && l.pn == Number::INFINITE {
+                    if l.unknown != r.unknown {
+                        l.unknown.cmp(&r.unknown).reverse()
+                    } else if r.decided && l.pn == Number::INFINITE {
                         Ordering::Greater.reverse()
                     } else if r.decided {
                         Ordering::Less.reverse()
@@ -1198,7 +1200,9 @@ pub mod checkmate {
                     }
                 },
                 &Comparator::AndNodeComparator => {
-                    if r.decided && l.pn.is_zero() && l.dn == Number::INFINITE {
+                    if l.unknown != r.unknown {
+                        l.unknown.cmp(&r.unknown).reverse()
+                    } else if r.decided && l.pn.is_zero() && l.dn == Number::INFINITE {
                         Ordering::Less.reverse()
                     } else if r.decided && l.dn == Number::INFINITE {
                         Ordering::Greater.reverse()
@@ -1210,7 +1214,9 @@ pub mod checkmate {
                     }
                 },
                 &Comparator::DecidedOrNodeComparator => {
-                    if r.decided {
+                    if l.unknown != r.unknown {
+                        l.unknown.cmp(&r.unknown).reverse()
+                    } else if r.decided {
                         l.pn.cmp(&r.pn)
                             .then(r.dn.cmp(&l.dn))
                             .then(l.mate_depth.cmp(&r.mate_depth))
@@ -1223,7 +1229,9 @@ pub mod checkmate {
                     }
                 },
                 &Comparator::DecidedAndNodeComparator => {
-                    if r.decided {
+                    if l.unknown != r.unknown {
+                        l.unknown.cmp(&r.unknown).reverse()
+                    } else if r.decided {
                         r.dn.cmp(&l.dn)
                             .then(l.pn.cmp(&r.pn))
                             .then(r.mate_depth.cmp(&l.mate_depth))
@@ -1554,7 +1562,7 @@ pub mod checkmate {
                 let mut n = self.normalize_node(&n,mhash,shash,teban,node_repo)?;
 
                 if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
-                    let u = n.to_decided_node(uniq_id.gen());
+                    let u = n.to_unknown_node();
 
                     if !u.sennichite {
                         node_repo.update(teban,mhash,shash,&u)?;
@@ -1567,6 +1575,10 @@ pub mod checkmate {
                     let n = n.to_decided_node(uniq_id.gen());
 
                     return Ok(MaybeMate::Continuation(n));
+                } else if n.unknown {
+                    let n = n.to_unknown_node();
+
+                    return Ok(MaybeMate::Continuation(n));
                 } else if pn != n.pn || dn != n.dn {
                     return Ok(MaybeMate::Continuation(n));
                 }
@@ -1576,10 +1588,6 @@ pub mod checkmate {
                         if m.obtained() == Some(ObtainKind::Ou) {
                             n.pn = Number::INFINITE;
                             n.dn = Number::Value(Fraction::new(0));
-
-                            if pn == Number::INFINITE && dn.is_zero() {
-                                n = n.to_decided_node(uniq_id.gen());
-                            }
 
                             node_repo.update(teban,mhash,shash,&n)?;
 
@@ -1609,12 +1617,6 @@ pub mod checkmate {
                 } else {
                     let children = Rc::clone(&n.children);
 
-                    if pn == Number::INFINITE && dn.is_zero() && children.try_borrow()?.len() == 0 {
-                        n = n.to_decided_node(uniq_id.gen());
-
-                        return Ok(MaybeMate::Continuation(n));
-                    }
-
                     (Some(n),children)
                 }
             } else {
@@ -1642,7 +1644,7 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if n.try_borrow()?.decided || n.try_borrow()?.pn == Number::INFINITE {
+                if n.try_borrow()?.decided {
                     if let Some(u) = current_node.as_ref() {
                         let u = u.to_decided_node(uniq_id.gen());
 
@@ -1654,6 +1656,20 @@ pub mod checkmate {
                     } else {
                         break;
                     }
+                } else if n.try_borrow()?.unknown {
+                    if let Some(u) = current_node.as_ref() {
+                        let u = u.to_unknown_node();
+
+                        if !u.sennichite {
+                            node_repo.update(teban, mhash, shash, &u)?;
+                        }
+
+                        return Ok(MaybeMate::Continuation(u));
+                    } else {
+                        break;
+                    }
+                } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
+                    break;
                 }
 
                 let update_node;
@@ -1864,7 +1880,7 @@ pub mod checkmate {
                 let mut n = self.normalize_node(n,mhash,shash,teban,node_repo)?;
 
                 if mate_depth.map(|d|  depth >= d).unwrap_or(false) {
-                    let u = n.to_decided_node(uniq_id.gen());
+                    let u = n.to_unknown_node();
 
                     if !u.sennichite {
                         node_repo.update(teban, mhash, shash, &u)?;
@@ -1875,6 +1891,10 @@ pub mod checkmate {
 
                 if n.decided {
                     let n = n.to_decided_node(uniq_id.gen());
+
+                    return Ok(MaybeMate::Continuation(n));
+                } else if n.unknown {
+                    let n = n.to_unknown_node();
 
                     return Ok(MaybeMate::Continuation(n));
                 } else if pn != n.pn || dn != n.dn {
@@ -1947,7 +1967,7 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if n.try_borrow()?.decided || (n.try_borrow()?.dn == Number::INFINITE && !n.try_borrow()?.pn.is_zero()) {
+                if n.try_borrow()?.decided && n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
                     let u = current_node;
 
                     let u = u.to_decided_node(uniq_id.gen());
@@ -1956,6 +1976,16 @@ pub mod checkmate {
                         node_repo.update(teban, mhash, shash, &u)?;
                     }
                     
+                    return Ok(MaybeMate::Continuation(u));
+                } else if n.try_borrow()?.decided || n.try_borrow()?.unknown {
+                    let u = current_node;
+
+                    let u = u.to_unknown_node();
+
+                    if !u.sennichite {
+                        node_repo.update(teban, mhash, shash, &u)?;
+                    }
+
                     return Ok(MaybeMate::Continuation(u));
                 }
 
@@ -1984,17 +2014,10 @@ pub mod checkmate {
                     let s = ignore_kyokumen_map.get(teban, &mhash, &shash).is_some();
                     let sc = current_kyokumen_map.get(teban, &mhash, &shash).map(|&c| c >= 3).unwrap_or(false);
 
-                    if sc {
+                    if s || sc {
                         let mut u = NormalizedNode::from(n.try_borrow()?.deref());
 
                         u.pn = Number::Value(Fraction::new(0));
-                        u.dn = Number::INFINITE;
-                        u.sennichite = true;
-
-                        update_node = u;
-                    } else if s {
-                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
-
                         u.dn = Number::INFINITE;
                         u.sennichite = true;
 
