@@ -1669,7 +1669,17 @@ pub mod checkmate {
                         break;
                     }
                 } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
-                    break;
+                    if let Some(u) = current_node.as_ref() {
+                        if u.pn != Number::INFINITE || !u.dn.is_zero() {
+                            let u = u.to_unknown_node();
+
+                            node_repo.update(teban, mhash, shash, &u)?;
+
+                            return Ok(MaybeMate::Continuation(u));
+                        }
+                    } else {
+                        break;
+                    }
                 }
 
                 let update_node;
@@ -1775,19 +1785,27 @@ pub mod checkmate {
 
                     c.update(&u)?;
 
-                    let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
-                        ApplicationError::LogicError(String::from(
-                            "Failed get mate node. (children is empty)."
-                        ))
-                    )?;
+                    if !u.unknown && c.pn.is_zero() && c.dn == Number::INFINITE {
+                        let mut s = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                            ApplicationError::LogicError(String::from(
+                                "Failed get mate node. (children is empty)."
+                            ))
+                        )?;
 
-                    if c.pn.is_zero() && c.dn == Number::INFINITE {
-                        if u.mate_depth < n.try_borrow()?.mate_depth {
-                            c.mate_depth = u.mate_depth + 1;
-                            c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                        if !self.strict_moves {
+                            c.mate_depth = s.try_borrow()?.mate_depth + 1;
+                            c.mate_node = Some(Rc::clone(&s));
                         } else {
-                            c.mate_depth = n.try_borrow()?.mate_depth + 1;
-                            c.mate_node = Some(Rc::clone(&n));
+                            for n in c.children.try_borrow()?.iter() {
+                                s = if s.try_borrow()?.mate_depth > n.try_borrow()?.mate_depth {
+                                    Rc::clone(n)
+                                } else {
+                                    s
+                                };
+                            }
+
+                            c.mate_depth = s.try_borrow()?.mate_depth + 1;
+                            c.mate_node = Some(Rc::clone(&s));
                         }
                     }
 
@@ -2097,19 +2115,27 @@ pub mod checkmate {
 
                 c.update(&u)?;
 
-                let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
-                    ApplicationError::LogicError(String::from(
-                        "Failed get mate node. (children is empty)."
-                    ))
-                )?;
+                if !u.unknown && c.pn.is_zero() && c.dn == Number::INFINITE {
+                    let mut s = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
+                        ApplicationError::LogicError(String::from(
+                            "Failed get mate node. (children is empty)."
+                        ))
+                    )?;
 
-                if c.pn.is_zero() && c.dn == Number::INFINITE {
-                    if u.mate_depth >= n.try_borrow()?.mate_depth {
-                        c.mate_depth = u.mate_depth + 1;
-                        c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                    if !self.strict_moves {
+                        c.mate_depth = s.try_borrow()?.mate_depth + 1;
+                        c.mate_node = Some(Rc::clone(&s));
                     } else {
-                        c.mate_depth = n.try_borrow()?.mate_depth + 1;
-                        c.mate_node = Some(Rc::clone(&n));
+                        for n in c.children.try_borrow()?.iter() {
+                            s = if s.try_borrow()?.mate_depth < n.try_borrow()?.mate_depth {
+                                Rc::clone(n)
+                            } else {
+                                s
+                            };
+                        }
+
+                        c.mate_depth = s.try_borrow()?.mate_depth + 1;
+                        c.mate_node = Some(Rc::clone(&s));
                     }
                 }
 
