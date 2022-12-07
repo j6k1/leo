@@ -673,6 +673,7 @@ pub mod checkmate {
         sennichite:bool,
         expanded:bool,
         decided:bool,
+        unknown:bool,
         m:LegalMove,
         children:Weak<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
         mate_node:Option<Rc<RefCell<Node>>>,
@@ -704,6 +705,7 @@ pub mod checkmate {
                 sennichite: false,
                 expanded: false,
                 decided:false,
+                unknown:false,
                 m:m,
                 children:Weak::new(),
                 mate_node:None,
@@ -749,6 +751,7 @@ pub mod checkmate {
                 sennichite: false,
                 expanded: false,
                 decided:false,
+                unknown:false,
                 m:m,
                 children:Weak::new(),
                 mate_node:None,
@@ -796,6 +799,7 @@ pub mod checkmate {
                 sennichite: self.sennichite,
                 expanded: self.expanded,
                 decided: self.decided,
+                unknown: self.unknown,
                 m: self.m,
                 children: self.children.clone(),
                 mate_node: self.mate_node.clone(),
@@ -820,6 +824,7 @@ pub mod checkmate {
                 sennichite: n.sennichite,
                 expanded: n.expanded,
                 decided: n.decided,
+                unknown: n.unknown,
                 m: n.m,
                 children: Rc::downgrade(&n.children),
                 mate_node: n.mate_node.clone(),
@@ -845,6 +850,7 @@ pub mod checkmate {
         ref_count:u64,
         expanded:bool,
         decided:bool,
+        unknown:bool,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
         mate_node:Option<Rc<RefCell<Node>>>,
         generation:u32
@@ -865,6 +871,7 @@ pub mod checkmate {
                 sennichite: n.sennichite,
                 expanded: self.expanded,
                 decided: self.decided,
+                unknown: self.unknown,
                 m: n.m,
                 children: Rc::downgrade(&self.children),
                 mate_node: self.mate_node.clone(),
@@ -887,6 +894,7 @@ pub mod checkmate {
                 ref_count: self.ref_count,
                 expanded: self.expanded,
                 decided: self.decided,
+                unknown: self.unknown,
                 children: Rc::clone(&self.children),
                 mate_node: self.mate_node.clone(),
                 generation: self.generation
@@ -907,6 +915,7 @@ pub mod checkmate {
                 ref_count: n.ref_count,
                 expanded: n.expanded,
                 decided: n.decided,
+                unknown: n.unknown,
                 children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
                 mate_node: n.mate_node.clone(),
                 generation: n.generation
@@ -927,6 +936,7 @@ pub mod checkmate {
                 ref_count: n.ref_count,
                 expanded: n.expanded,
                 decided: n.decided,
+                unknown: n.unknown,
                 children: Rc::clone(&n.children),
                 mate_node: n.mate_node.clone(),
                 generation: n.generation
@@ -946,6 +956,7 @@ pub mod checkmate {
         sennichite:bool,
         expanded:bool,
         decided:bool,
+        unknown:bool,
         m:LegalMove,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
         mate_node: Option<Rc<RefCell<Node>>>,
@@ -970,6 +981,7 @@ pub mod checkmate {
                         sennichite: self.sennichite,
                         expanded: self.expanded,
                         decided: true,
+                        unknown: false,
                         m: self.m,
                         children: Rc::clone(&self.children),
                         mate_node: self.mate_node.clone(),
@@ -990,6 +1002,7 @@ pub mod checkmate {
                         sennichite: self.sennichite,
                         expanded: self.expanded,
                         decided: true,
+                        unknown: false,
                         m: self.m,
                         children: Rc::clone(&self.children),
                         mate_node: self.mate_node.clone(),
@@ -997,6 +1010,29 @@ pub mod checkmate {
                         generation: self.generation
                     }
                 }
+            }
+        }
+
+        #[inline]
+        pub fn to_unknown_node(&self) -> NormalizedNode {
+            NormalizedNode {
+                id: self.id,
+                pn_base: self.pn_base,
+                dn_base: self.dn_base,
+                pn: self.pn,
+                dn: self.dn,
+                priority: self.priority,
+                mate_depth: self.mate_depth,
+                ref_count: self.ref_count,
+                sennichite: self.sennichite,
+                expanded: self.expanded,
+                decided: false,
+                unknown: true,
+                m: self.m,
+                children: Rc::clone(&self.children),
+                mate_node: self.mate_node.clone(),
+                comparator: self.comparator.clone(),
+                generation: self.generation
             }
         }
 
@@ -1075,6 +1111,7 @@ pub mod checkmate {
                 sennichite: self.sennichite,
                 expanded: self.expanded,
                 decided: self.decided,
+                unknown: self.unknown,
                 m: self.m,
                 children: Rc::clone(&self.children),
                 mate_node: self.mate_node.clone(),
@@ -1099,6 +1136,7 @@ pub mod checkmate {
                 sennichite: n.sennichite,
                 expanded: n.expanded,
                 decided: n.decided,
+                unknown: n.unknown,
                 m: n.m,
                 children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
                 mate_node: n.mate_node.clone(),
