@@ -641,6 +641,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         for r in await_mvs {
             let (m,s) = r.0.recv()?;
+            env.nodes.fetch_add(1,atomic::Ordering::Release);
             mvs.push((m,Score::Value(-s)));
         }
 
@@ -892,6 +893,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
         for r in await_mvs {
             let (m,s) = r.0.recv()?;
+            env.nodes.fetch_add(1,atomic::Ordering::Release);
             mvs.push((m,Score::Value(-s)));
         }
 
