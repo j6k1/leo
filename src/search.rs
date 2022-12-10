@@ -884,6 +884,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             }
         };
 
+        if await_mvs.len() > 0 {
+            evalutor.begin_transaction()?;
+        }
+
         let mut mvs = Vec::with_capacity(await_mvs.len());
 
         for r in await_mvs {
