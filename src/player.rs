@@ -432,6 +432,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     state: &Arc::new(state.clone()),
                     alpha: Score::NEGINFINITE,
                     beta: Score::INFINITE,
+                    score: Score::NEGINFINITE,
                     m:None,
                     mc: &Arc::new(mc.clone()),
                     obtained:None,
@@ -455,16 +456,6 @@ impl USIPlayer<ApplicationError> for Leo {
                     },
                     Ok(EvaluationResult::Timeout) => {
                         self.send_message_immediate(&mut env,"think timeout!")?;
-                        BestMove::Resign
-                    },
-                    Ok(EvaluationResult::Async(_)) => {
-                        let e = ApplicationError::LogicError(String::from("Async was returned from the root node."));
-
-                        self.send_message_immediate(&mut env,&format!("{}",&e))?;
-
-                        let _ = on_error_handler.lock().map(|h| {
-                            h.call(&e)
-                        });
                         BestMove::Resign
                     },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
