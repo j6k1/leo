@@ -1282,18 +1282,6 @@ pub mod checkmate {
             }
 
             if !node_repo.contains(teban,mhash,shash) {
-                {
-                    let mut n = n.try_borrow_mut()?;
-
-                    n.expanded = false;
-                    n.ref_count = 1;
-                    n.pn_base = Number::Value(Fraction::new(1));
-                    n.dn_base = Number::Value(Fraction::new(1));
-                    n.pn = Number::Value(Fraction::new(1));
-                    n.dn = Number::Value(Fraction::new(1));
-                    n.generation += 1;
-                }
-
                 let n = node_repo.get(teban,mhash,shash,n)?;
 
                 Ok(n)
