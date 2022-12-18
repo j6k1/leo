@@ -984,7 +984,7 @@ pub mod checkmate {
         #[inline]
         pub fn to_decided_node(&self,id:u64) -> NormalizedNode {
             match self.comparator {
-                Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
+                Comparator::OrNodeComparator => {
                     NormalizedNode {
                         id: id,
                         pn_base: self.pn_base,
@@ -1001,11 +1001,11 @@ pub mod checkmate {
                         m: self.m,
                         children: Rc::clone(&self.children),
                         mate_node: self.mate_node.clone(),
-                        comparator: Comparator::DecidedOrNodeComparator,
+                        comparator: self.comparator.clone(),
                         generation: self.generation
                     }
                 },
-                Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
+                Comparator::AndNodeComparator => {
                     NormalizedNode {
                         id: id,
                         pn_base: self.pn_base,
@@ -1022,7 +1022,7 @@ pub mod checkmate {
                         m: self.m,
                         children: Rc::clone(&self.children),
                         mate_node: self.mate_node.clone(),
-                        comparator: Comparator::DecidedAndNodeComparator,
+                        comparator: self.comparator.clone(),
                         generation: self.generation
                     }
                 }
@@ -1068,7 +1068,7 @@ pub mod checkmate {
             };
 
             match self.comparator {
-                Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
+                Comparator::AndNodeComparator => {
                     let mut pn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
@@ -1087,7 +1087,7 @@ pub mod checkmate {
 
                     self.dn = self.dn_base / self.ref_count;
                 },
-                Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
+                Comparator::OrNodeComparator => {
                     let mut dn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
@@ -1192,9 +1192,7 @@ pub mod checkmate {
     #[derive(Clone,Copy)]
     pub enum Comparator {
         OrNodeComparator,
-        AndNodeComparator,
-        DecidedOrNodeComparator,
-        DecidedAndNodeComparator
+        AndNodeComparator
     }
 
     impl Comparator {
@@ -1202,64 +1200,21 @@ pub mod checkmate {
         pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             match self {
                 &Comparator::OrNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided && l.pn == Number::INFINITE {
-                        Ordering::Greater.reverse()
-                    } else if r.decided {
-                        Ordering::Less.reverse()
-                    } else {
-                        l.pn.cmp(&r.pn)
-                            .then(l.mate_depth.cmp(&r.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    }
+                    l.unknown.cmp(&r.unknown)
+                        .then_with(|| l.decided.cmp(&r.decided))
+                        .then_with(|| l.pn.cmp(&r.pn))
+                        .then_with(|| l.mate_depth.cmp(&r.mate_depth))
+                        .then_with(|| r.priority.cmp(&l.priority))
+                        .then_with(|| l.id.cmp(&r.id)).reverse()
                 },
                 &Comparator::AndNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided && l.pn.is_zero() && l.dn == Number::INFINITE {
-                        Ordering::Less.reverse()
-                    } else if r.decided && l.dn == Number::INFINITE {
-                        Ordering::Greater.reverse()
-                    } else {
-                        l.dn.cmp(&r.dn)
-                            .then(r.mate_depth.cmp(&l.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    }
-                },
-                &Comparator::DecidedOrNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided {
-                        l.pn.cmp(&r.pn)
-                            .then(r.dn.cmp(&l.dn))
-                            .then(l.mate_depth.cmp(&r.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    } else if r.pn == Number::INFINITE {
-                        Ordering::Less.reverse()
-                    } else {
-                        Ordering::Greater.reverse()
-                    }
-                },
-                &Comparator::DecidedAndNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided {
-                        r.dn.cmp(&l.dn)
-                            .then(l.pn.cmp(&r.pn))
-                            .then(r.mate_depth.cmp(&l.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    } else if r.pn.is_zero() && r.dn == Number::INFINITE {
-                        Ordering::Greater.reverse()
-                    } else if r.dn == Number::INFINITE {
-                        Ordering::Less.reverse()
-                    } else {
-                        Ordering::Greater.reverse()
-                    }
+                    l.unknown.cmp(&r.unknown)
+                        .then_with(|| l.decided.cmp(&r.decided))
+                        .then_with(|| l.dn.cmp(&r.dn))
+                        .then_with(|| l.pn.cmp(&r.pn))
+                        .then_with(|| r.mate_depth.cmp(&l.mate_depth))
+                        .then_with(|| r.priority.cmp(&l.priority))
+                        .then_with(|| l.id.cmp(&r.id)).reverse()
                 }
             }
         }
@@ -1765,11 +1720,9 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                                        let u = NormalizedNode::from(n.try_borrow()?.deref());
 
-                                        u.pn = Number::INFINITE;
-
-                                        update_node = u;
+                                        update_node = u.to_unknown_node();
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -2104,11 +2057,9 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                                        let u = NormalizedNode::from(n.try_borrow()?.deref());
 
-                                        u.dn = Number::INFINITE;
-
-                                        update_node = u;
+                                        update_node = u.to_unknown_node();
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
