@@ -1939,7 +1939,7 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if n.try_borrow()?.state == NodeState::Decided && n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
+                if n.try_borrow()?.state == NodeState::Decided && current_node.pn.is_zero() && current_node.dn == Number::INFINITE {
                     let u = current_node;
 
                     let u = u.to_decided_node(uniq_id.gen());
