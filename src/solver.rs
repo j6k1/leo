@@ -1061,6 +1061,22 @@ pub mod checkmate {
             };
 
             match self.comparator {
+                Comparator::AndNodeComparator if u.try_borrow()?.state == NodeState::Decided => {
+                    let mut pn = Number::INFINITE;
+                    let mut dn = Number::Value(Fraction::new(0));
+
+                    for n in self.children.try_borrow()?.iter() {
+                        if n.try_borrow()?.state == NodeState::Decided {
+                            continue;
+                        }
+                        pn = pn.min(n.try_borrow()?.pn);
+                        dn += n.try_borrow()?.dn;
+                    }
+                    self.pn = pn;
+                    self.dn_base = dn;
+
+                    self.dn = self.dn_base / self.ref_count;
+                },
                 Comparator::AndNodeComparator => {
                     let mut pn = Number::INFINITE;
 
@@ -1071,15 +1087,27 @@ pub mod checkmate {
                         pn = pn.min(n.try_borrow()?.pn);
                     }
                     self.pn = pn;
-
-                    if u.try_borrow()?.state == NodeState::Decided {
-                        self.dn_base = self.dn_base - dn;
-                    } else {
-                        self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
-                    }
+                    self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
 
                     self.dn = self.dn_base / self.ref_count;
                 },
+                Comparator::OrNodeComparator if u.try_borrow()?.state == NodeState::Decided => {
+                    let mut pn = Number::Value(Fraction::new(0));
+                    let mut dn = Number::INFINITE;
+
+                    for n in self.children.try_borrow()?.iter() {
+                        if n.try_borrow()?.state == NodeState::Decided {
+                            continue;
+                        }
+                        pn += n.try_borrow()?.pn;
+                        dn = dn.min(n.try_borrow()?.dn);
+                    }
+
+                    self.pn_base = pn;
+
+                    self.pn = self.pn_base / self.ref_count;
+                    self.dn = dn;
+                }
                 Comparator::OrNodeComparator => {
                     let mut dn = Number::INFINITE;
 
@@ -1090,11 +1118,7 @@ pub mod checkmate {
                         dn = dn.min(n.try_borrow()?.dn);
                     }
 
-                    if u.try_borrow()?.state == NodeState::Decided {
-                        self.pn_base = self.pn_base - pn;
-                    } else {
-                        self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
-                    }
+                    self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
 
                     self.pn = self.pn_base / self.ref_count;
                     self.dn = dn;
