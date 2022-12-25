@@ -260,7 +260,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let ms = GameStateForMate {
                     base_depth: env.base_depth,
-                    current_depth: gs.depth,
+                    current_depth: gs.current_depth,
                     mhash: gs.mhash,
                     shash: gs.shash,
                     current_kyokumen_map: gs.current_kyokumen_map,
