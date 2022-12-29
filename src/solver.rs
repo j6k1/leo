@@ -1295,7 +1295,9 @@ pub mod checkmate {
             }
 
             if !node_repo.contains(teban,mhash,shash) {
-                let n = node_repo.get(teban,mhash,shash,n)?;
+                let mut n = node_repo.get(teban,mhash,shash,n)?;
+
+                n.expanded = false;
 
                 Ok(n)
             } else {
@@ -1588,6 +1590,12 @@ pub mod checkmate {
                     return Ok(MaybeMate::Continuation(n));
                 } else {
                     let children = Rc::clone(&n.children);
+
+                    if n.pn == Number::INFINITE && n.dn.is_zero() && children.try_borrow()?.len() == 0 {
+                        let u = n.to_decided_node(uniq_id.gen());
+
+                        return Ok(MaybeMate::Continuation(u));
+                    }
 
                     (Some(n),children)
                 }
@@ -1926,17 +1934,13 @@ pub mod checkmate {
                     if len == 0 {
                         n.pn = Number::Value(Fraction::new(0));
                         n.dn = Number::INFINITE;
-
-                        node_repo.update(teban, mhash, shash, &n)?;
-
-                        return Ok(MaybeMate::Continuation(n));
-                    } else {
-                        node_repo.update(teban, mhash, shash, &n)?;
-
-                        return Ok(MaybeMate::Continuation(n));
                     }
+
+                    node_repo.update(teban, mhash, shash, &n)?;
+
+                    return Ok(MaybeMate::Continuation(n));
                 } else {
-                    if pn.is_zero() && dn == Number::INFINITE && n.children.try_borrow()?.len() == 0 {
+                    if n.pn.is_zero() && n.dn == Number::INFINITE && n.children.try_borrow()?.len() == 0 {
                         n = n.to_decided_node(uniq_id.gen());
 
                         return Ok(MaybeMate::Continuation(n));
