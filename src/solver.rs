@@ -1295,9 +1295,13 @@ pub mod checkmate {
             }
 
             if !node_repo.contains(teban,mhash,shash) {
+                let weak_count = n.try_borrow()?.children.weak_count();
+
                 let mut n = node_repo.get(teban,mhash,shash,n)?;
 
-                n.expanded = false;
+                if weak_count == 0 {
+                    n.expanded = false;
+                }
 
                 Ok(n)
             } else {
