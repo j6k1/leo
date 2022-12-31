@@ -1067,6 +1067,7 @@ pub mod checkmate {
                     for n in self.children.try_borrow()?.iter() {
                         pn = pn.min(n.try_borrow()?.pn);
                     }
+                    
                     self.pn = pn;
                     self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
 
