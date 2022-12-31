@@ -1616,13 +1616,17 @@ pub mod checkmate {
                     }
                 } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
                     if let Some(u) = current_node.as_ref() {
-                        if u.pn.is_zero() && u.dn == Number::INFINITE {
+                        if u.pn == Number::INFINITE && u.dn.is_zero() {
+                            node_repo.update(teban, mhash, shash, &u)?;
+
+                            return Ok(MaybeMate::Continuation(u.clone()));
+                        } else if u.pn.is_zero() && u.dn == Number::INFINITE {
                             let u = u.to_decided_node(uniq_id.gen());
 
                             node_repo.update(teban, mhash, shash, &u)?;
 
                             return Ok(MaybeMate::Continuation(u));
-                        } else if u.pn != Number::INFINITE || !u.dn.is_zero() {
+                        } else {
                             let u = u.to_unknown_node();
 
                             node_repo.update(teban, mhash, shash, &u)?;
