@@ -1065,9 +1065,6 @@ pub mod checkmate {
                     let mut pn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
-                        if n.try_borrow()?.state == NodeState::Decided {
-                            continue;
-                        }
                         pn = pn.min(n.try_borrow()?.pn);
                     }
                     self.pn = pn;
@@ -1079,9 +1076,6 @@ pub mod checkmate {
                     let mut dn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
-                        if n.try_borrow()?.state == NodeState::Decided {
-                            continue;
-                        }
                         dn = dn.min(n.try_borrow()?.dn);
                     }
 
