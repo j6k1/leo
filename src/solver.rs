@@ -1061,6 +1061,23 @@ pub mod checkmate {
             };
 
             match self.comparator {
+                Comparator::AndNodeComparator if u.try_borrow()?.state == NodeState::Decided => {
+                    let mut pn = Number::INFINITE;
+                    let mut dn= Number::Value(Fraction::new(0));
+
+                    for n in self.children.try_borrow()?.iter() {
+                        if n.try_borrow()?.state == NodeState::Decided {
+                            continue;
+                        }
+                        pn = pn.min(n.try_borrow()?.pn);
+                        dn += n.try_borrow()?.dn;
+                    }
+
+                    self.pn = pn;
+                    self.dn_base = dn;
+
+                    self.dn = self.dn_base / self.ref_count;
+                },
                 Comparator::AndNodeComparator => {
                     let mut pn = Number::INFINITE;
 
@@ -1073,6 +1090,23 @@ pub mod checkmate {
 
                     self.dn = self.dn_base / self.ref_count;
                 },
+                Comparator::OrNodeComparator if u.try_borrow()?.state == NodeState::Decided => {
+                    let mut pn = Number::Value(Fraction::new(0));
+                    let mut dn = Number::INFINITE;
+
+                    for n in self.children.try_borrow()?.iter() {
+                        if n.try_borrow()?.state == NodeState::Decided {
+                            continue;
+                        }
+                        pn += n.try_borrow()?.pn;
+                        dn = dn.min(n.try_borrow()?.dn);
+                    }
+
+                    self.pn_base = pn;
+
+                    self.pn = self.pn_base / self.ref_count;
+                    self.dn = dn;
+                }
                 Comparator::OrNodeComparator => {
                     let mut dn = Number::INFINITE;
 
@@ -1616,23 +1650,25 @@ pub mod checkmate {
                     }
                 } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
                     if let Some(u) = current_node.as_ref() {
-                        if u.pn == Number::INFINITE && u.dn.is_zero() {
+                        let u = if u.pn == Number::INFINITE && u.dn.is_zero() {
                             node_repo.update(teban, mhash, shash, &u)?;
 
-                            return Ok(MaybeMate::Continuation(u.clone()));
+                            u.clone()
                         } else if u.pn.is_zero() && u.dn == Number::INFINITE {
                             let u = u.to_decided_node(uniq_id.gen());
 
                             node_repo.update(teban, mhash, shash, &u)?;
 
-                            return Ok(MaybeMate::Continuation(u));
+                            u
                         } else {
                             let u = u.to_unknown_node();
 
                             node_repo.update(teban, mhash, shash, &u)?;
 
-                            return Ok(MaybeMate::Continuation(u));
-                        }
+                            u
+                        };
+
+                        return Ok(MaybeMate::Continuation(u));
                     } else {
                         break;
                     }
