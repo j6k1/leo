@@ -418,12 +418,13 @@ pub struct Trainer<M>
     packed_sfen_reader:PackedSfenReader,
     hcpe_reader:HcpeReader,
     bias_shake_shake:bool,
+    similar:bool
 }
 pub struct TrainerCreator {
 }
 
 impl TrainerCreator {
-    pub fn create(save_dir:String, nna_path:String, nnb_path:String, enable_shake_shake:bool)
+    pub fn create(save_dir:String, nna_path:String, nnb_path:String, enable_shake_shake:bool, similar:bool)
                   -> Result<Trainer<impl BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>>>,ApplicationError> {
 
         let mut rnd = prelude::thread_rng();
@@ -526,6 +527,7 @@ impl TrainerCreator {
             packed_sfen_reader:PackedSfenReader::new(),
             hcpe_reader:HcpeReader::new(),
             bias_shake_shake:enable_shake_shake,
+            similar:similar
         })
     }
 }
@@ -573,26 +575,31 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
 
         let mut teban = last_teban;
         let bias_shake_shake = self.bias_shake_shake;
+        let similar = self.similar;
 
         let batch = history.iter().rev().map(move |(banmen,mc,_,_)| {
             let (a, b) = Self::calc_alpha_beta(bias_shake_shake);
 
             let input = InputCreator::make_input(true, teban, banmen, mc);
 
-            let t = match s {
-                GameEndState::Win if teban == last_teban => {
-                    1f32
+            let t = if similar {
+                1f32
+            } else {
+                match s {
+                    GameEndState::Win if teban == last_teban => {
+                        1f32
+                    }
+                    GameEndState::Win => {
+                        -1f32
+                    },
+                    GameEndState::Lose if teban == last_teban => {
+                        -1f32
+                    },
+                    GameEndState::Lose => {
+                        1f32
+                    },
+                    _ => 0f32
                 }
-                GameEndState::Win => {
-                    -1f32
-                },
-                GameEndState::Lose if teban == last_teban => {
-                    -1f32
-                },
-                GameEndState::Lose => {
-                    1f32
-                },
-                _ => 0f32
             };
 
             teban = teban.opposite();
@@ -629,6 +636,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
 
         let lossf = Mse::new();
         let bias_shake_shake = self.bias_shake_shake;
+        let similar = self.similar;
 
         let mut sfens_with_extended = Vec::with_capacity(packed_sfens.len());
 
@@ -651,14 +659,18 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
 
                 let input = InputCreator::make_input(true, teban, banmen, mc);
 
-                let t = match es {
-                    GameEndState::Win => {
-                        1f32
+                let t = if similar {
+                    1f32
+                } else {
+                    match es {
+                        GameEndState::Win => {
+                            1f32
+                        }
+                        GameEndState::Lose => {
+                            -1f32
+                        },
+                        _ => 0f32
                     }
-                    GameEndState::Lose => {
-                        -1f32
-                    },
-                    _ => 0f32
                 };
 
                 (t,input,a,b)
@@ -695,6 +707,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
 
         let lossf = Mse::new();
         let bias_shake_shake = self.bias_shake_shake;
+        let similar = self.similar;
 
         let mut sfens_with_extended = Vec::with_capacity(hcpes.len());
 
@@ -728,14 +741,18 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                     }
                 };
 
-                let t = match es {
-                    GameEndState::Win => {
-                        1f32
+                let t = if similar {
+                    1f32
+                } else {
+                    match es {
+                        GameEndState::Win => {
+                            1f32
+                        }
+                        GameEndState::Lose => {
+                            -1f32
+                        },
+                        _ => 0f32
                     }
-                    GameEndState::Lose => {
-                        -1f32
-                    },
-                    _ => 0f32
                 };
 
                 (t,input,a,b)

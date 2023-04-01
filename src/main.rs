@@ -102,6 +102,7 @@ fn run() -> Result<(),ApplicationError> {
     opts.optflag("", "yaneuraou", "YaneuraOu format teacher phase.");
     opts.optflag("", "hcpe", "hcpe format teacher phase.");
     opts.optopt("e","maxepoch", "Number of epochs in batch learning.","number of epoch");
+    opts.optflag("s","similar", "The inputted game record is always considered as the correct answer and is used for learning.");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -122,7 +123,9 @@ fn run() -> Result<(),ApplicationError> {
             Learnener::new().learning_from_yaneuraou_bin(kifudir,
                                                          TrainerCreator::create(String::from("data"),
                                                                                 String::from("nn.a.bin"),
-                                                                                String::from("nn.b.bin"),config.bias_shake_shake_with_kifu)?,
+                                                                                String::from("nn.b.bin"),
+                                                                                config.bias_shake_shake_with_kifu,
+                                                                                         matches.opt_present("similar"))?,
                                                          on_error_handler.clone(),
                                                          config.learn_sfen_read_size.unwrap_or(LEAN_SFEN_READ_SIZE),
                                                          config.learn_batch_size.unwrap_or(LEAN_BATCH_SIZE),
@@ -132,7 +135,9 @@ fn run() -> Result<(),ApplicationError> {
             Learnener::new().learning_from_hcpe(kifudir,
                                                 TrainerCreator::create(String::from("data"),
                                                                        String::from("nn.a.bin"),
-                                                                       String::from("nn.b.bin"),config.bias_shake_shake_with_kifu)?,
+                                                                       String::from("nn.b.bin"),
+                                                                       config.bias_shake_shake_with_kifu,
+                                                                       matches.opt_present("similar"))?,
                                                 on_error_handler.clone(),
                                                 config.learn_sfen_read_size.unwrap_or(LEAN_SFEN_READ_SIZE),
                                                 config.learn_batch_size.unwrap_or(LEAN_BATCH_SIZE),
@@ -146,7 +151,9 @@ fn run() -> Result<(),ApplicationError> {
 
                                                TrainerCreator::create(String::from("data"),
                                                                       String::from("nn.a.bin"),
-                                                                      String::from("nn.b.bin"),config.bias_shake_shake_with_kifu)?,
+                                                                      String::from("nn.b.bin"),
+                                                                      config.bias_shake_shake_with_kifu,
+                                                                      matches.opt_present("similar"))?,
                                                on_error_handler.clone())
         };
 
