@@ -801,12 +801,12 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
         let nna_path = Path::new(&self.nnsavedir).join(&self.nna_path);
         let nnb_path = Path::new(&self.nnsavedir).join(&self.nnb_path);
 
-        let mut pa = BinFilePersistence::new(&nna_path.as_os_str()
+        let mut pa = BinFilePersistence::new(&nna_path.join(".tmp").as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
 
-        let mut pb = BinFilePersistence::new(&nnb_path.as_os_str()
+        let mut pb = BinFilePersistence::new(&nnb_path.join(".tmp").as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
