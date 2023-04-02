@@ -798,15 +798,15 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
     }
 
     pub fn save(&mut self) -> Result<(),ApplicationError> {
-        let nna_path = Path::new(&self.nnsavedir).join(&self.nna_path);
-        let nnb_path = Path::new(&self.nnsavedir).join(&self.nnb_path);
+        let tmp_nna_path = Path::new(&self.nnsavedir).join(&format!("{}.{}", &self.nna_path, "tmp"));
+        let tmp_nnb_path = Path::new(&self.nnsavedir).join(&format!("{}.{}", &self.nnb_path, "tmp"));
 
-        let mut pa = BinFilePersistence::new(&nna_path.join(".tmp").as_os_str()
+        let mut pa = BinFilePersistence::new(tmp_nna_path.as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
 
-        let mut pb = BinFilePersistence::new(&nnb_path.join(".tmp").as_os_str()
+        let mut pb = BinFilePersistence::new(tmp_nnb_path.as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
@@ -814,15 +814,15 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
         self.nna.save(&mut pa)?;
         self.nnb.save(&mut pb)?;
 
-        pa.save(nna_path.join(".tmp"))?;
-        pb.save(nnb_path.join(".tmp"))?;
+        pa.save(&tmp_nna_path)?;
+        pb.save(&tmp_nnb_path)?;
 
-        fs::rename(Path::new(&nna_path.join(".tmp")),nna_path.as_os_str()
+        fs::rename(Path::new(&tmp_nna_path),Path::new(&self.nnsavedir).join(&self.nna_path).as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
 
-        fs::rename(Path::new(&nnb_path.join(".tmp")),nnb_path.as_os_str()
+        fs::rename(Path::new(&tmp_nnb_path),Path::new(&self.nnsavedir).join(&self.nnb_path).as_os_str()
             .to_str().ok_or(ApplicationError::InvalidSettingError(
             String::from("ニューラルネットワークのモデルのパスの処理時にエラーが発生しました。")
         ))?)?;
