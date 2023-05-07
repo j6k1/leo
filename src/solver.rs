@@ -661,6 +661,13 @@ pub mod checkmate {
         }
     }
 
+    #[derive(Debug,Clone,Copy,PartialEq,Eq,PartialOrd,Ord)]
+    pub enum NodeState {
+        UnDecided,
+        Decided,
+        Unknown
+    }
+
     pub struct Node {
         id:u64,
         pn_base:Number,
@@ -672,8 +679,7 @@ pub mod checkmate {
         ref_count:u64,
         sennichite:bool,
         expanded:bool,
-        decided:bool,
-        unknown:bool,
+        state:NodeState,
         m:LegalMove,
         children:Weak<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
         mate_node:Option<Rc<RefCell<Node>>>,
@@ -720,8 +726,7 @@ pub mod checkmate {
                 ref_count:1,
                 sennichite: false,
                 expanded: false,
-                decided:false,
-                unknown:false,
+                state:NodeState::UnDecided,
                 m:m,
                 children:Weak::new(),
                 mate_node:None,
@@ -766,8 +771,7 @@ pub mod checkmate {
                 ref_count:1,
                 sennichite: false,
                 expanded: false,
-                decided:false,
-                unknown:false,
+                state: NodeState::UnDecided,
                 m:m,
                 children:Weak::new(),
                 mate_node:None,
@@ -814,8 +818,7 @@ pub mod checkmate {
                 ref_count: self.ref_count,
                 sennichite: self.sennichite,
                 expanded: self.expanded,
-                decided: self.decided,
-                unknown: self.unknown,
+                state: self.state,
                 m: self.m,
                 children: self.children.clone(),
                 mate_node: self.mate_node.clone(),
@@ -839,8 +842,7 @@ pub mod checkmate {
                 ref_count: n.ref_count,
                 sennichite: n.sennichite,
                 expanded: n.expanded,
-                decided: n.decided,
-                unknown: n.unknown,
+                state: n.state,
                 m: n.m,
                 children: Rc::downgrade(&n.children),
                 mate_node: n.mate_node.clone(),
@@ -865,8 +867,7 @@ pub mod checkmate {
         mate_depth:u32,
         ref_count:u64,
         expanded:bool,
-        decided:bool,
-        unknown:bool,
+        state:NodeState,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
         mate_node:Option<Rc<RefCell<Node>>>,
         generation:u32
@@ -886,8 +887,7 @@ pub mod checkmate {
                 ref_count: self.ref_count,
                 sennichite: n.sennichite,
                 expanded: self.expanded,
-                decided: self.decided,
-                unknown: self.unknown,
+                state: self.state,
                 m: n.m,
                 children: Rc::downgrade(&self.children),
                 mate_node: self.mate_node.clone(),
@@ -909,8 +909,7 @@ pub mod checkmate {
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 expanded: self.expanded,
-                decided: self.decided,
-                unknown: self.unknown,
+                state: self.state,
                 children: Rc::clone(&self.children),
                 mate_node: self.mate_node.clone(),
                 generation: self.generation
@@ -930,8 +929,7 @@ pub mod checkmate {
                 mate_depth: n.mate_depth,
                 ref_count: n.ref_count,
                 expanded: n.expanded,
-                decided: n.decided,
-                unknown: n.unknown,
+                state: n.state,
                 children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
                 mate_node: n.mate_node.clone(),
                 generation: n.generation
@@ -951,8 +949,7 @@ pub mod checkmate {
                 mate_depth: n.mate_depth,
                 ref_count: n.ref_count,
                 expanded: n.expanded,
-                decided: n.decided,
-                unknown: n.unknown,
+                state: n.state,
                 children: Rc::clone(&n.children),
                 mate_node: n.mate_node.clone(),
                 generation: n.generation
@@ -971,8 +968,7 @@ pub mod checkmate {
         ref_count:u64,
         sennichite:bool,
         expanded:bool,
-        decided:bool,
-        unknown:bool,
+        state:NodeState,
         m:LegalMove,
         children:Rc<RefCell<BinaryHeap<Rc<RefCell<Node>>>>>,
         mate_node: Option<Rc<RefCell<Node>>>,
@@ -984,7 +980,7 @@ pub mod checkmate {
         #[inline]
         pub fn to_decided_node(&self,id:u64) -> NormalizedNode {
             match self.comparator {
-                Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
+                Comparator::OrNodeComparator => {
                     NormalizedNode {
                         id: id,
                         pn_base: self.pn_base,
@@ -996,16 +992,15 @@ pub mod checkmate {
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
                         expanded: self.expanded,
-                        decided: true,
-                        unknown: false,
+                        state: NodeState::Decided,
                         m: self.m,
                         children: Rc::clone(&self.children),
                         mate_node: self.mate_node.clone(),
-                        comparator: Comparator::DecidedOrNodeComparator,
+                        comparator: self.comparator.clone(),
                         generation: self.generation
                     }
                 },
-                Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
+                Comparator::AndNodeComparator => {
                     NormalizedNode {
                         id: id,
                         pn_base: self.pn_base,
@@ -1017,12 +1012,11 @@ pub mod checkmate {
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
                         expanded: self.expanded,
-                        decided: true,
-                        unknown: false,
+                        state: NodeState::Decided,
                         m: self.m,
                         children: Rc::clone(&self.children),
                         mate_node: self.mate_node.clone(),
-                        comparator: Comparator::DecidedAndNodeComparator,
+                        comparator: self.comparator.clone(),
                         generation: self.generation
                     }
                 }
@@ -1042,8 +1036,7 @@ pub mod checkmate {
                 ref_count: self.ref_count,
                 sennichite: self.sennichite,
                 expanded: self.expanded,
-                decided: false,
-                unknown: true,
+                state: NodeState::Unknown,
                 m: self.m,
                 children: Rc::clone(&self.children),
                 mate_node: self.mate_node.clone(),
@@ -1068,40 +1061,60 @@ pub mod checkmate {
             };
 
             match self.comparator {
-                Comparator::AndNodeComparator | Comparator::DecidedAndNodeComparator => {
+                Comparator::AndNodeComparator if u.try_borrow()?.state == NodeState::Decided => {
                     let mut pn = Number::INFINITE;
+                    let mut dn= Number::Value(Fraction::new(0));
 
                     for n in self.children.try_borrow()?.iter() {
-                        if n.try_borrow()?.decided {
+                        if n.try_borrow()?.state == NodeState::Decided {
                             continue;
                         }
                         pn = pn.min(n.try_borrow()?.pn);
+                        dn += n.try_borrow()?.dn;
                     }
-                    self.pn = pn;
 
-                    if u.try_borrow()?.decided {
-                        self.dn_base = self.dn_base - dn;
-                    } else {
-                        self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
-                    }
+                    self.pn = pn;
+                    self.dn_base = dn;
 
                     self.dn = self.dn_base / self.ref_count;
                 },
-                Comparator::OrNodeComparator | Comparator::DecidedOrNodeComparator => {
+                Comparator::AndNodeComparator => {
+                    let mut pn = Number::INFINITE;
+
+                    for n in self.children.try_borrow()?.iter() {
+                        pn = pn.min(n.try_borrow()?.pn);
+                    }
+
+                    self.pn = pn;
+                    self.dn_base = self.dn_base - dn + u.try_borrow()?.dn;
+
+                    self.dn = self.dn_base / self.ref_count;
+                },
+                Comparator::OrNodeComparator if u.try_borrow()?.state == NodeState::Decided => {
+                    let mut pn = Number::Value(Fraction::new(0));
                     let mut dn = Number::INFINITE;
 
                     for n in self.children.try_borrow()?.iter() {
-                        if n.try_borrow()?.decided {
+                        if n.try_borrow()?.state == NodeState::Decided {
                             continue;
                         }
+                        pn += n.try_borrow()?.pn;
                         dn = dn.min(n.try_borrow()?.dn);
                     }
 
-                    if u.try_borrow()?.decided {
-                        self.pn_base = self.pn_base - pn;
-                    } else {
-                        self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
+                    self.pn_base = pn;
+
+                    self.pn = self.pn_base / self.ref_count;
+                    self.dn = dn;
+                }
+                Comparator::OrNodeComparator => {
+                    let mut dn = Number::INFINITE;
+
+                    for n in self.children.try_borrow()?.iter() {
+                        dn = dn.min(n.try_borrow()?.dn);
                     }
+
+                    self.pn_base = self.pn_base - pn + u.try_borrow()?.pn;
 
                     self.pn = self.pn_base / self.ref_count;
                     self.dn = dn;
@@ -1126,8 +1139,7 @@ pub mod checkmate {
                 ref_count: self.ref_count,
                 sennichite: self.sennichite,
                 expanded: self.expanded,
-                decided: self.decided,
-                unknown: self.unknown,
+                state: self.state,
                 m: self.m,
                 children: Rc::clone(&self.children),
                 mate_node: self.mate_node.clone(),
@@ -1151,8 +1163,7 @@ pub mod checkmate {
                 ref_count: n.ref_count,
                 sennichite: n.sennichite,
                 expanded: n.expanded,
-                decided: n.decided,
-                unknown: n.unknown,
+                state: n.state,
                 m: n.m,
                 children: n.children.upgrade().unwrap_or(Rc::new(RefCell::new(BinaryHeap::new()))),
                 mate_node: n.mate_node.clone(),
@@ -1192,9 +1203,7 @@ pub mod checkmate {
     #[derive(Clone,Copy)]
     pub enum Comparator {
         OrNodeComparator,
-        AndNodeComparator,
-        DecidedOrNodeComparator,
-        DecidedAndNodeComparator
+        AndNodeComparator
     }
 
     impl Comparator {
@@ -1202,64 +1211,19 @@ pub mod checkmate {
         pub fn cmp(&self,l:&Node,r:&Node) -> Ordering {
             match self {
                 &Comparator::OrNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided && l.pn == Number::INFINITE {
-                        Ordering::Greater.reverse()
-                    } else if r.decided {
-                        Ordering::Less.reverse()
-                    } else {
-                        l.pn.cmp(&r.pn)
-                            .then(l.mate_depth.cmp(&r.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    }
+                    l.state.cmp(&r.state)
+                        .then_with(|| l.pn.cmp(&r.pn))
+                        .then_with(|| l.mate_depth.cmp(&r.mate_depth))
+                        .then_with(|| r.priority.cmp(&l.priority))
+                        .then_with(|| l.id.cmp(&r.id)).reverse()
                 },
                 &Comparator::AndNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided && l.pn.is_zero() && l.dn == Number::INFINITE {
-                        Ordering::Less.reverse()
-                    } else if r.decided && l.dn == Number::INFINITE {
-                        Ordering::Greater.reverse()
-                    } else {
-                        l.dn.cmp(&r.dn)
-                            .then(r.mate_depth.cmp(&l.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    }
-                },
-                &Comparator::DecidedOrNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided {
-                        l.pn.cmp(&r.pn)
-                            .then(r.dn.cmp(&l.dn))
-                            .then(l.mate_depth.cmp(&r.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    } else if r.pn == Number::INFINITE {
-                        Ordering::Less.reverse()
-                    } else {
-                        Ordering::Greater.reverse()
-                    }
-                },
-                &Comparator::DecidedAndNodeComparator => {
-                    if l.unknown != r.unknown {
-                        l.unknown.cmp(&r.unknown).reverse()
-                    } else if r.decided {
-                        r.dn.cmp(&l.dn)
-                            .then(l.pn.cmp(&r.pn))
-                            .then(r.mate_depth.cmp(&l.mate_depth))
-                            .then(r.priority.cmp(&l.priority))
-                            .then(l.id.cmp(&r.id)).reverse()
-                    } else if r.pn.is_zero() && r.dn == Number::INFINITE {
-                        Ordering::Greater.reverse()
-                    } else if r.dn == Number::INFINITE {
-                        Ordering::Less.reverse()
-                    } else {
-                        Ordering::Greater.reverse()
-                    }
+                    l.state.cmp(&r.state)
+                        .then_with(|| l.dn.cmp(&r.dn))
+                        .then_with(|| l.pn.cmp(&r.pn))
+                        .then_with(|| r.mate_depth.cmp(&l.mate_depth))
+                        .then_with(|| r.priority.cmp(&l.priority))
+                        .then_with(|| l.id.cmp(&r.id)).reverse()
                 }
             }
         }
@@ -1327,19 +1291,13 @@ pub mod checkmate {
             }
 
             if !node_repo.contains(teban,mhash,shash) {
-                {
-                    let mut n = n.try_borrow_mut()?;
+                let weak_count = n.try_borrow()?.children.weak_count();
 
+                let mut n = node_repo.get(teban,mhash,shash,n)?;
+
+                if weak_count == 0 {
                     n.expanded = false;
-                    n.ref_count = 1;
-                    n.pn_base = Number::Value(Fraction::new(1));
-                    n.dn_base = Number::Value(Fraction::new(1));
-                    n.pn = Number::Value(Fraction::new(1));
-                    n.dn = Number::Value(Fraction::new(1));
-                    n.generation += 1;
                 }
-
-                let n = node_repo.get(teban,mhash,shash,n)?;
 
                 Ok(n)
             } else {
@@ -1587,11 +1545,11 @@ pub mod checkmate {
                     return Ok(MaybeMate::Continuation(u));
                 }
 
-                if n.decided {
+                if n.state == NodeState::Decided {
                     let n = n.to_decided_node(uniq_id.gen());
 
                     return Ok(MaybeMate::Continuation(n));
-                } else if n.unknown {
+                } else if n.state == NodeState::Unknown {
                     let n = n.to_unknown_node();
 
                     return Ok(MaybeMate::Continuation(n));
@@ -1633,6 +1591,12 @@ pub mod checkmate {
                 } else {
                     let children = Rc::clone(&n.children);
 
+                    if n.pn == Number::INFINITE && n.dn.is_zero() && children.try_borrow()?.len() == 0 {
+                        let u = n.to_decided_node(uniq_id.gen());
+
+                        return Ok(MaybeMate::Continuation(u));
+                    }
+
                     (Some(n),children)
                 }
             } else {
@@ -1660,7 +1624,7 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if n.try_borrow()?.decided {
+                if n.try_borrow()?.state == NodeState::Decided {
                     if let Some(u) = current_node.as_ref() {
                         let u = u.to_decided_node(uniq_id.gen());
 
@@ -1672,7 +1636,7 @@ pub mod checkmate {
                     } else {
                         break;
                     }
-                } else if n.try_borrow()?.unknown {
+                } else if n.try_borrow()?.state == NodeState::Unknown {
                     if let Some(u) = current_node.as_ref() {
                         let u = u.to_unknown_node();
 
@@ -1686,13 +1650,25 @@ pub mod checkmate {
                     }
                 } else if n.try_borrow()?.pn == Number::INFINITE && n.try_borrow()?.dn.is_zero() {
                     if let Some(u) = current_node.as_ref() {
-                        if u.pn != Number::INFINITE || !u.dn.is_zero() {
+                        let u = if u.pn == Number::INFINITE && u.dn.is_zero() {
+                            node_repo.update(teban, mhash, shash, &u)?;
+
+                            u.clone()
+                        } else if u.pn.is_zero() && u.dn == Number::INFINITE {
+                            let u = u.to_decided_node(uniq_id.gen());
+
+                            node_repo.update(teban, mhash, shash, &u)?;
+
+                            u
+                        } else {
                             let u = u.to_unknown_node();
 
                             node_repo.update(teban, mhash, shash, &u)?;
 
-                            return Ok(MaybeMate::Continuation(u));
-                        }
+                            u
+                        };
+
+                        return Ok(MaybeMate::Continuation(u));
                     } else {
                         break;
                     }
@@ -1765,11 +1741,9 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                                        let u = NormalizedNode::from(n.try_borrow()?.deref());
 
-                                        u.pn = Number::INFINITE;
-
-                                        update_node = u;
+                                        update_node = u.to_unknown_node();
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -1801,7 +1775,7 @@ pub mod checkmate {
 
                     c.update(&u)?;
 
-                    if !u.unknown && c.pn.is_zero() && c.dn == Number::INFINITE {
+                    if u.state != NodeState::Unknown && c.pn.is_zero() && c.dn == Number::INFINITE {
                         let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
                             ApplicationError::LogicError(String::from(
                                 "Failed get mate node. (children is empty)."
@@ -1813,7 +1787,7 @@ pub mod checkmate {
                             c.mate_node = Some(Rc::clone(&n));
                         } else {
                             match c.mate_node.as_ref() {
-                                Some(n) if n.try_borrow()?.decided => {
+                                Some(n) if n.try_borrow()?.state == NodeState::Decided => {
                                     if u.mate_depth <= n.try_borrow()?.mate_depth {
                                         c.mate_depth = u.mate_depth + 1;
                                         c.mate_node = Some(Rc::new(RefCell::new(u.into())));
@@ -1931,11 +1905,11 @@ pub mod checkmate {
                     return Ok(MaybeMate::Continuation(u));
                 }
 
-                if n.decided {
+                if n.state == NodeState::Decided {
                     let n = n.to_decided_node(uniq_id.gen());
 
                     return Ok(MaybeMate::Continuation(n));
-                } else if n.unknown {
+                } else if n.state == NodeState::Unknown {
                     let n = n.to_unknown_node();
 
                     return Ok(MaybeMate::Continuation(n));
@@ -1972,17 +1946,13 @@ pub mod checkmate {
                     if len == 0 {
                         n.pn = Number::Value(Fraction::new(0));
                         n.dn = Number::INFINITE;
-
-                        node_repo.update(teban, mhash, shash, &n)?;
-
-                        return Ok(MaybeMate::Continuation(n));
-                    } else {
-                        node_repo.update(teban, mhash, shash, &n)?;
-
-                        return Ok(MaybeMate::Continuation(n));
                     }
+
+                    node_repo.update(teban, mhash, shash, &n)?;
+
+                    return Ok(MaybeMate::Continuation(n));
                 } else {
-                    if pn.is_zero() && dn == Number::INFINITE && n.children.try_borrow()?.len() == 0 {
+                    if n.pn.is_zero() && n.dn == Number::INFINITE && n.children.try_borrow()?.len() == 0 {
                         n = n.to_decided_node(uniq_id.gen());
 
                         return Ok(MaybeMate::Continuation(n));
@@ -2009,7 +1979,7 @@ pub mod checkmate {
                     "None of the child nodes exist."
                 )))?;
 
-                if n.try_borrow()?.decided && n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE {
+                if n.try_borrow()?.state == NodeState::Decided && current_node.pn.is_zero() && current_node.dn == Number::INFINITE {
                     let u = current_node;
 
                     let u = u.to_decided_node(uniq_id.gen());
@@ -2019,7 +1989,7 @@ pub mod checkmate {
                     }
                     
                     return Ok(MaybeMate::Continuation(u));
-                } else if n.try_borrow()?.decided || n.try_borrow()?.unknown {
+                } else if n.try_borrow()?.state == NodeState::Decided || n.try_borrow()?.state == NodeState::Unknown {
                     let u = current_node;
 
                     let u = u.to_unknown_node();
@@ -2104,11 +2074,9 @@ pub mod checkmate {
                                         return Ok(r);
                                     },
                                     MaybeMate::Skip | MaybeMate::MaxDepth => {
-                                        let mut u = NormalizedNode::from(n.try_borrow()?.deref());
+                                        let u = NormalizedNode::from(n.try_borrow()?.deref());
 
-                                        u.dn = Number::INFINITE;
-
-                                        update_node = u;
+                                        update_node = u.to_unknown_node();
                                     },
                                     MaybeMate::MateMoves(_) => {
                                         return Err(ApplicationError::LogicError(String::from(
@@ -2139,7 +2107,7 @@ pub mod checkmate {
 
                 c.update(&u)?;
 
-                if !u.unknown && c.pn.is_zero() && c.dn == Number::INFINITE {
+                if u.state != NodeState::Unknown && c.pn.is_zero() && c.dn == Number::INFINITE {
                     let n = c.children.try_borrow()?.peek().map(|n| Rc::clone(n)).ok_or(
                         ApplicationError::LogicError(String::from(
                             "Failed get mate node. (children is empty)."
@@ -2151,7 +2119,7 @@ pub mod checkmate {
                         c.mate_node = Some(Rc::clone(&n));
                     } else {
                         match c.mate_node.as_ref() {
-                            Some(n) if n.try_borrow()?.decided => {
+                            Some(n) if n.try_borrow()?.state == NodeState::Decided => {
                                 if u.mate_depth >= n.try_borrow()?.mate_depth {
                                     c.mate_depth = u.mate_depth + 1;
                                     c.mate_node = Some(Rc::new(RefCell::new(u.into())));
