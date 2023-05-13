@@ -1790,6 +1790,7 @@ pub mod checkmate {
                 }
 
                 let u = update_node;
+                let is_mate = u.pn.is_zero() && u.dn == Number::INFINITE;
 
                 let md = u.mate_depth;
 
@@ -1805,7 +1806,7 @@ pub mod checkmate {
                         if !self.strict_moves || c.mate_node.is_none() {
                             c.mate_depth = u.mate_depth + 1;
                             c.mate_node = Some(Rc::new(RefCell::new(u.into())));
-                        } else if mate_depth.map(|d| d > u.mate_depth + depth + 1).unwrap_or(true) {
+                        } else if is_mate && mate_depth.map(|d| d > md).unwrap_or(true) {
                             c.mate_depth = u.mate_depth + 1;
                             c.mate_node = Some(Rc::new(RefCell::new(u.into())));
                         }
@@ -1817,7 +1818,7 @@ pub mod checkmate {
 
                     if c.pn != pn || c.dn != dn {
                         return Ok(MaybeMate::Continuation(c.clone()));
-                    } else if c.pn.is_zero() && c.dn == Number::INFINITE && mate_depth.map(|d| {
+                    } else if is_mate && mate_depth.map(|d| {
                         d > md
                     }).unwrap_or(false) {
                         return Ok(MaybeMate::Continuation(c.clone()));
@@ -1834,10 +1835,14 @@ pub mod checkmate {
 
                     if !self.strict_moves && u.pn.is_zero() && u.dn == Number::INFINITE {
                         *mate_depth = Some(md + 1);
-                        return Ok(MaybeMate::MateMoves(self.build_moves(&Rc::new(RefCell::new(u.into())))?));
+                        let mate_mvs = self.build_moves(&Rc::new(RefCell::new(u.into())))?;
+                        self.send_pv(&mate_mvs)?;
+                        return Ok(MaybeMate::MateMoves(mate_mvs));
                     } else if u.pn.is_zero() && u.dn == Number::INFINITE {
                         *mate_depth = Some(md + 1);
-                        mate_mvs = Some(self.build_moves(&Rc::new(RefCell::new(u.into())))?);
+                        let mvs = self.build_moves(&Rc::new(RefCell::new(u.into())))?;
+                        self.send_pv(&mvs)?;
+                        mate_mvs = Some(mvs);
                     }
                 }
             }
@@ -2093,8 +2098,18 @@ pub mod checkmate {
                 c.update(&u)?;
 
                 if mate_depth.map(|d| d > u.mate_depth + depth + 1).unwrap_or(true) {
-                    c.mate_depth = u.mate_depth + 1;
-                    c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                    let n = Node::from(&u);
+                    let mut n = Rc::new(RefCell::new(n));
+
+                    for c in children.try_borrow()?.iter() {
+                        if c.try_borrow()?.pn.is_zero() && c.try_borrow()?.dn == Number::INFINITE &&
+                           c.try_borrow()?.mate_depth > n.try_borrow()?.mate_depth {
+                           n = Rc::clone(c);
+                        }
+                    }
+
+                    c.mate_depth = n.try_borrow()?.mate_depth + 1;
+                    c.mate_node = Some(n);
 
                     let u = c;
 
@@ -2120,7 +2135,8 @@ pub mod checkmate {
                         "None of the child nodes exist."
                     )))?;
 
-                    if n.try_borrow()?.state == NodeState::Decided || n.try_borrow()?.state == NodeState::Unknown {
+                    if n.try_borrow()?.state == NodeState::Decided || n.try_borrow()?.state == NodeState::Unknown ||
+                        (n.try_borrow()?.pn.is_zero() && n.try_borrow()?.dn == Number::INFINITE) {
                         let u = current_node;
 
                         let u = u.to_unknown_node();
@@ -2260,6 +2276,15 @@ pub mod checkmate {
                     }
                 }
             }
+        }
+
+        fn send_pv(&mut self, pv:&VecDeque<LegalMove>) -> Result<(),ApplicationError> {
+            let mut commands: Vec<UsiInfoSubCommand> = Vec::new();
+
+            commands.push(UsiInfoSubCommand::CurrMove(pv[0].to_move()));
+            commands.push(UsiInfoSubCommand::Pv(pv.clone().into_iter().map(|m| m.to_move()).collect()));
+
+            Ok(self.info_sender.send_immediate(commands)?)
         }
 
         fn send_seldepth(&mut self, depth:u32) -> Result<(),InfoSendError>{
