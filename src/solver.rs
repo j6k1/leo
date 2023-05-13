@@ -695,7 +695,7 @@ pub mod checkmate {
         pub fn new_or_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
             let priority = match m {
                 LegalMove::Put(m) => {
-                    MochigomaKind::Hisha as usize - m.kind() as usize
+                    m.kind() as usize + 2
                 },
                 LegalMove::To(m) => {
                     let nari = m.is_nari();
@@ -708,10 +708,12 @@ pub mod checkmate {
                                 1
                             } else {
                                 0
-                            } + MochigomaKind::Hisha as usize + 1
+                            } + MochigomaKind::Hisha as usize + 3
                         } else {
                             0
                         }
+                    } else if nari {
+                        1
                     } else {
                         0
                     }
@@ -746,17 +748,21 @@ pub mod checkmate {
         #[inline]
         pub fn new_and_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
             let priority = match m {
-                LegalMove::Put(_) => 0,
+                LegalMove::Put(m) => {
+                    m.kind() as usize + 2
+                },
                 LegalMove::To(m) => {
                     let nari = m.is_nari();
 
                     if let Some(o) = m.obtained() {
-                        if let Ok(k) = MochigomaKind::try_from(o) {
+                        if o == ObtainKind::Ou {
+                            MochigomaKind::Hisha as usize * 3 + 3
+                        } else if let Ok(k) = MochigomaKind::try_from(o) {
                             k as usize * 2 + if nari {
                                 1
                             } else {
                                 0
-                            } + 2
+                            } + MochigomaKind::Hisha as usize + 3
                         } else {
                             0
                         }
@@ -1236,7 +1242,7 @@ pub mod checkmate {
                         .then_with(|| l.dn.cmp(&r.dn))
                         .then_with(|| l.pn.cmp(&r.pn))
                         .then_with(|| r.mate_depth.cmp(&l.mate_depth))
-                        .then_with(|| r.priority.cmp(&l.priority))
+                        .then_with(|| r.priority.cmp(&l.priority).reverse())
                         .then_with(|| l.id.cmp(&r.id)).reverse()
                 }
             }
@@ -2196,8 +2202,8 @@ pub mod checkmate {
                         if s || sc {
                             let mut u = NormalizedNode::from(n.try_borrow()?.deref());
 
-                            u.pn = Number::Value(Fraction::new(0));
-                            u.dn = Number::INFINITE;
+                            u.pn = Number::INFINITE;
+                            u.dn = Number::Value(Fraction::new(0));
                             u.sennichite = true;
 
                             update_node = u;
@@ -2279,8 +2285,18 @@ pub mod checkmate {
                     c.update(&u)?;
 
                     if c.pn.is_zero() && c.dn == Number::INFINITE {
-                        c.mate_depth = u.mate_depth + 1;
-                        c.mate_node = Some(Rc::new(RefCell::new(u.into())));
+                        let n = Node::from(&u);
+                        let mut n = Rc::new(RefCell::new(n));
+
+                        for c in children.try_borrow()?.iter() {
+                            if c.try_borrow()?.pn.is_zero() && c.try_borrow()?.dn == Number::INFINITE &&
+                                c.try_borrow()?.mate_depth > n.try_borrow()?.mate_depth {
+                                n = Rc::clone(c);
+                            }
+                        }
+
+                        c.mate_depth = n.try_borrow()?.mate_depth + 1;
+                        c.mate_node = Some(n);
                     }
 
                     let u = c;
