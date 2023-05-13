@@ -1242,7 +1242,7 @@ pub mod checkmate {
                         .then_with(|| l.dn.cmp(&r.dn))
                         .then_with(|| l.pn.cmp(&r.pn))
                         .then_with(|| r.mate_depth.cmp(&l.mate_depth))
-                        .then_with(|| r.priority.cmp(&l.priority).reverse())
+                        .then_with(|| r.priority.cmp(&l.priority))
                         .then_with(|| l.id.cmp(&r.id)).reverse()
                 }
             }
