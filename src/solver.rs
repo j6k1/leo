@@ -1799,7 +1799,7 @@ pub mod checkmate {
 
                     c.update(&u)?;
 
-                    let md = u.mate_depth + depth;
+                    let md = u.mate_depth + depth + 1;
 
                     if c.pn.is_zero() && c.dn == Number::INFINITE {
                         if !self.strict_moves || c.mate_node.is_none() {
@@ -1817,7 +1817,9 @@ pub mod checkmate {
 
                     if c.pn != pn || c.dn != dn {
                         return Ok(MaybeMate::Continuation(c.clone()));
-                    } else if mate_depth.map(|d| d > md).unwrap_or(false) {
+                    } else if c.pn.is_zero() && c.dn == Number::INFINITE && mate_depth.map(|d| {
+                        d > md
+                    }).unwrap_or(false) {
                         return Ok(MaybeMate::Continuation(c.clone()));
                     }
                 } else {
