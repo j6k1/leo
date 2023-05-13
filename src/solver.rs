@@ -1074,10 +1074,10 @@ pub mod checkmate {
         pub fn to_unknown_node(&self) -> NormalizedNode {
             NormalizedNode {
                 id: self.id,
-                pn_base: self.pn_base,
-                dn_base: self.dn_base,
-                pn: self.pn,
-                dn: self.dn,
+                pn_base: Number::Value(Fraction::new(0)),
+                dn_base: Number::Value(Fraction::new(0)),
+                pn: Number::Value(Fraction::new(0)),
+                dn: Number::Value(Fraction::new(0)),
                 priority: self.priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
@@ -2095,6 +2095,15 @@ pub mod checkmate {
 
                 let c = &mut current_node;
 
+                if u.state == NodeState::Unknown {
+                    let u = c.to_unknown_node();
+                    if !u.sennichite {
+                        node_repo.update(teban, mhash, shash, &u)?;
+                    }
+
+                    return Ok(MaybeMate::Continuation(u));
+                }
+
                 c.update(&u)?;
 
                 if mate_depth.map(|d| d > u.mate_depth + depth + 1).unwrap_or(true) {
@@ -2254,6 +2263,15 @@ pub mod checkmate {
                     let u = update_node;
 
                     let c = &mut current_node;
+
+                    if u.state == NodeState::Unknown {
+                        let u = c.to_unknown_node();
+                        if !u.sennichite {
+                            node_repo.update(teban, mhash, shash, &u)?;
+                        }
+
+                        return Ok(MaybeMate::Continuation(u));
+                    }
 
                     let pn = c.pn;
                     let dn = c.dn;
