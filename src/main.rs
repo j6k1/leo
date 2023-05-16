@@ -36,6 +36,7 @@ pub mod player;
 pub mod search;
 pub mod solver;
 pub mod learning;
+pub mod initial_estimation;
 
 const LEAN_SFEN_READ_SIZE:usize = 1000 * 1000 * 10;
 const LEAN_BATCH_SIZE:usize = 1000 * 100;
