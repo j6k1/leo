@@ -692,7 +692,7 @@ pub mod checkmate {
 
     impl Node {
         #[inline]
-        pub fn new_or_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
+        pub fn new_and_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
             let priority = match m {
                 LegalMove::Put(m) => {
                     m.kind() as usize + 2
@@ -746,7 +746,7 @@ pub mod checkmate {
         }
 
         #[inline]
-        pub fn new_and_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
+        pub fn new_or_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
             let priority = match m {
                 LegalMove::Put(m) => {
                     m.kind() as usize + 2
@@ -1345,7 +1345,7 @@ pub mod checkmate {
                     let nodes = mvs.into_iter().map(|m| {
                         let id = uniq_id.gen();
                         Rc::new(RefCell::new(
-                            Node::new_and_node(id, m, parent_ref.map(|p| Rc::clone(p)))
+                            Node::new_or_node(id, m, parent_ref.map(|p| Rc::clone(p)))
                         ))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
@@ -1358,7 +1358,7 @@ pub mod checkmate {
                     let nodes = mvs.into_iter().map(|m| {
                         let id = uniq_id.gen();
                         Rc::new(RefCell::new(
-                            Node::new_or_node(id, m, parent_ref.map(|p| Rc::clone(p)))
+                            Node::new_and_node(id, m, parent_ref.map(|p| Rc::clone(p)))
                         ))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
@@ -1400,7 +1400,7 @@ pub mod checkmate {
 
             let nodes = mvs.into_iter().map(|m| {
                 let id = uniq_id.gen();
-                Rc::new(RefCell::new(Node::new_and_node(id, m, None)))
+                Rc::new(RefCell::new(Node::new_or_node(id, m, None)))
             }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
             let children = Rc::new(RefCell::new(BinaryHeap::new()));
