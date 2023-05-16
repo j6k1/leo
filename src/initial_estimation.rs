@@ -26,16 +26,14 @@ pub fn initial_pn_dn_plus_or_node(teban:Teban,state:&State,m:LegalMove) -> (Frac
         _ => 0
     };
 
-    if attack_support + bonus > defense_support {
-        dn += 1;
-    }
-
     let x = to / 9;
     let y = to - x * 9;
 
     let obtained = state.get_banmen().0[y as usize][x as usize];
 
-    if obtained != Blank {
+    if attack_support + bonus > defense_support {
+        dn += 1;
+    } else if obtained != Blank {
         if obtained == SKin || obtained == GKin || obtained == SGin || obtained == GGin {
             dn += 1;
         } else {
@@ -98,6 +96,7 @@ pub fn calc_asc_priority(teban:Teban,state:&State,m:LegalMove) -> i32 {
             let y = m.src() - x * 9;
 
             let kind = state.get_banmen().0[y as usize][x as usize];
+
             match kind {
                 SFu | SKaku | SHisha |
                 GFu | GKaku | GHisha if Rule::is_possible_nari(kind,m.src() as Square,m.dst() as Square) => {
@@ -120,7 +119,7 @@ pub fn calc_asc_priority(teban:Teban,state:&State,m:LegalMove) -> i32 {
             let x = m.src() / 9;
             let y = m.src() - x * 9;
 
-            state.get_banmen().0[y as usize][x as usize].to_nari() as usize
+            state.get_banmen().0[y as usize][x as usize] as usize
         },
         LegalMove::Put(m) => {
             m.kind() as usize
