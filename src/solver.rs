@@ -381,8 +381,9 @@ pub mod checkmate {
     use usiagent::logger::Logger;
     use usiagent::player::InfoSender;
     use usiagent::rule::{LegalMove, Rule, State};
-    use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
+    use usiagent::shogi::{KomaKind, MochigomaCollections, MochigomaKind, ObtainKind, Teban};
     use crate::error::{ApplicationError};
+    use crate::initial_estimation::{calc_asc_priority, initial_pn_dn_plus_and_node, initial_pn_dn_plus_or_node};
     use crate::search::{TIMELIMIT_MARGIN};
     use crate::solver::{Fraction, MaybeMate};
 
@@ -676,7 +677,7 @@ pub mod checkmate {
         dn_base:Number,
         pn:Number,
         dn:Number,
-        priority:usize,
+        asc_priority:i32,
         mate_depth:u32,
         ref_count:u64,
         sennichite:bool,
@@ -692,45 +693,45 @@ pub mod checkmate {
 
     impl Node {
         #[inline]
-        pub fn new_and_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
-            let priority = match m {
-                LegalMove::Put(m) => {
-                    m.kind() as usize + 2
-                },
-                LegalMove::To(m) => {
-                    let nari = m.is_nari();
-
-                    if let Some(o) = m.obtained() {
-                        if o == ObtainKind::Ou {
-                            MochigomaKind::Hisha as usize * 3 + 3
-                        } else if let Ok(k) = MochigomaKind::try_from(o) {
-                            k as usize * 2 + if nari {
-                                1
-                            } else {
-                                0
-                            } + MochigomaKind::Hisha as usize + 3
-                        } else {
-                            0
-                        }
-                    } else if nari {
-                        1
-                    } else {
-                        0
-                    }
-                }
-            };
+        pub fn new_and_node(id:u64, teban:Teban, state: &State, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
+            let (pn,dn) = initial_pn_dn_plus_and_node(teban,state,m);
 
             let mut parent_refs = HashMap::new();
 
             parent.as_ref().map(|p| parent_refs.insert((p.teban,p.mhash,p.shash),Rc::clone(p)));
 
+            let asc_priority = match m {
+                LegalMove::Put(m) => {
+                    m.kind() as i32 + KomaKind::SHishaN as i32 + ObtainKind::HishaN as i32 + 2
+                },
+                LegalMove::To(m) => {
+                    let from = m.src();
+
+                    let x = from / 9;
+                    let y = from - x * 9;
+
+                    match m.obtained() {
+                        Some(o) => {
+                            o as i32 - ObtainKind::HishaN as i32
+                        },
+                        None => {
+                            if teban == Teban::Sente {
+                                state.get_banmen().0[y as usize][x as usize] as i32 + ObtainKind::HishaN as i32 + 1
+                            } else {
+                                state.get_banmen().0[y as usize][x as usize] as i32 - KomaKind::GFu as i32 + ObtainKind::HishaN as i32 + 1
+                            }
+                        }
+                    }
+                }
+            };
+
             Node {
                 id: id,
-                pn_base: Number::Value(Fraction::new(1)),
-                dn_base: Number::Value(Fraction::new(1)),
-                pn: Number::Value(Fraction::new(1)),
-                dn: Number::Value(Fraction::new(1)),
-                priority: priority,
+                pn_base: Number::Value(pn),
+                dn_base: Number::Value(dn),
+                pn: Number::Value(pn),
+                dn: Number::Value(dn),
+                asc_priority: asc_priority,
                 mate_depth: 0,
                 ref_count:1,
                 sennichite: false,
@@ -746,33 +747,8 @@ pub mod checkmate {
         }
 
         #[inline]
-        pub fn new_or_node(id:u64, m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
-            let priority = match m {
-                LegalMove::Put(m) => {
-                    m.kind() as usize + 2
-                },
-                LegalMove::To(m) => {
-                    let nari = m.is_nari();
-
-                    if let Some(o) = m.obtained() {
-                        if o == ObtainKind::Ou {
-                            MochigomaKind::Hisha as usize * 3 + 3
-                        } else if let Ok(k) = MochigomaKind::try_from(o) {
-                            k as usize * 2 + if nari {
-                                1
-                            } else {
-                                0
-                            } + MochigomaKind::Hisha as usize + 3
-                        } else {
-                            0
-                        }
-                    } else if nari {
-                        1
-                    } else {
-                        0
-                    }
-                }
-            };
+        pub fn new_or_node(id:u64, teban:Teban,state:&State,m:LegalMove, parent:Option<Rc<ParentRef>>) -> Node {
+            let (pn,dn) = initial_pn_dn_plus_or_node(teban,state,m);
 
             let mut parent_refs = HashMap::new();
 
@@ -780,11 +756,11 @@ pub mod checkmate {
 
             Node {
                 id: id,
-                pn_base: Number::Value(Fraction::new(1)),
-                dn_base: Number::Value(Fraction::new(1)),
-                pn: Number::Value(Fraction::new(1)),
-                dn: Number::Value(Fraction::new(1)),
-                priority: priority,
+                pn_base: Number::Value(pn),
+                dn_base: Number::Value(dn),
+                pn: Number::Value(pn),
+                dn: Number::Value(dn),
+                asc_priority: calc_asc_priority(teban,state,m),
                 mate_depth: 0,
                 ref_count:1,
                 sennichite: false,
@@ -844,7 +820,7 @@ pub mod checkmate {
                 dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
-                priority: self.priority,
+                asc_priority: self.asc_priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 sennichite: self.sennichite,
@@ -869,7 +845,7 @@ pub mod checkmate {
                 dn_base: n.dn_base,
                 pn: n.pn,
                 dn: n.dn,
-                priority: n.priority,
+                asc_priority: n.asc_priority,
                 mate_depth: n.mate_depth,
                 ref_count: n.ref_count,
                 sennichite: n.sennichite,
@@ -928,7 +904,7 @@ pub mod checkmate {
         dn_base:Number,
         pn:Number,
         dn:Number,
-        priority:usize,
+        asc_priority:i32,
         mate_depth:u32,
         ref_count:u64,
         expanded:bool,
@@ -951,7 +927,7 @@ pub mod checkmate {
                 dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
-                priority: self.priority,
+                asc_priority: self.asc_priority,
                 mate_depth: self.mate_depth,
                 ref_count: ref_count,
                 sennichite: n.sennichite,
@@ -975,7 +951,7 @@ pub mod checkmate {
                 dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
-                priority: self.priority,
+                asc_priority: self.asc_priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 expanded: self.expanded,
@@ -995,7 +971,7 @@ pub mod checkmate {
                 dn_base: n.dn_base,
                 pn: n.pn,
                 dn: n.dn,
-                priority: n.priority,
+                asc_priority: n.asc_priority,
                 mate_depth: n.mate_depth,
                 ref_count: n.ref_count,
                 expanded: n.expanded,
@@ -1013,7 +989,7 @@ pub mod checkmate {
         dn_base:Number,
         pn:Number,
         dn:Number,
-        priority:usize,
+        asc_priority:i32,
         mate_depth:u32,
         ref_count:u64,
         sennichite:bool,
@@ -1038,7 +1014,7 @@ pub mod checkmate {
                         dn_base: self.dn_base,
                         pn: self.pn,
                         dn: self.dn,
-                        priority: self.priority,
+                        asc_priority: self.asc_priority,
                         mate_depth: self.mate_depth,
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
@@ -1059,7 +1035,7 @@ pub mod checkmate {
                         dn_base: self.dn_base,
                         pn: self.pn,
                         dn: self.dn,
-                        priority: self.priority,
+                        asc_priority: self.asc_priority,
                         mate_depth: self.mate_depth,
                         ref_count: self.ref_count,
                         sennichite: self.sennichite,
@@ -1084,7 +1060,7 @@ pub mod checkmate {
                 dn_base: Number::Value(Fraction::new(0)),
                 pn: Number::Value(Fraction::new(0)),
                 dn: Number::Value(Fraction::new(0)),
-                priority: self.priority,
+                asc_priority: self.asc_priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 sennichite: self.sennichite,
@@ -1152,7 +1128,7 @@ pub mod checkmate {
                 dn_base: self.dn_base,
                 pn: self.pn,
                 dn: self.dn,
-                priority: self.priority,
+                asc_priority: self.asc_priority,
                 mate_depth: self.mate_depth,
                 ref_count: self.ref_count,
                 sennichite: self.sennichite,
@@ -1177,7 +1153,7 @@ pub mod checkmate {
                 dn_base: n.dn_base,
                 pn: n.pn,
                 dn: n.dn,
-                priority: n.priority,
+                asc_priority: n.asc_priority,
                 mate_depth: n.mate_depth,
                 ref_count: n.ref_count,
                 sennichite: n.sennichite,
@@ -1234,7 +1210,7 @@ pub mod checkmate {
                     l.state.cmp(&r.state)
                         .then_with(|| l.pn.cmp(&r.pn))
                         .then_with(|| r.mate_depth.cmp(&l.mate_depth))
-                        .then_with(|| r.priority.cmp(&l.priority))
+                        .then_with(|| l.asc_priority.cmp(&r.asc_priority))
                         .then_with(|| l.id.cmp(&r.id)).reverse()
                 },
                 &Comparator::AndNodeComparator => {
@@ -1242,7 +1218,7 @@ pub mod checkmate {
                         .then_with(|| l.dn.cmp(&r.dn))
                         .then_with(|| l.pn.cmp(&r.pn))
                         .then_with(|| r.mate_depth.cmp(&l.mate_depth))
-                        .then_with(|| r.priority.cmp(&l.priority))
+                        .then_with(|| l.asc_priority.cmp(&r.asc_priority))
                         .then_with(|| l.id.cmp(&r.id)).reverse()
                 }
             }
@@ -1336,52 +1312,66 @@ pub mod checkmate {
                             state:&State,
                             mc:&MochigomaCollections)
                             -> Result<NormalizedNode,ApplicationError> {
-            {
+            let (pn,dn) = {
                 let mut children = n.children.try_borrow_mut()?;
 
                 if depth % 2 == 0 {
+                    let mut pn = Number::INFINITE;
+                    let mut dn = Number::Value(Fraction::new(0));
+
                     let mvs = Rule::oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
                         let id = uniq_id.gen();
-                        Rc::new(RefCell::new(
-                            Node::new_or_node(id, m, parent_ref.map(|p| Rc::clone(p)))
-                        ))
+                        let n = Node::new_or_node(id, teban, state, m, parent_ref.map(|p| Rc::clone(p)));
+
+                        pn = pn.min(n.pn);
+                        dn += n.dn;
+
+                        Rc::new(RefCell::new(n))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
                         children.push(Rc::clone(child));
                     }
+
+                    (pn,dn)
                 } else {
+                    let mut pn = Number::Value(Fraction::new(0));
+                    let mut dn = Number::INFINITE;
+
                     let mvs = Rule::respond_oute_only_moves_all(teban, state, mc);
 
                     let nodes = mvs.into_iter().map(|m| {
                         let id = uniq_id.gen();
-                        Rc::new(RefCell::new(
-                            Node::new_and_node(id, m, parent_ref.map(|p| Rc::clone(p)))
-                        ))
+                        let n = Node::new_and_node(id, teban, state, m, parent_ref.map(|p| Rc::clone(p)));
+
+                        pn += n.pn;
+                        dn = dn.min(n.dn);
+
+                        Rc::new(RefCell::new(n))
                     }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
                     for child in nodes.iter() {
                         children.push(Rc::clone(child));
                     }
+
+                    (pn,dn)
                 }
-            }
+            };
 
             n.expanded = true;
-
-            let len = n.children.try_borrow()?.len();
 
             let parent_count = n.ref_count;
 
             if depth % 2 == 0 {
-                n.pn = Number::Value(Fraction::new(1));
-                n.dn_base = Number::Value(Fraction::new(len as u64));
-                n.dn = Number::Value(Fraction::new(len as u64) / parent_count);
+                n.pn = pn;
+                n.dn_base = dn;
+                n.dn = n.dn_base / parent_count;
             } else {
-                n.pn_base = Number::Value(Fraction::new(len as u64));
-                n.pn = Number::Value(Fraction::new(len as u64) / parent_count);
-                n.dn = Number::Value(Fraction::new(1));
+                n.pn_base = pn;
+                n.pn = pn / parent_count;
+                n.dn = dn;
             }
 
             node_repo.update(teban,mhash,shash,&n)?;
@@ -1400,7 +1390,7 @@ pub mod checkmate {
 
             let nodes = mvs.into_iter().map(|m| {
                 let id = uniq_id.gen();
-                Rc::new(RefCell::new(Node::new_or_node(id, m, None)))
+                Rc::new(RefCell::new(Node::new_or_node(id, teban, state, m, None)))
             }).collect::<VecDeque<Rc<RefCell<Node>>>>();
 
             let children = Rc::new(RefCell::new(BinaryHeap::new()));
