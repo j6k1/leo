@@ -705,21 +705,12 @@ pub mod checkmate {
                     m.kind() as i32 + KomaKind::SHishaN as i32 + ObtainKind::HishaN as i32 + 2
                 },
                 LegalMove::To(m) => {
-                    let from = m.src();
-
-                    let x = from / 9;
-                    let y = from - x * 9;
-
                     match m.obtained() {
                         Some(o) => {
                             o as i32 - ObtainKind::HishaN as i32
                         },
                         None => {
-                            if teban == Teban::Sente {
-                                state.get_banmen().0[y as usize][x as usize] as i32 + ObtainKind::HishaN as i32 + 1
-                            } else {
-                                state.get_banmen().0[y as usize][x as usize] as i32 - KomaKind::GFu as i32 + ObtainKind::HishaN as i32 + 1
-                            }
+                            ObtainKind::HishaN as i32 + 1
                         }
                     }
                 }
