@@ -1272,7 +1272,6 @@ pub mod checkmate {
                 &Comparator::AndNodeComparator => {
                     l.state.cmp(&r.state)
                         .then_with(|| l.dn.cmp(&r.dn))
-                        .then_with(|| l.pn.cmp(&r.pn))
                         .then_with(|| r.mate_depth.cmp(&l.mate_depth))
                         .then_with(|| l.asc_priority.cmp(&r.asc_priority))
                         .then_with(|| l.id.cmp(&r.id)).reverse()
