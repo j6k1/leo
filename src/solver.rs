@@ -532,7 +532,7 @@ pub mod checkmate {
 
                 gc_entry.try_borrow_mut()?.generation = self.generation;
 
-                Ok(node.reflect_to(n,path).into())
+                Ok(node.reflect_to(n,path)?.into())
             } else {
                 let node = NormalizedNode::from(n);
 
@@ -908,29 +908,81 @@ pub mod checkmate {
 
     impl MapNode {
         #[inline]
-        pub fn reflect_to(&self,n:&Node,path:&HashSet<(Teban,u64,u64)>) -> Node {
+        pub fn reflect_to(&self,n:&Node,path:&HashSet<(Teban,u64,u64)>) -> Result<Node,ApplicationError> {
             let parent_refs = n.merge(self,path);
             let ref_count = (parent_refs.len() as u64).max(1);
 
-            Node {
+            let (pn_base,dn_base,pn,dn,state) = if self.state == NodeState::Unknown {
+                if !self.expanded {
+                    match n.comparator {
+                        Comparator::AndNodeComparator => {
+                            (
+                                Number::Value(Fraction::new(1)),
+                                Number::Value(Fraction::new(1)),
+                                Number::Value(Fraction::new(1)),
+                                Number::Value(Fraction::new(1)) / ref_count,
+                                NodeState::UnDecided
+                            )
+                        },
+                        Comparator::OrNodeComparator => {
+                            (
+                                Number::Value(Fraction::new(1)),
+                                Number::Value(Fraction::new(1)),
+                                Number::Value(Fraction::new(1)) / ref_count,
+                                Number::Value(Fraction::new(1)),
+                                NodeState::UnDecided
+                            )
+                        }
+                    }
+                } else {
+                    match n.comparator {
+                        Comparator::AndNodeComparator => {
+                            let mut pn = Number::INFINITE;
+                            let mut dn = Number::Value(Fraction::new(0));
+
+                            for n in self.children.try_borrow()?.iter() {
+                                pn = pn.min(n.try_borrow()?.pn);
+                                dn += n.try_borrow()?.dn;
+                            }
+
+                            (pn,dn,pn,dn / ref_count,NodeState::UnDecided)
+                        },
+                        Comparator::OrNodeComparator => {
+                            let mut dn = Number::INFINITE;
+                            let mut pn = Number::Value(Fraction::new(0));
+
+                            for n in self.children.try_borrow()?.iter() {
+                                dn = dn.min(n.try_borrow()?.dn);
+                                pn += n.try_borrow()?.pn;
+                            }
+
+                            (pn,dn,pn / ref_count,dn,NodeState::UnDecided)
+                        }
+                    }
+                }
+            } else {
+                (self.pn_base,self.dn_base,self.pn,self.dn,self.state)
+            };
+
+            Ok(Node {
                 id: n.id,
-                pn_base: self.pn_base,
-                dn_base: self.dn_base,
-                pn: self.pn,
-                dn: self.dn,
+                pn_base: pn_base,
+                dn_base: dn_base,
+                pn: pn,
+                dn: dn,
                 asc_priority: self.asc_priority,
                 mate_depth: self.mate_depth,
                 ref_count: ref_count,
                 sennichite: n.sennichite,
                 expanded: self.expanded,
-                state: self.state,
+                state: state,
                 m: n.m,
                 children: Rc::downgrade(&self.children),
                 parent_refs: Rc::new(parent_refs),
                 mate_node: self.mate_node.clone(),
                 comparator: n.comparator,
                 generation: self.generation
-            }
+            })
         }
     }
 
@@ -1047,9 +1099,9 @@ pub mod checkmate {
         pub fn to_unknown_node(&self) -> NormalizedNode {
             NormalizedNode {
                 id: self.id,
-                pn_base: Number::Value(Fraction::new(0)),
+                pn_base: Number::INFINITE,
                 dn_base: Number::Value(Fraction::new(0)),
-                pn: Number::Value(Fraction::new(0)),
+                pn: Number::INFINITE,
                 dn: Number::Value(Fraction::new(0)),
                 asc_priority: self.asc_priority,
                 mate_depth: self.mate_depth,
