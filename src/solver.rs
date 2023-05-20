@@ -1686,10 +1686,6 @@ pub mod checkmate {
                 (None,children)
             };
 
-            if self.max_depth.map(|d| depth > d).unwrap_or(false) {
-                return Ok(MaybeMate::MaxDepth);
-            }
-
             let mut mate_mvs = None;
 
             loop {
@@ -1942,6 +1938,10 @@ pub mod checkmate {
                 return Ok(MaybeMate::Aborted)
             }
 
+            if self.max_depth.map(|d| depth > d).unwrap_or(false) {
+                return Ok(MaybeMate::MaxDepth);
+            }
+
             if self.max_nodes.map(|n| self.node_count >= n).unwrap_or(false) {
                 return Ok(MaybeMate::MaxNodes);
             }
@@ -2029,10 +2029,6 @@ pub mod checkmate {
                     "current move is not set."
                 )));
             };
-
-            if self.max_depth.map(|d| depth > d).unwrap_or(false) {
-                return Ok(MaybeMate::MaxDepth);
-            }
 
             let children = Rc::clone(&current_node.children);
 

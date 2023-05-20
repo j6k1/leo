@@ -563,8 +563,8 @@ impl USIPlayer<ApplicationError> for Leo {
 
                 commands.push(UsiInfoSubCommand::Nodes(node_count));
 
-//            Ok(self.info_sender.send(commands)?)
-                Ok(info_sender.send_immediate(commands)?)
+                  Ok(info_sender.send(commands)?)
+//                Ok(info_sender.send_immediate(commands)?)
             })),
             ms
         ) {
