@@ -309,7 +309,9 @@ impl Solver {
         }
     }
 
-    pub fn checkmate<L,S>(&self,strict_moves:bool,
+    pub fn checkmate<L,S>(&self,
+                     strict_moves:bool,
+                     enable_send_seldepth:bool,
                      hash_size:usize,
                      limit:Option<Instant>,
                      checkmate_limit:Option<Instant>,
@@ -327,6 +329,7 @@ impl Solver {
         where L: Logger + Send + 'static, S: InfoSender {
         let mut strategy = CheckmateStrategy::<S>::new(hasher,
                                                   strict_moves,
+                                                  enable_send_seldepth,
                                                   limit,
                                                   checkmate_limit,
                                                   network_delay,
@@ -1296,6 +1299,7 @@ pub mod checkmate {
     pub struct CheckmateStrategy<S> where S: InfoSender {
         hasher:Arc<KyokumenHash<u64>>,
         strict_moves:bool,
+        enable_send_seldepth:bool,
         limit:Option<Instant>,
         checkmate_limit:Option<Instant>,
         network_delay:u32,
@@ -1313,6 +1317,7 @@ pub mod checkmate {
     impl<S> CheckmateStrategy<S> where S: InfoSender {
         pub fn new(hasher:Arc<KyokumenHash<u64>>,
                strict_moves:bool,
+               enable_send_seldepth:bool,
                limit:Option<Instant>,
                checkmate_limit:Option<Instant>,
                network_delay:u32,
@@ -1327,6 +1332,7 @@ pub mod checkmate {
             CheckmateStrategy {
                 hasher:hasher,
                 strict_moves:strict_moves,
+                enable_send_seldepth:enable_send_seldepth,
                 limit:limit,
                 checkmate_limit:checkmate_limit,
                 network_delay:network_delay,
@@ -2386,11 +2392,15 @@ pub mod checkmate {
         }
 
         fn send_seldepth(&mut self, depth:u32) -> Result<(),InfoSendError>{
-            let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
-            commands.push(UsiInfoSubCommand::Depth(self.base_depth));
-            commands.push(UsiInfoSubCommand::SelDepth(self.current_depth + depth));
+            if self.enable_send_seldepth {
+                let mut commands: Vec<UsiInfoSubCommand> = Vec::new();
+                commands.push(UsiInfoSubCommand::Depth(self.base_depth));
+                commands.push(UsiInfoSubCommand::SelDepth(self.current_depth + depth));
 
-            Ok(self.info_sender.send(commands)?)
+                Ok(self.info_sender.send(commands)?)
+            } else {
+                Ok(())
+            }
         }
 
         fn check_timelimit(&mut self) -> bool {

@@ -560,6 +560,7 @@ impl USIPlayer<ApplicationError> for Leo {
 
         match solver.checkmate::<L,S>(
             self.strict_mate,
+            true,
             env.mate_hash,
             env.limit.clone(),
             env.max_ply_timelimit.map(|l| Instant::now() + l),

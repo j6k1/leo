@@ -275,6 +275,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                 match solver.checkmate(
                     false,
+                    false,
                     env.mate_hash,
                     env.limit.clone(),
                     env.max_ply_timelimit.map(|l| Instant::now() + l),
