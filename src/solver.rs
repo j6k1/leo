@@ -3,7 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::ops::{Add, AddAssign, Sub, SubAssign, Div, DivAssign, Mul, MulAssign};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool};
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
 use usiagent::error::InfoSendError;
 
@@ -320,6 +320,7 @@ impl Solver {
                      on_error_handler:&Arc<Mutex<OnErrorHandler<L>>>,
                      hasher:Arc<KyokumenHash<u64>>,
                      stop:Arc<AtomicBool>,
+                     nodes:Arc<AtomicU64>,
                      quited:Arc<AtomicBool>,
                      on_complete:Option<Box<dyn FnOnce(u64) -> Result<(),InfoSendError>>>,
                      ms: GameStateForMate) -> Result<MaybeMate,ApplicationError>
@@ -333,6 +334,7 @@ impl Solver {
                                                   max_nodes,
                                                   info_sender,
                                                   Arc::clone(&stop),
+                                                  Arc::clone(&nodes),
                                                   ms.base_depth,
                                                   ms.current_depth);
         let mut event_dispatcher = Root::<L,S>::create_event_dispatcher::<CheckmateStrategy<S>>(on_error_handler,&stop,&quited);
@@ -371,7 +373,7 @@ pub mod checkmate {
     use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
     use std::ops::{Add, AddAssign, Sub, SubAssign, Deref, Div, Mul};
     use std::rc::{Rc, Weak};
-    use std::sync::atomic::{AtomicBool};
+    use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::{Arc, atomic, Mutex};
     use std::time::{Duration, Instant};
     use usiagent::command::UsiInfoSubCommand;
@@ -1301,6 +1303,7 @@ pub mod checkmate {
         max_nodes:Option<i64>,
         info_sender:S,
         stop:Arc<AtomicBool>,
+        nodes:Arc<AtomicU64>,
         base_depth:u32,
         current_depth:u32,
         node_count:i64,
@@ -1317,6 +1320,7 @@ pub mod checkmate {
                max_nodes:Option<i64>,
                info_sender:S,
                stop:Arc<AtomicBool>,
+               nodes:Arc<AtomicU64>,
                base_depth:u32,
                current_depth:u32,
        ) -> CheckmateStrategy<S> {
@@ -1330,6 +1334,7 @@ pub mod checkmate {
                 max_nodes:max_nodes,
                 info_sender:info_sender,
                 stop:stop,
+                nodes:nodes,
                 base_depth:base_depth,
                 current_depth:current_depth,
                 node_count:0,
@@ -1610,6 +1615,7 @@ pub mod checkmate {
                 return Ok(MaybeMate::MaxNodes);
             }
 
+            self.nodes.fetch_add(1,atomic::Ordering::Release);
             self.node_count += 1;
 
             event_dispatcher.dispatch_events(self,event_queue)?;
@@ -1957,6 +1963,7 @@ pub mod checkmate {
                 return Ok(MaybeMate::MaxNodes);
             }
 
+            self.nodes.fetch_add(1,atomic::Ordering::Release);
             self.node_count += 1;
 
             event_dispatcher.dispatch_events(self,event_queue)?;

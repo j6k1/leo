@@ -486,7 +486,7 @@ impl USIPlayer<ApplicationError> for Leo {
     }
 
     fn think_mate<L,S,P>(&mut self,limit:&UsiGoMateTimeLimit,event_queue:Arc<Mutex<UserEventQueue>>,
-                         info_sender:S,_:P,on_error_handler:Arc<Mutex<OnErrorHandler<L>>>)
+                         info_sender:S,periodically_info:P,on_error_handler:Arc<Mutex<OnErrorHandler<L>>>)
                          -> Result<CheckMate,ApplicationError>
         where L: Logger + Send + 'static,
               S: InfoSender,
@@ -539,6 +539,25 @@ impl USIPlayer<ApplicationError> for Leo {
 
         let think_start_time = Instant::now();
 
+        let _pinfo_sender = {
+            let nodes = env.nodes.clone();
+            let think_start_time = think_start_time.clone();
+            let on_error_handler = env.on_error_handler.clone();
+
+            periodically_info.start(100,move || {
+                let mut commands = vec![];
+                commands.push(UsiInfoSubCommand::Nodes(nodes.load(Ordering::Acquire)));
+
+                let sec = (Instant::now() - think_start_time).as_secs();
+
+                if sec > 0 {
+                    commands.push(UsiInfoSubCommand::Nps(nodes.load(Ordering::Acquire) / sec));
+                }
+
+                commands
+            }, &on_error_handler)
+        };
+
         match solver.checkmate::<L,S>(
             self.strict_mate,
             env.mate_hash,
@@ -551,6 +570,7 @@ impl USIPlayer<ApplicationError> for Leo {
             &env.on_error_handler,
             Arc::clone(&env.hasher),
             Arc::clone(&env.stop),
+            Arc::clone(&env.nodes),
             Arc::clone(&env.quited),
             Some(Box::new(move |node_count| {
                 let mut commands:Vec<UsiInfoSubCommand> = Vec::new();

@@ -16,6 +16,7 @@ use usiagent::player::InfoSender;
 use usiagent::rule::{LegalMove, Rule, State};
 use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError};
+use crate::initial_estimation::{attack_priority, defense_priority};
 use crate::nn::Evalutor;
 use crate::search::Score::{INFINITE, NEGINFINITE};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
@@ -284,6 +285,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     &env.on_error_handler,
                     Arc::clone(&env.hasher),
                     Arc::clone(&env.stop),
+                    Arc::clone(&env.nodes),
                     Arc::clone(&env.quited),
                     None,
                     ms
@@ -324,7 +326,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 }
             }
 
-            let mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
+            let mut mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
 
             if mvs.len() == 0 {
                 let mut mvs = VecDeque::new();
@@ -334,6 +336,9 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     EvaluationResult::Immediate(NEGINFINITE, gs.depth,gs.mhash,gs.shash,mvs)
                 ));
             } else {
+                mvs.sort_by(|&a,&b| {
+                    defense_priority(gs.teban,&gs.state,a).cmp(&defense_priority(gs.teban,&gs.state,b))
+                });
                 mvs
             }
         } else {
@@ -341,7 +346,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
             }
 
-            let mvs:Vec<LegalMove> = Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc);
+            let mut mvs:Vec<LegalMove> = Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc);
+            mvs.sort_by(|&a,&b| {
+                attack_priority(gs.teban,&gs.state,a).cmp(&attack_priority(gs.teban,&gs.state,b))
+            });
 
             mvs
         };
@@ -897,7 +905,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             mvs.push((m,Score::Value(-s)));
         }
 
-        let mut mvs = mvs.into_iter().map(|m| {
+        let mvs = mvs.into_iter().map(|m| {
             if let LegalMove::To(ref mv) = m.0 {
                 if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
                     return (1000,false,m.0,m.1);
@@ -910,10 +918,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 (0,false,m.0,m.1)
             }
         }).collect::<Vec<(u32,bool,LegalMove,Score)>>();
-
-        mvs.sort_by(|a,b| {
-            b.0.cmp(&a.0).then(b.3.cmp(&a.3))
-        });
 
         let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
             "move is not set."
