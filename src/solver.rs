@@ -711,15 +711,26 @@ pub mod checkmate {
 
             let asc_priority = match m {
                 LegalMove::Put(m) => {
-                    m.kind() as i32 + KomaKind::SHishaN as i32 + ObtainKind::HishaN as i32 + 2
+                    m.kind() as i32 + KomaKind::SHishaN as i32 + ObtainKind::HishaN as i32 + 4
                 },
-                LegalMove::To(m) => {
+                LegalMove::To(m) if m.obtained() == Some(ObtainKind::Ou) => {
+                    0
+                },
+                LegalMove::To(m)=> {
+                    let src = m.src();
+                    let x = src / 9;
+                    let y = src - x * 9;
+                    let kind = state.get_banmen().0[y as usize][x as usize];
+
                     match m.obtained() {
                         Some(o) => {
-                            o as i32 - ObtainKind::HishaN as i32
+                            o as i32 - ObtainKind::HishaN as i32 + 1
+                        },
+                        None if kind == KomaKind::SOu || kind == KomaKind::GOu => {
+                            ObtainKind::HishaN as i32 + 2
                         },
                         None => {
-                            ObtainKind::HishaN as i32 + 1
+                            ObtainKind::HishaN as i32 + 3
                         }
                     }
                 }
