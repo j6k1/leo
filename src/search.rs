@@ -653,7 +653,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             mvs.push((m,Score::Value(-s)));
         }
 
-        let mut mvs = mvs.into_iter().map(|m| {
+        let mvs = mvs.into_iter().map(|m| {
             if let LegalMove::To(ref mv) = m.0 {
                 if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
                     return (1000,false,m.0,m.1);
@@ -666,10 +666,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 (0,false,m.0,m.1)
             }
         }).collect::<Vec<(u32,bool,LegalMove,Score)>>();
-
-        mvs.sort_by(|a,b| {
-            b.0.cmp(&a.0).then(b.3.cmp(&a.3))
-        });
 
         let mut alpha = gs.alpha;
         let beta = gs.beta;
