@@ -144,7 +144,7 @@ impl<M> Learnener<M>
 
             loop {
                 match input_reader.read() {
-                    Ok(line) => {
+                    Ok(Some(line)) => {
                         match line.trim_end() {
                             "quit" => {
                                 match system_event_queue.lock() {
@@ -172,6 +172,19 @@ impl<M> Learnener<M>
                                 }
                             }
                             _ => (),
+                        }
+                    },
+                    Ok(None) => {
+                        match system_event_queue.lock() {
+                            Ok(mut system_event_queue) => {
+                                notify_run_test.store(false, Ordering::Release);
+                                system_event_queue.push(SystemEvent::Quit);
+                                return;
+                            },
+                            Err(ref e) => {
+                                let _ = on_error_handler.lock().map(|h| h.call(e));
+                                return;
+                            }
                         }
                     },
                     Err(ref e) => {
