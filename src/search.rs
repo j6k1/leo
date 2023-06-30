@@ -739,12 +739,17 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         }
 
                         if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
-                            is_timeout = true;
+                            if best_moves.is_empty() {
+                                is_timeout = true;
+                            }
                             break;
                         }
                     },
-                    EvaluationResult::Timeout => {
+                    EvaluationResult::Timeout if best_moves.is_empty() => {
                         is_timeout = true;
+                        break;
+                    },
+                    EvaluationResult::Timeout => {
                         break;
                     }
                 }
