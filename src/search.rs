@@ -606,22 +606,31 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         env.stop.store(true,atomic::Ordering::Release);
 
         let mut score = score;
+        let mut last_error = None;
 
         while evalutor.active_threads() > 0 {
-            match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r)? {
-                EvaluationResult::Immediate(s,_,_,_,mvs) => {
+            match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
+                Ok(EvaluationResult::Immediate(s,_,_,_,mvs)) => {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
                         self.send_info(env, env.base_depth,gs.current_depth,&best_moves,&score)?;
                     }
                 },
+                e @ Err(_) => {
+                    last_error = Some(e);
+                }
                 _ => ()
             }
-            evalutor.on_end_thread().map_err(|e| ApplicationError::from(e))?;
+
+            if let Err(e) = evalutor.on_end_thread().map_err(|e| ApplicationError::from(e)) {
+                last_error = Some(Err(e));
+            }
         }
 
-        if is_timeout && best_moves.is_empty() {
+        if let Some(e) = last_error {
+            e
+        } else if is_timeout && best_moves.is_empty() {
             Ok(EvaluationResult::Timeout)
         } else {
             Ok(EvaluationResult::Immediate(score, gs.depth, gs.mhash, gs.shash, best_moves))
@@ -676,6 +685,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mvs_count = mvs.len() as u64;
 
         let mut threads = env.max_threads.min(mvs_count as u32);
+        let mut force_recv = false;
 
         let sender = self.sender.clone();
 
@@ -684,10 +694,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mut is_timeout = false;
 
         loop {
-            if threads == 0 {
+            if threads == 0 || force_recv {
                 let r = self.receiver.recv();
 
                 evalutor.on_end_thread()?;
+
+                if evalutor.active_threads() == 0 {
+                    force_recv = false;
+                }
 
                 let r = r?.map_err(|e| ApplicationError::from(e))?;
 
@@ -831,7 +845,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     None => (),
                 }
             } else if evalutor.active_threads() > 0 {
-                threads -= 1;
+                force_recv = true;
             } else {
                 break;
             }
@@ -845,20 +859,40 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         let r = self.parallelized(env,gs,event_dispatcher,evalutor);
+        let mut last_error = None;
 
         env.stop.store(true,atomic::Ordering::Release);
 
         match r {
             Ok(r) => {
                 while evalutor.active_threads() > 0 {
-                    self.receiver.recv()?.map_err(|e| ApplicationError::from(e))?;
-                    evalutor.on_end_thread()?;
+                    if let Err(e) = self.receiver.recv().map_err(|e| ApplicationError::from(e)) {
+                        last_error = Some(Err(e));
+                    }
+
+                    if let Err(e) = evalutor.on_end_thread().map_err(|e| ApplicationError::from(e)) {
+                        last_error = Some(Err(e));
+                    }
                 }
 
-                Ok(r)
+                if let Some(e) = last_error {
+                    e
+                } else {
+                    Ok(r)
+                }
             },
             Err(e) => {
-                Err(e)
+                while evalutor.active_threads() > 0 {
+                    if let Err(e) = self.receiver.recv().map_err(|e| ApplicationError::from(e)) {
+                        last_error = Some(Err(e));
+                    }
+
+                    if let Err(e) = evalutor.on_end_thread().map_err(|e| ApplicationError::from(e)) {
+                        last_error = Some(Err(e));
+                    }
+                }
+
+                last_error.unwrap_or(Err(e))
             }
         }
     }
