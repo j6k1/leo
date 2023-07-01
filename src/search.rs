@@ -614,7 +614,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
-                        self.send_info(env, env.base_depth,gs.current_depth,&best_moves,&score)?;
+                        if let Err(e) =  self.send_info(env, env.base_depth,gs.current_depth,&best_moves,&score) {
+                            last_error = Some(Err(e));
+                        }
                     }
                 },
                 e @ Err(_) => {
@@ -722,7 +724,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if -s > scoreval {
+                        if -s >= scoreval {
                             scoreval = -s;
 
                             self.send_info(env, env.base_depth,gs.current_depth,&mvs, &scoreval)?;
