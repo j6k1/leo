@@ -315,7 +315,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 Some(m) => {
                     let mut mvs = VecDeque::new();
                     mvs.push_front(m);
-                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(gs.score, gs.depth, gs.mhash, gs.shash,mvs)));
+                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(-gs.score, gs.depth, gs.mhash, gs.shash,mvs)));
                 }
             }
         }
