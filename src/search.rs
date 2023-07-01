@@ -724,7 +724,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if -s >= scoreval {
+                        if -s > scoreval {
                             scoreval = -s;
 
                             self.send_info(env, env.base_depth,gs.current_depth,&mvs, &scoreval)?;

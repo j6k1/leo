@@ -458,6 +458,9 @@ impl USIPlayer<ApplicationError> for Leo {
                         self.send_message_immediate(&mut env,"think timeout!")?;
                         BestMove::Resign
                     },
+                    Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_,_,_,_)) => {
+                        BestMove::Resign
+                    },
                     Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
                         self.send_message_immediate(&mut env,"moves is empty!")?;
                         BestMove::Resign
