@@ -366,7 +366,7 @@ impl Evalutor {
                         .zip(m.into_par_iter().zip(s.into_par_iter()))
                         .for_each(|(r,(m,s))| {
 
-                        let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 29) as f32) as i32));
+                        let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 23) as f32) as i32));
                     });
                 },
                 Err(e) => {
