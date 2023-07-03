@@ -17,6 +17,7 @@ use crate::error::{ApplicationError};
 use crate::nn::Evalutor;
 use crate::search::{BASE_DEPTH, DEFALUT_DISPLAY_EVALUTE_SCORE, DEFAULT_MATE_HASH, DEFAULT_STRICT_MATE, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_PLY, MAX_PLY_TIMELIMIT, MAX_THREADS, MIN_TURN_COUNT, NETWORK_DELAY, Root, Score, Search, TURN_COUNT};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
+use crate::transposition_table::{TT, ZobristHash};
 
 pub trait FromOption {
     fn from_option(option:SysEventOption) -> Option<Self> where Self: Sized;
@@ -60,12 +61,12 @@ pub struct Leo {
     evalutor: Option<Evalutor>,
     kyokumen:Option<Kyokumen>,
     remaining_turns:u32,
-    mhash:u64,
-    shash:u64,
+    zh:Option<ZobristHash<u64>>,
     oute_kyokumen_map:KyokumenMap<u64,()>,
     kyokumen_map:KyokumenMap<u64,u32>,
     pub history:Vec<(Banmen,MochigomaCollections,u64,u64)>,
     hasher:Arc<KyokumenHash<u64>>,
+    transposition_tabale:Arc<TT<u64,Score,{1<<20},4>>,
     base_depth:u32,
     max_depth:u32,
     max_nodes:Option<i64>,
@@ -97,12 +98,12 @@ impl Leo {
             evalutor:None,
             kyokumen:None,
             remaining_turns:0,
-            mhash:0,
-            shash:0,
+            zh:None,
             oute_kyokumen_map:KyokumenMap::new(),
             kyokumen_map:KyokumenMap::new(),
             history:Vec::new(),
             hasher:Arc::new(KyokumenHash::new()),
+            transposition_tabale:Arc::new(TT::new()),
             base_depth:BASE_DEPTH,
             max_depth:MAX_DEPTH,
             max_nodes:None,
@@ -277,6 +278,16 @@ impl USIPlayer<ApplicationError> for Leo {
         self.kyokumen = None;
         self.history.clear();
         self.remaining_turns = self.turn_count;
+        match Arc::get_mut(&mut self.transposition_tabale) {
+            Some(transposition_tabale) => {
+                transposition_tabale.clear();
+            },
+            None => {
+                return Err(ApplicationError::InvalidStateError(String::from(
+                    "Failed to get mutable reference for transposition_table."
+                )));
+            }
+        }
         Ok(())
     }
     fn set_position(&mut self,teban:Teban,banmen:Banmen,
@@ -286,45 +297,46 @@ impl USIPlayer<ApplicationError> for Leo {
         self.kyokumen_map = KyokumenMap::new();
 
         let kyokumen_map:KyokumenMap<u64,u32> = KyokumenMap::new();
-        let (mhash,shash) = self.hasher.calc_initial_hash(&banmen, &ms, &mg);
+        let zh = ZobristHash::new(&self.hasher,teban,&banmen,&ms,&mg);
 
         let teban = teban;
         let state = State::new(banmen);
 
         let mc = MochigomaCollections::new(ms,mg);
 
-
         let history:Vec<(Banmen,MochigomaCollections,u64,u64)> = Vec::new();
 
         let (t,state,mc,r) = self.apply_moves(state,teban, mc,&m.into_iter()
                 .map(|m| m.to_applied_move())
                 .collect::<Vec<AppliedMove>>(),
-        (mhash,shash,kyokumen_map,history),
+        (zh,kyokumen_map,history),
           |_,t,banmen,mc,m,o,r| {
-          let (prev_mhash,prev_shash,mut kyokumen_map,mut history) = r;
+          let (mut zh,mut kyokumen_map,mut history) = r;
+          let (prev_mhash,prev_shash) = zh.keys();
 
-          let (mhash,shash) = match m {
+          let zh = match m {
               &Some(m) => {
-                  let mhash = self.hasher.calc_main_hash(prev_mhash, t, &banmen, &mc, m, &o);
-                  let shash = self.hasher.calc_sub_hash(prev_shash, t, &banmen, &mc, m, &o);
+                  zh = zh.updated(&self.hasher,t,&banmen,&mc,m,&o);
+
+                  let (mhash,shash) = zh.keys();
 
                   match kyokumen_map.get(t,&mhash,&shash).unwrap_or(&0) {
                       &c => {
                           kyokumen_map.insert(t,mhash,shash,c+1);
                       }
                   };
-                  (mhash,shash)
+                  zh
               },
               &None => {
-                  (prev_mhash,prev_shash)
+                  zh
               }
           };
 
           history.push((banmen.clone(),mc.clone(),prev_mhash,prev_shash));
-          (mhash,shash,kyokumen_map,history)
+          (zh,kyokumen_map,history)
         });
 
-        let (mhash,shash,kyokumen_map,history) = r;
+        let (zh,kyokumen_map,history) = r;
 
         let mut oute_kyokumen_map:KyokumenMap<u64,()> = KyokumenMap::new();
         let mut current_teban = t.opposite();
@@ -355,8 +367,7 @@ impl USIPlayer<ApplicationError> for Leo {
             mc:mc,
             teban:t
         });
-        self.mhash = mhash;
-        self.shash = shash;
+        self.zh = Some(zh);
         self.oute_kyokumen_map = oute_kyokumen_map;
         self.kyokumen_map = kyokumen_map;
         self.history = history;
@@ -396,10 +407,10 @@ impl USIPlayer<ApplicationError> for Leo {
             self.network_delay,
             self.display_evalute_score,
             self.max_threads,
-            self.mate_hash
+            self.mate_hash,
+            &self.transposition_tabale
         );
 
-        let (mhash,shash) = (self.mhash.clone(), self.shash.clone());
         let kyokumen_map = self.kyokumen_map.clone();
         let oute_kyokumen_map = self.oute_kyokumen_map.clone();
         let base_depth = env.base_depth;
@@ -427,6 +438,13 @@ impl USIPlayer<ApplicationError> for Leo {
                     }, &on_error_handler)
                 };
 
+                let zh = match self.zh.as_ref() {
+                    Some(zh) => zh.clone(),
+                    None => {
+                        return Err(ApplicationError::InvalidStateError(format!("ZobristHash is not initialized!")))
+                    }
+                };
+
                 let mut gs = GameState {
                     teban: teban,
                     state: &Arc::new(state.clone()),
@@ -438,8 +456,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     obtained:None,
                     current_kyokumen_map:&kyokumen_map,
                     oute_kyokumen_map:&oute_kyokumen_map,
-                    mhash:mhash,
-                    shash:shash,
+                    zh:zh,
                     depth:base_depth,
                     current_depth:0
                 };
@@ -458,14 +475,14 @@ impl USIPlayer<ApplicationError> for Leo {
                         self.send_message_immediate(&mut env,"think timeout!")?;
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_,_,_,_)) => {
+                    Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_)) => {
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) if mvs.len() == 0 => {
+                    Ok(EvaluationResult::Immediate(_,mvs)) if mvs.len() == 0 => {
                         self.send_message_immediate(&mut env,"moves is empty!")?;
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,_,_,_,mvs)) => {
+                    Ok(EvaluationResult::Immediate(_,mvs)) => {
                         BestMove::Move(mvs[0].to_move(),None)
                     }
                 };
@@ -499,7 +516,14 @@ impl USIPlayer<ApplicationError> for Leo {
                 String::from("Position information is not initialized."))
         )?;
 
-        let (mhash,shash) = (self.mhash.clone(), self.shash.clone());
+        let zh = match self.zh.as_ref() {
+            Some(zh) => zh.clone(),
+            None => {
+                return Err(ApplicationError::InvalidStateError(format!("ZobristHash is not initialized!")))
+            }
+        };
+
+        let (mhash,shash) = zh.keys();
 
         let limit = limit.to_instant(Instant::now());
 
@@ -521,7 +545,8 @@ impl USIPlayer<ApplicationError> for Leo {
             self.max_ply_timelimit.map(|l| Duration::from_micros(l)), self.network_delay,
             self.display_evalute_score,
             self.max_threads,
-            self.mate_hash
+            self.mate_hash,
+            &self.transposition_tabale
         );
 
         let ms = GameStateForMate {

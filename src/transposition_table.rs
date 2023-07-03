@@ -8,34 +8,35 @@ use usiagent::hash::{InitialHash, KyokumenHash};
 use usiagent::rule::AppliedMove;
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, MochigomaKind, Teban};
 
-pub trait ToTTIndex {
-    fn to_tt_index(self) -> usize;
+pub trait ToBucketIndex {
+    fn to_bucket_index(self) -> usize;
 }
-impl ToTTIndex for u128 {
-    fn to_tt_index(self) -> usize {
+impl ToBucketIndex for u128 {
+    fn to_bucket_index(self) -> usize {
         self as usize
     }
 }
-impl ToTTIndex for u64 {
-    fn to_tt_index(self) -> usize {
+impl ToBucketIndex for u64 {
+    fn to_bucket_index(self) -> usize {
         self as usize
     }
 }
-impl ToTTIndex for u32 {
-    fn to_tt_index(self) -> usize {
+impl ToBucketIndex for u32 {
+    fn to_bucket_index(self) -> usize {
         self as usize
     }
 }
-impl ToTTIndex for u16 {
-    fn to_tt_index(self) -> usize {
+impl ToBucketIndex for u16 {
+    fn to_bucket_index(self) -> usize {
         self as usize
     }
 }
-impl ToTTIndex for u8 {
-    fn to_tt_index(self) -> usize {
+impl ToBucketIndex for u8 {
+    fn to_bucket_index(self) -> usize {
         self as usize
     }
 }
+#[derive(Debug,Clone)]
 pub struct ZobristHash<T>
     where T: Add + Sub + BitXor<Output = T> + Copy + InitialHash,
              Wrapping<T>: Add<Output = Wrapping<T>> + Sub<Output = Wrapping<T>> + BitXor<Output = Wrapping<T>> + Copy,
@@ -78,77 +79,70 @@ impl<T> ZobristHash<T>
         self.teban
     }
 }
-pub struct TTPartialEntry {
+#[derive(Debug,Clone)]
+pub struct TTPartialEntry<T> where T: Default {
     pub depth:u8,
-    pub static_eval:u32,
-    pub search_eval:u32
+    pub score:T
 }
-impl Default for TTPartialEntry {
+impl<T> Default for TTPartialEntry<T> where T: Default {
     fn default() -> Self {
         TTPartialEntry {
             depth:0,
-            static_eval:0,
-            search_eval:0
+            score:T::default()
         }
     }
 }
-pub struct TTEntry<K> where K: Eq {
+#[derive(Debug,Clone)]
+pub struct TTEntry<T,K> where K: Eq, T: Default {
     used:bool,
     mhash:K,
     shash:K,
     teban:Teban,
-    generation:u16,
-    entry:TTPartialEntry
+    entry:TTPartialEntry<T>
 }
-impl<K> TTEntry<K> where K: Eq + Default {
-    pub fn priority(&self,generation:u16) -> u16 {
-        i16::MAX as u16 + self.entry.depth as u16 - (generation - self.generation)
-    }
-}
-impl<K> Default for TTEntry<K> where K: Eq + Default {
+impl<T,K> Default for TTEntry<T,K> where K: Eq + Default, T: Default {
     fn default() -> Self {
         TTEntry {
             used:false,
             mhash:K::default(),
             shash:K::default(),
             teban:Teban::Sente,
-            generation:0,
             entry: TTPartialEntry::default()
         }
     }
 }
-pub struct ReadGuard<'a,K,const N:usize> where K: Eq {
-    locked_bucket:RwLockReadGuard<'a, [TTEntry<K>;N]>,
+pub struct ReadGuard<'a,T,K,const N:usize> where K: Eq, T: Default {
+    locked_bucket:RwLockReadGuard<'a, [TTEntry<T,K>;N]>,
     index:usize
 }
-impl<'a,K,const N:usize> ReadGuard<'a,K,N> where K: Eq {
-    fn new(locked_bucket:RwLockReadGuard<'a,[TTEntry<K>;N]>,index:usize) -> ReadGuard<'a,K,N> {
+impl<'a,T,K,const N:usize> ReadGuard<'a,T,K,N> where K: Eq, T: Default {
+    fn new(locked_bucket:RwLockReadGuard<'a,[TTEntry<T,K>;N]>,index:usize) -> ReadGuard<'a,T,K,N> {
         ReadGuard {
             locked_bucket:locked_bucket,
             index:index
         }
     }
 }
-impl<'a,K,const N:usize> Deref for ReadGuard<'a,K,N> where K: Eq {
-    type Target = TTPartialEntry;
+impl<'a,T,K,const N:usize> Deref for ReadGuard<'a,T,K,N> where K: Eq, T: Default {
+    type Target = TTPartialEntry<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.locked_bucket.deref().index(self.index).entry
     }
 }
-pub struct WriteGuard<'a,K,const N:usize> where K: Eq {
-    locked_bucket:RwLockWriteGuard<'a, [TTEntry<K>;N]>,
+pub struct WriteGuard<'a,T,K,const N:usize> where K: Eq, T: Default {
+    locked_bucket:RwLockWriteGuard<'a, [TTEntry<T,K>;N]>,
     index:usize
 }
-impl<'a,K,const N:usize> WriteGuard<'a,K,N> where K: Eq {
-    fn new(locked_bucket:RwLockWriteGuard<'a,[TTEntry<K>;N]>,index:usize) -> WriteGuard<'a,K,N> {
+impl<'a,T,K,const N:usize> WriteGuard<'a,T,K,N> where K: Eq, T: Default {
+    fn new(locked_bucket:RwLockWriteGuard<'a,[TTEntry<T,K>;N]>,index:usize) -> WriteGuard<'a,T,K,N> {
         WriteGuard {
             locked_bucket:locked_bucket,
             index:index
         }
     }
 
-    fn remove(&mut self) -> TTPartialEntry {
+    fn remove(&mut self) -> TTPartialEntry<T> {
         let mut e = self.locked_bucket.deref_mut().index_mut(self.index);
 
         e.used = false;
@@ -156,138 +150,139 @@ impl<'a,K,const N:usize> WriteGuard<'a,K,N> where K: Eq {
         mem::replace(&mut e.entry,TTPartialEntry::default())
     }
 
-    fn insert(&mut self,entry:TTEntry<K>) {
+    fn insert(&mut self,entry:TTEntry<T,K>) {
         let e = self.locked_bucket.deref_mut().index_mut(self.index);
 
         *e = entry
     }
 }
-impl<'a,K,const N:usize> Deref for WriteGuard<'a,K,N> where K: Eq {
-    type Target = TTPartialEntry;
+impl<'a,T,K,const N:usize> Deref for WriteGuard<'a,T,K,N> where K: Eq, T: Default {
+    type Target = TTPartialEntry<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.locked_bucket.deref().index(self.index).entry
     }
 }
 
-impl<'a,K,const N:usize> DerefMut for WriteGuard<'a,K,N> where K: Eq {
+impl<'a,T,K,const N:usize> DerefMut for WriteGuard<'a,T,K,N> where K: Eq, T: Default {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.locked_bucket.deref_mut().index_mut(self.index).entry
     }
 }
-pub struct OccupiedTTEntry<'a,K,const N:usize> where K: Eq {
-    write_guard:WriteGuard<'a,K,N>
+pub struct OccupiedTTEntry<'a,T,K,const N:usize> where K: Eq, T: Default {
+    write_guard:WriteGuard<'a,T,K,N>
 }
-impl<'a,K,const N:usize> OccupiedTTEntry<'a,K,N> where K: Eq {
-    fn new(write_guard:WriteGuard<'a,K,N>) -> OccupiedTTEntry<'a,K,N> {
+impl<'a,T,K,const N:usize> OccupiedTTEntry<'a,T,K,N> where K: Eq, T: Default {
+    fn new(write_guard:WriteGuard<'a,T,K,N>) -> OccupiedTTEntry<'a,T,K,N> {
         OccupiedTTEntry {
             write_guard:write_guard
         }
     }
 
-    pub fn get(&self) -> &TTPartialEntry {
+    pub fn get(&self) -> &TTPartialEntry<T> {
         self.write_guard.deref()
     }
 
-    pub fn get_mut(&mut self) -> &mut TTPartialEntry {
+    pub fn get_mut(&mut self) -> &mut TTPartialEntry<T> {
         self.write_guard.deref_mut()
     }
 
-    pub fn remove(&mut self) -> TTPartialEntry {
+    pub fn remove(&mut self) -> TTPartialEntry<T> {
         self.write_guard.remove()
     }
 
-    pub fn insert(&mut self,entry:TTPartialEntry) -> &mut TTPartialEntry {
+    pub fn insert(&mut self,entry:TTPartialEntry<T>) -> &mut TTPartialEntry<T> {
         *self.write_guard.deref_mut() = entry;
         self.write_guard.deref_mut()
     }
 }
-pub struct VacantTTEntry<'a,K,const N:usize> where K: Eq + Copy {
+pub struct VacantTTEntry<'a,T,K,const N:usize> where K: Eq + Copy, T: Default {
     mhash:K,
     shash:K,
     teban:Teban,
-    generation:u16,
-    write_guard:WriteGuard<'a,K,N>
+    write_guard:WriteGuard<'a,T,K,N>
 }
-impl<'a,K,const N:usize> VacantTTEntry<'a,K,N> where K: Eq + Copy {
-    fn new(write_guard:WriteGuard<'a,K,N>,mhash:K,shash:K,teban:Teban,generation:u16) -> VacantTTEntry<'a,K,N> {
+impl<'a,T,K,const N:usize> VacantTTEntry<'a,T,K,N> where K: Eq + Copy, T: Default {
+    fn new(write_guard:WriteGuard<'a,T,K,N>,mhash:K,shash:K,teban:Teban) -> VacantTTEntry<'a,T,K,N> {
         VacantTTEntry {
             mhash:mhash,
             shash:shash,
             teban:teban,
-            generation:generation,
             write_guard:write_guard
         }
     }
 
-    pub fn insert(&mut self,entry:TTPartialEntry) -> &mut TTPartialEntry {
+    pub fn insert(&mut self,entry:TTPartialEntry<T>) -> &mut TTPartialEntry<T> {
         self.write_guard.insert(TTEntry {
             used:true,
             mhash:self.mhash,
             shash:self.shash,
             teban:self.teban,
-            generation:self.generation,
             entry:entry
         });
 
         self.write_guard.deref_mut()
     }
 }
-pub enum Entry<'a,K,const N:usize> where K: Eq + Copy {
-    OccupiedTTEntry(OccupiedTTEntry<'a,K,N>),
-    VacantTTEntry(VacantTTEntry<'a,K,N>)
+pub enum Entry<'a,T,K,const N:usize> where K: Eq + Copy, T: Default {
+    OccupiedTTEntry(OccupiedTTEntry<'a,T,K,N>),
+    VacantTTEntry(VacantTTEntry<'a,T,K,N>)
 }
-impl<'a,K,const N:usize> Entry<'a,K,N> where K: Eq + Copy {
-    pub fn or_insert(&mut self,entry:TTPartialEntry) -> &mut TTPartialEntry where K: Copy {
+impl<'a,T,K,const N:usize> Entry<'a,T,K,N> where K: Eq + Copy, T: Default {
+    pub fn or_insert(&mut self,entry:TTPartialEntry<T>) -> &mut TTPartialEntry<T> where K: Copy {
         match self {
-            Entry::OccupiedTTEntry(e) => {
+            Entry::OccupiedTTEntry(ref mut e) => {
                 e.get_mut()
             },
-            Entry::VacantTTEntry(e) => {
+            Entry::VacantTTEntry(ref mut e) => {
                 e.insert(entry)
             }
         }
+    }
+
+    pub fn or_default(&mut self) -> &mut TTPartialEntry<T> where K: Copy {
+        self.or_insert(TTPartialEntry::default())
     }
 }
 const fn support_fast_mod(v:usize) -> bool {
     v != 0 && v & (v - 1) == 0
 }
-pub struct TT<K,const S:usize,const N:usize>
-    where K: Eq + Default + Add + Sub + BitXor<Output = K> + Copy + InitialHash + ToTTIndex,
+pub struct TT<K,T,const S:usize,const N:usize>
+    where K: Eq + Default + Add + Sub + BitXor<Output = K> + Copy + InitialHash + ToBucketIndex,
              Wrapping<K>: Add<Output = Wrapping<K>> + Sub<Output = Wrapping<K>> + BitXor<Output = Wrapping<K>> + Copy,
              Standard: Distribution<K>,
-             [TTEntry<K>;N]: Default {
-    buckets:Vec<RwLock<[TTEntry<K>;N]>>,
-    generation:u16
+             [TTEntry<T,K>;N]: Default,
+             T: Default {
+    buckets:Vec<RwLock<[TTEntry<T,K>;N]>>
 }
-impl<K,const S:usize,const N:usize> TT<K,S,N>
-    where K: Eq + Default + Add + Sub + BitXor<Output = K> + Copy + InitialHash + ToTTIndex,
+impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
+    where K: Eq + Default + Add + Sub + BitXor<Output = K> + Copy + InitialHash + ToBucketIndex,
              Wrapping<K>: Add<Output = Wrapping<K>> + Sub<Output = Wrapping<K>> + BitXor<Output = Wrapping<K>> + Copy,
              Standard: Distribution<K>,
-             [TTEntry<K>;N]: Default  {
-    pub fn with_size() -> TT<K,S,N> {
+             [TTEntry<T,K>;N]: Default,
+             T: Default {
+    pub fn new() -> TT<K,T,S,N> {
         let mut buckets = Vec::with_capacity(S);
         buckets.resize_with(S,RwLock::default);
 
         TT {
-            buckets:buckets,
-            generation:0
+            buckets:buckets
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.buckets.fill_with(RwLock::default);
     }
 
     fn bucket_index(&self,zh:&ZobristHash<K>) -> usize {
         if support_fast_mod(S) {
-            zh.mhash.to_tt_index() & (S - 1)
+            zh.mhash.to_bucket_index() & (S - 1)
         } else {
-            zh.mhash.to_tt_index() % S
+            zh.mhash.to_bucket_index() % S
         }
     }
 
-    pub fn generation_to_next(&mut self) {
-        self.generation += 8;
-    }
-
-    pub fn get(&self,zh: &ZobristHash<K>) -> Option<ReadGuard<'_,K,N>> {
+    pub fn get(&self,zh: &ZobristHash<K>) -> Option<ReadGuard<'_,T,K,N>> {
         let index = self.bucket_index(zh);
 
         match self.buckets[index].read() {
@@ -306,7 +301,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
         }
     }
 
-    pub fn get_mut(&self,zh: &ZobristHash<K>) -> Option<WriteGuard<'_,K,N>> {
+    pub fn get_mut(&self,zh: &ZobristHash<K>) -> Option<WriteGuard<'_,T,K,N>> {
         let index = self.bucket_index(zh);
 
         match self.buckets[index].write() {
@@ -325,7 +320,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
         }
     }
 
-    pub fn insert(&self,zh: &ZobristHash<K>, entry:TTPartialEntry) -> Option<TTPartialEntry> {
+    pub fn insert(&self,zh: &ZobristHash<K>, entry:TTPartialEntry<T>) -> Option<TTPartialEntry<T>> {
         let index = self.bucket_index(zh);
 
         let tte = TTEntry {
@@ -333,7 +328,6 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
             mhash:zh.mhash,
             shash:zh.shash,
             teban:zh.teban,
-            generation:self.generation,
             entry: entry
         };
 
@@ -348,7 +342,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
                 }
 
                 let mut index = 0;
-                let mut priority = u16::MAX;
+                let mut priority = u8::MAX;
 
                 for i in 0..bucket.len() {
                     if !bucket[i].used {
@@ -356,7 +350,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
                         break;
                     }
 
-                    let pri = bucket[i].priority(self.generation);
+                    let pri = bucket[i].entry.depth;
 
                     if pri <= priority {
                         priority = pri;
@@ -378,7 +372,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
         }
     }
 
-    pub fn entry(&self,zh: &ZobristHash<K>) -> Entry<'_,K,N> {
+    pub fn entry(&self,zh: &ZobristHash<K>) -> Entry<'_,T,K,N> {
         let index = self.bucket_index(zh);
 
         match self.buckets[index].write() {
@@ -392,7 +386,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
                 }
 
                 let mut index = 0;
-                let mut priority = u16::MAX;
+                let mut priority = u8::MAX;
 
                 for i in 0..bucket.len() {
                     if !bucket[i].used {
@@ -400,7 +394,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
                         break;
                     }
 
-                    let pri = bucket[i].priority(self.generation);
+                    let pri = bucket[i].entry.depth;
 
                     if pri <= priority {
                         priority = pri;
@@ -413,8 +407,7 @@ impl<K,const S:usize,const N:usize> TT<K,S,N>
               WriteGuard::new(bucket, index),
                         zh.mhash,
                         zh.shash,
-                        zh.teban,
-                        self.generation
+                        zh.teban
                     )
                 )
             },

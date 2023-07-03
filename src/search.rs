@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
 use std::marker::PhantomData;
-use std::ops::{Add, Neg, Sub};
+use std::ops::{Add, Deref, Neg, Sub};
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
-use concurrent_fixed_hashmap::ConcurrentFixedHashMap;
 use usiagent::command::{UsiInfoSubCommand, UsiScore, UsiScoreMate};
 use usiagent::error::EventHandlerError;
 use usiagent::event::{EventDispatcher, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, UserEventQueue, USIEventDispatcher};
@@ -20,6 +19,7 @@ use crate::initial_estimation::{attack_priority, defense_priority};
 use crate::nn::Evalutor;
 use crate::search::Score::{INFINITE, NEGINFINITE};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
+use crate::transposition_table::{TT, TTPartialEntry, ZobristHash};
 
 pub const BASE_DEPTH:u32 = 2;
 pub const MAX_DEPTH:u32 = 6;
@@ -136,7 +136,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn startup_strategy<'a>(&self,env:&mut Environment<L,S>,
                             gs: &mut GameState<'a>,
                             m:LegalMove, priority:u32,is_oute:bool)
-                            -> Option<(u32,Option<ObtainKind>,u64,u64,KyokumenMap<u64,()>,KyokumenMap<u64,u32>,bool)> {
+                            -> Option<(u32,Option<ObtainKind>,ZobristHash<u64>,KyokumenMap<u64,()>,KyokumenMap<u64,u32>,bool)> {
 
         let obtained = match m {
             LegalMove::To(ref m) => m.obtained(),
@@ -146,11 +146,12 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut oute_kyokumen_map = gs.oute_kyokumen_map.clone();
         let mut current_kyokumen_map = gs.current_kyokumen_map.clone();
 
-        let (mhash,shash) = {
+        let zh = {
             let o = gs.obtained.and_then(|o| MochigomaKind::try_from(o).ok());
 
-            let mhash = env.hasher.calc_main_hash(gs.mhash,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
-            let shash = env.hasher.calc_sub_hash(gs.shash,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
+            let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
+
+            let (mhash,shash) = zh.keys();
 
             if is_oute {
                 match oute_kyokumen_map.get(gs.teban,&mhash,&shash) {
@@ -163,8 +164,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 }
             }
 
-            (mhash,shash)
+            zh
         };
+
+        let (mhash,shash) = zh.keys();
 
         if !is_oute {
             oute_kyokumen_map.clear(gs.teban);
@@ -188,7 +191,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             _ => false,
         };
 
-        Some((depth,obtained,mhash,shash,oute_kyokumen_map,current_kyokumen_map,is_sennichite))
+        Some((depth,obtained,zh,oute_kyokumen_map,current_kyokumen_map,is_sennichite))
     }
 
     fn before_search<'a,'b>(&self,
@@ -207,19 +210,22 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         if let Some(ObtainKind::Ou) = gs.obtained {
-            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,gs.depth,gs.mhash,gs.shash,VecDeque::new())));
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(NEGINFINITE,VecDeque::new())));
         }
 
         if let Some(m) = gs.m {
             if Rule::is_mate(gs.teban, &*gs.state) {
                 let mut mvs = VecDeque::new();
                 mvs.push_front(m);
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE,gs.depth,gs.mhash,gs.shash,mvs)));
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE,mvs)));
             }
 
-            let r = env.kyokumen_score_map.get(&(gs.teban, gs.mhash, gs.shash)).map(|g| *g);
+            let r = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone());
 
-            if let Some((s,d)) = r {
+            if let Some(TTPartialEntry {
+                depth:d,
+                score:s
+            }) = r {
                 match s {
                     Score::INFINITE => {
                         if env.display_evalute_score {
@@ -229,7 +235,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         mvs.push_front(m);
 
                         return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(Score::INFINITE, gs.depth, gs.mhash, gs.shash, mvs)
+                            EvaluationResult::Immediate(Score::INFINITE, mvs)
                         ));
                     },
                     Score::NEGINFINITE => {
@@ -240,10 +246,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         mvs.push_front(m);
 
                         return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(Score::NEGINFINITE, gs.depth, gs.mhash, gs.shash, mvs)
+                            EvaluationResult::Immediate(Score::NEGINFINITE, mvs)
                         ));
                     },
-                    Score::Value(s) if d >= gs.depth => {
+                    Score::Value(s) if d as u32 >= gs.depth => {
                         if env.display_evalute_score {
                             self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
                         }
@@ -251,7 +257,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         mvs.push_front(m);
 
                         return Ok(BeforeSearchResult::Complete(
-                            EvaluationResult::Immediate(Score::Value(s), gs.depth, gs.mhash, gs.shash, mvs)
+                            EvaluationResult::Immediate(Score::Value(s), mvs)
                         ));
                     },
                     _ => ()
@@ -259,11 +265,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }
 
             if (gs.depth <= 1 || gs.current_depth >= env.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+                let (mhash,shash) = gs.zh.keys();
+
                 let ms = GameStateForMate {
                     base_depth: env.base_depth,
                     current_depth: gs.current_depth,
-                    mhash: gs.mhash,
-                    shash: gs.shash,
+                    mhash: mhash,
+                    shash: shash,
                     current_kyokumen_map: gs.current_kyokumen_map,
                     event_queue: env.event_queue.clone(),
                     teban: gs.teban,
@@ -295,7 +303,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         let mut r = mvs;
                         r.push_front(m);
 
-                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, gs.depth, gs.mhash, gs.shash,r)));
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, r)));
                     },
                     _ => ()
                 }
@@ -315,7 +323,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 Some(m) => {
                     let mut mvs = VecDeque::new();
                     mvs.push_front(m);
-                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(-gs.score, gs.depth, gs.mhash, gs.shash,mvs)));
+                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(-gs.score, mvs)));
                 }
             }
         }
@@ -334,7 +342,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 gs.m.map(|m| mvs.push_front(m));
 
                 return Ok(BeforeSearchResult::Complete(
-                    EvaluationResult::Immediate(NEGINFINITE, gs.depth,gs.mhash,gs.shash,mvs)
+                    EvaluationResult::Immediate(NEGINFINITE, mvs)
                 ));
             } else {
                 mvs.sort_by(|&a,&b| {
@@ -371,7 +379,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 }
 #[derive(Debug)]
 pub enum EvaluationResult {
-    Immediate(Score, u32, u64, u64, VecDeque<LegalMove>),
+    Immediate(Score, VecDeque<LegalMove>),
     Timeout
 }
 #[derive(Debug)]
@@ -418,7 +426,11 @@ impl Sub<i32> for Score {
         }
     }
 }
-
+impl Default for Score {
+    fn default() -> Self {
+        Score::NEGINFINITE
+    }
+}
 pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub event_queue:Arc<Mutex<UserEventQueue>>,
     pub info_sender:S,
@@ -440,7 +452,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub mate_hash:usize,
     pub stop:Arc<AtomicBool>,
     pub quited:Arc<AtomicBool>,
-    pub kyokumen_score_map:Arc<ConcurrentFixedHashMap<(Teban,u64,u64),(Score,u32)>>,
+    pub transposition_table:Arc<TT<u64,Score,{1<<20},4>>,
     pub nodes:Arc<AtomicU64>,
     pub think_start_time:Instant
 }
@@ -467,7 +479,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             mate_hash:self.mate_hash,
             stop:Arc::clone(&self.stop),
             quited:Arc::clone(&self.quited),
-            kyokumen_score_map:self.kyokumen_score_map.clone(),
+            transposition_table:self.transposition_table.clone(),
             nodes:Arc::clone(&self.nodes),
             think_start_time:self.think_start_time.clone()
         }
@@ -492,7 +504,8 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                network_delay:u32,
                display_evalute_score:bool,
                max_threads:u32,
-               mate_hash:usize
+               mate_hash:usize,
+               transposition_table: &Arc<TT<u64,Score,{1 << 20},4>>
     ) -> Environment<L,S> {
         let stop = Arc::new(AtomicBool::new(false));
         let quited = Arc::new(AtomicBool::new(false));
@@ -519,7 +532,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             mate_hash:mate_hash,
             stop:stop,
             quited:quited,
-            kyokumen_score_map:Arc::new(ConcurrentFixedHashMap::with_size(1 << 22)),
+            transposition_table:Arc::clone(transposition_table),
             nodes:Arc::new(AtomicU64::new(0))
         }
     }
@@ -535,8 +548,7 @@ pub struct GameState<'a> {
     pub obtained:Option<ObtainKind>,
     pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
     pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
-    pub mhash:u64,
-    pub shash:u64,
+    pub zh:ZobristHash<u64>,
     pub depth:u32,
     pub current_depth:u32
 }
@@ -610,7 +622,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         while evalutor.active_threads() > 0 {
             match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,_,_,_,mvs)) => {
+                Ok(EvaluationResult::Immediate(s,mvs)) => {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
@@ -635,7 +647,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         } else if is_timeout && best_moves.is_empty() {
             Ok(EvaluationResult::Timeout)
         } else {
-            Ok(EvaluationResult::Immediate(score, gs.depth, gs.mhash, gs.shash, best_moves))
+            Ok(EvaluationResult::Immediate(score, best_moves))
         }
     }
 
@@ -710,17 +722,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 threads += 1;
 
                 match r {
-                    EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                        if !env.kyokumen_score_map.contains_key(&(gs.teban.opposite(),mhash,shash)) {
-                            env.kyokumen_score_map.insert_new((gs.teban.opposite(), mhash, shash), (s, depth));
-                        }
+                    EvaluationResult::Immediate(s,mvs) => {
+                        {
+                            let mut tte = env.transposition_table.entry(&gs.zh);
+                            let tte = tte.or_default();
 
-                        if let Some(mut g) = env.kyokumen_score_map.get_mut(&(gs.teban.opposite(),mhash,shash)) {
-                            let (ref mut score,ref mut d) = *g;
-
-                            if *d < depth {
-                                *d = depth;
-                                *score = s;
+                            if tte.depth < gs.depth as u8 {
+                                tte.depth = gs.depth as u8;
+                                tte.score = s;
                             }
                         }
 
@@ -769,7 +778,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                             m,
                                             priority,
                                             is_oute) {
-                    Some((depth, obtained, mhash, shash,
+                    Some((depth, obtained, zh,
                              oute_kyokumen_map,
                              current_kyokumen_map,
                              is_sennichite)) => {
@@ -832,8 +841,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         obtained: obtained,
                                         current_kyokumen_map: &current_kyokumen_map,
                                         oute_kyokumen_map: &oute_kyokumen_map,
-                                        mhash: mhash,
-                                        shash: shash,
+                                        zh: zh,
                                         depth: depth - 1,
                                         current_depth: current_depth + 1
                                     };
@@ -961,7 +969,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             "move is not set."
         )))?;
 
-        let teban = gs.teban;
         let mut alpha = gs.alpha;
         let beta = gs.beta;
         let mut scoreval = Score::NEGINFINITE;
@@ -969,7 +976,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
         for &(priority,is_oute,m,score) in &mvs {
             match self.startup_strategy(env,gs,m,priority,is_oute) {
-                Some((depth,obtained,mhash,shash,
+                Some((depth,obtained,zh,
                          oute_kyokumen_map,
                          current_kyokumen_map,
                          is_sennichite)) => {
@@ -990,7 +997,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     best_moves.push_front(prev_move);
 
                                     if scoreval >= gs.beta {
-                                        return Ok(EvaluationResult::Immediate(scoreval,gs.depth,gs.mhash,gs.shash,best_moves));
+                                        return Ok(EvaluationResult::Immediate(scoreval,best_moves));
                                     }
                                 }
 
@@ -1014,8 +1021,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 obtained: obtained,
                                 current_kyokumen_map: &current_kyokumen_map,
                                 oute_kyokumen_map: &oute_kyokumen_map,
-                                mhash: mhash,
-                                shash: shash,
+                                zh: zh,
                                 depth: depth - 1,
                                 current_depth: gs.current_depth + 1
                             };
@@ -1027,19 +1033,16 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     return Ok(EvaluationResult::Timeout);
                                 },
                                 EvaluationResult::Timeout => {
-                                    return Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves));
+                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves));
                                 },
-                                EvaluationResult::Immediate(s,depth,mhash,shash,mvs) => {
-                                    if !env.kyokumen_score_map.contains_key(&(teban.opposite(),mhash,shash)) {
-                                        env.kyokumen_score_map.insert_new((teban.opposite(), mhash, shash), (s, depth));
-                                    }
+                                EvaluationResult::Immediate(s,mvs) => {
+                                    {
+                                        let mut tte = env.transposition_table.entry(&gs.zh);
+                                        let tte = tte.or_default();
 
-                                    if let Some(mut g) = env.kyokumen_score_map.get_mut(&(teban.opposite(), mhash, shash)) {
-                                        let (ref mut score, ref mut d) = *g;
-
-                                        if *d < depth {
-                                            *d = depth;
-                                            *score = s;
+                                        if tte.depth < gs.depth as u8 {
+                                            tte.depth = gs.depth as u8;
+                                            tte.score = s;
                                         }
                                     }
 
@@ -1050,7 +1053,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         best_moves.push_front(prev_move);
 
                                         if scoreval >= beta {
-                                            return Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves));
+                                            return Ok(EvaluationResult::Immediate(scoreval, best_moves));
                                         }
                                     }
 
@@ -1066,7 +1069,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 if best_moves.is_empty() {
                                     return Ok(EvaluationResult::Timeout);
                                 } else {
-                                    return Ok(EvaluationResult::Immediate(scoreval, gs.depth, gs.mhash, gs.shash, best_moves));
+                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves));
                                 }
                             }
                         }
@@ -1076,6 +1079,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             }
         }
 
-        Ok(EvaluationResult::Immediate(scoreval, gs.depth,gs.mhash,gs.shash,best_moves))
+        Ok(EvaluationResult::Immediate(scoreval, best_moves))
     }
 }
