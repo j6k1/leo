@@ -284,6 +284,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 match solver.checkmate(
                     false,
                     false,
+                    false,
                     env.mate_hash,
                     env.limit.clone(),
                     env.max_ply_timelimit.map(|l| Instant::now() + l),
@@ -951,7 +952,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             mvs.push((m,Score::Value(-s)));
         }
 
-        let mvs = mvs.into_iter().map(|m| {
+        let mut mvs = mvs.into_iter().map(|m| {
             if let LegalMove::To(ref mv) = m.0 {
                 if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
                     return (1000,false,m.0,m.1);
@@ -964,6 +965,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 (0,false,m.0,m.1)
             }
         }).collect::<Vec<(u32,bool,LegalMove,Score)>>();
+
+        mvs.sort_by(|a,b| b.0.cmp(&a.0).then(b.3.cmp(&a.3)));
 
         let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
             "move is not set."

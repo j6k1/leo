@@ -312,6 +312,7 @@ impl Solver {
     pub fn checkmate<L,S>(&self,
                      strict_moves:bool,
                      enable_send_seldepth:bool,
+                     is_tsume_shogi:bool,
                      hash_size:usize,
                      limit:Option<Instant>,
                      checkmate_limit:Option<Instant>,
@@ -330,6 +331,7 @@ impl Solver {
         let mut strategy = CheckmateStrategy::<S>::new(hasher,
                                                   strict_moves,
                                                   enable_send_seldepth,
+                                                  is_tsume_shogi,
                                                   limit,
                                                   checkmate_limit,
                                                   network_delay,
@@ -1300,6 +1302,7 @@ pub mod checkmate {
         hasher:Arc<KyokumenHash<u64>>,
         strict_moves:bool,
         enable_send_seldepth:bool,
+        is_tsume_shogi:bool,
         limit:Option<Instant>,
         checkmate_limit:Option<Instant>,
         network_delay:u32,
@@ -1318,6 +1321,7 @@ pub mod checkmate {
         pub fn new(hasher:Arc<KyokumenHash<u64>>,
                strict_moves:bool,
                enable_send_seldepth:bool,
+               is_tsume_shogi:bool,
                limit:Option<Instant>,
                checkmate_limit:Option<Instant>,
                network_delay:u32,
@@ -1333,6 +1337,7 @@ pub mod checkmate {
                 hasher:hasher,
                 strict_moves:strict_moves,
                 enable_send_seldepth:enable_send_seldepth,
+                is_tsume_shogi:is_tsume_shogi,
                 limit:limit,
                 checkmate_limit:checkmate_limit,
                 network_delay:network_delay,
@@ -2383,12 +2388,16 @@ pub mod checkmate {
         }
 
         fn send_pv(&mut self, pv:&VecDeque<LegalMove>) -> Result<(),ApplicationError> {
-            let mut commands: Vec<UsiInfoSubCommand> = Vec::new();
+            if self.is_tsume_shogi {
+                let mut commands: Vec<UsiInfoSubCommand> = Vec::new();
 
-            commands.push(UsiInfoSubCommand::CurrMove(pv[0].to_move()));
-            commands.push(UsiInfoSubCommand::Pv(pv.clone().into_iter().map(|m| m.to_move()).collect()));
+                commands.push(UsiInfoSubCommand::CurrMove(pv[0].to_move()));
+                commands.push(UsiInfoSubCommand::Pv(pv.clone().into_iter().map(|m| m.to_move()).collect()));
 
-            Ok(self.info_sender.send_immediate(commands)?)
+                Ok(self.info_sender.send(commands)?)
+            } else {
+                Ok(())
+            }
         }
 
         fn send_seldepth(&mut self, depth:u32) -> Result<(),InfoSendError>{
