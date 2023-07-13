@@ -6,6 +6,8 @@ extern crate getopts;
 extern crate toml;
 extern crate rayon;
 extern crate concurrent_queue;
+extern crate parking_lot;
+
 #[macro_use]
 extern crate serde_derive;
 

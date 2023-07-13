@@ -10,8 +10,10 @@ use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError
 use packedsfen::error::ReadError;
 use usiagent::error::{EventDispatchError, InfoSendError, PlayerError, SfenStringConvertError, UsiProtocolError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind, UserEvent, UserEventKind};
-use usiagent::rule::AppliedMove;
-use crate::nn::{BatchItem, Message};
+use usiagent::rule::{AppliedMove, LegalMove};
+use crate::nn::{BatchItem, Message, OnCompleteTransactionHandler};
+use crate::search::Score;
+use crate::transposition_table::ZobristHash;
 
 #[derive(Debug)]
 pub enum ApplicationError {
@@ -41,9 +43,11 @@ pub enum ApplicationError {
     ResultSendError(SendError<(AppliedMove,i32)>),
     EvaluationThreadError(EvaluationThreadError),
     EndTransactionSendError(SendError<()>),
+    TransactionCompleteCallbackSendError(SendError<(VecDeque<LegalMove>, Score, ZobristHash<u64>)>),
     PoisonError(String),
     TransactionPushError(PushError<Sender<()>>),
     BatchItemPushError(PushError<BatchItem>),
+    OnCompleteTransactionHandlerPushError(PushError<OnCompleteTransactionHandler>),
     ConcurrentQueuePopError(PopError),
     InfoSendError(InfoSendError),
     UsiProtocolError(UsiProtocolError),
@@ -79,9 +83,13 @@ impl fmt::Display for ApplicationError {
             ApplicationError::ResultSendError(ref e) => write!(f,"{}",e),
             ApplicationError::EvaluationThreadError(ref e) => write!(f,"{}",e),
             ApplicationError::EndTransactionSendError(ref e) => write!(f,"{}",e),
+            ApplicationError::TransactionCompleteCallbackSendError(ref e) => write!(f,"{}",e),
             ApplicationError::PoisonError(ref s) => write!(f,"{}",s),
             ApplicationError::TransactionPushError(ref e) => write!(f,"{}",e),
             ApplicationError::BatchItemPushError(ref e) => write!(f,"{}",e),
+            ApplicationError::OnCompleteTransactionHandlerPushError(_) => {
+                write!(f,"An error occurred while adding a on complete transaction handler to the queue.")
+            },
             ApplicationError::ConcurrentQueuePopError(ref e) => write!(f,"{}",e),
             ApplicationError::InfoSendError(ref e) => write!(f,"{}",e),
             ApplicationError::UsiProtocolError(ref e) => write!(f,"{}",e),
@@ -120,9 +128,11 @@ impl error::Error for ApplicationError {
             ApplicationError::ResultSendError(_) => "An error occurred in the process of sending the results of the neural network calculation.",
             ApplicationError::EvaluationThreadError(_) => "An error occurred in the process of sending the all results of the neural network calculation.",
             ApplicationError::EndTransactionSendError(_) => "An error occurred when sending the transaction termination notification.",
+            ApplicationError::TransactionCompleteCallbackSendError(_) => "An error occurred during transmission from the transaction completion callback.",
             ApplicationError::PoisonError(_) => "panic occurred during thread execution.",
             ApplicationError::TransactionPushError(_) => "An error occurred in adding the transaction to the queue.",
             ApplicationError::BatchItemPushError(_) => "An error occurred while adding a batch item to the queue.",
+            ApplicationError::OnCompleteTransactionHandlerPushError(_) => "An error occurred while adding a on complete transaction handler to the queue.",
             ApplicationError::ConcurrentQueuePopError(_) => "Error retrieving element from concurrent queue.",
             ApplicationError::InfoSendError(_) => "An error occurred when sending info command.",
             ApplicationError::UsiProtocolError(_) => "An error occurred in the parsing or string generation process of string processing according to the USI protocol.",
@@ -159,9 +169,11 @@ impl error::Error for ApplicationError {
             ApplicationError::ResultSendError(ref e) =>  Some(e),
             ApplicationError::EvaluationThreadError(ref e) => Some(e),
             ApplicationError::EndTransactionSendError(ref e) => Some(e),
+            ApplicationError::TransactionCompleteCallbackSendError(ref e) => Some(e),
             ApplicationError::PoisonError(_) => None,
             ApplicationError::TransactionPushError(ref e) => Some(e),
             ApplicationError::BatchItemPushError(ref e) => Some(e),
+            ApplicationError::OnCompleteTransactionHandlerPushError(_) => None,
             ApplicationError::ConcurrentQueuePopError(ref e) => Some(e),
             ApplicationError::InfoSendError(ref e) => Some(e),
             ApplicationError::UsiProtocolError(ref e) => Some(e),
@@ -277,8 +289,18 @@ impl From<SendError<()>> for ApplicationError {
         ApplicationError::EndTransactionSendError(err)
     }
 }
+impl From<SendError<(VecDeque<LegalMove>, Score, ZobristHash<u64>)>> for ApplicationError {
+    fn from(err: SendError<(VecDeque<LegalMove>, Score, ZobristHash<u64>)>) -> ApplicationError {
+        ApplicationError::TransactionCompleteCallbackSendError(err)
+    }
+}
 impl From<PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>> for ApplicationError {
     fn from(err: PoisonError<MutexGuard<'_, VecDeque<std::sync::mpsc::Sender<()>>>>) -> ApplicationError {
+        ApplicationError::PoisonError(format!("{}",err))
+    }
+}
+impl From<PoisonError<MutexGuard<'_, ()>>> for ApplicationError {
+    fn from(err: PoisonError<MutexGuard<'_, ()>>) -> ApplicationError {
         ApplicationError::PoisonError(format!("{}",err))
     }
 }
@@ -295,6 +317,11 @@ impl From<PushError<Sender<()>>> for ApplicationError {
 impl From<PushError<BatchItem>> for ApplicationError {
     fn from(err: PushError<BatchItem>) -> ApplicationError {
         ApplicationError::BatchItemPushError(err)
+    }
+}
+impl From<PushError<OnCompleteTransactionHandler>> for ApplicationError {
+    fn from(err: PushError<OnCompleteTransactionHandler>) -> Self {
+        ApplicationError::OnCompleteTransactionHandlerPushError(err)
     }
 }
 impl From<PopError> for ApplicationError {

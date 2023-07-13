@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::{fs, thread};
+use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use concurrent_queue::ConcurrentQueue;
 use rand::{prelude, Rng, SeedableRng};
@@ -126,12 +127,25 @@ impl<T,U,D,P,PT,I,O> BatchNeuralNetwork<U,D,P,PT,I,O> for T
              U: UnitValue<U>,
              D: Device<U>,
              PT: PersistenceType {}
+pub struct OnCompleteTransactionHandler(pub Box<dyn FnOnce() -> Result<(),ApplicationError> + Send + 'static>);
+
+impl Debug for OnCompleteTransactionHandler {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f,"OnCompleteTransactionHandler")
+    }
+}
+impl OnCompleteTransactionHandler {
+    pub fn invoke(self) -> Result<(),ApplicationError> {
+        (self.0)()
+    }
+}
 pub struct Evalutor {
     ref_count: Arc<AtomicUsize>,
     sender:Sender<Message>,
     transaction_sender_queue:Arc<ConcurrentQueue<Sender<()>>>,
     receiver:Arc<Mutex<Receiver<Result<Vec<(f32,f32)>,EvaluationThreadError>>>>,
     queue:Arc<ConcurrentQueue<BatchItem>>,
+    on_complete_transaction_handlers:Arc<ConcurrentQueue<OnCompleteTransactionHandler>>,
     active_threads:Arc<AtomicUsize>,
     wait_threads:Arc<AtomicUsize>
 }
@@ -280,7 +294,8 @@ impl Evalutor {
             active_threads:Arc::new(AtomicUsize::new(0)),
             wait_threads:Arc::new(AtomicUsize::new(0)),
             receiver:Arc::new(Mutex::new(r)),
-            queue:Arc::new(ConcurrentQueue::unbounded())
+            queue:Arc::new(ConcurrentQueue::unbounded()),
+            on_complete_transaction_handlers:Arc::new(ConcurrentQueue::unbounded())
         })
     }
 
@@ -311,6 +326,11 @@ impl Evalutor {
         }
 
         Ok(())
+    }
+
+    pub fn add_on_complete_transaction_listener<F>(&self,listener:F) -> Result<(),ApplicationError>
+        where F: FnOnce() -> Result<(),ApplicationError> + Send + 'static {
+        Ok(self.on_complete_transaction_handlers.push(OnCompleteTransactionHandler(Box::new(listener)))?)
     }
 
     pub fn begin_transaction(&self) -> Result<(),ApplicationError> {
@@ -374,9 +394,11 @@ impl Evalutor {
                 }
             }
 
-            while !self.transaction_sender_queue.is_empty() {
-                let s = self.transaction_sender_queue.pop()?;
+            while let Ok(listener) = self.on_complete_transaction_handlers.pop() {
+                listener.invoke()?;
+            }
 
+            while let Ok(s) = self.transaction_sender_queue.pop() {
                 s.send(())?;
             }
         }
@@ -395,7 +417,8 @@ impl Clone for Evalutor {
             active_threads:Arc::clone(&self.active_threads),
             wait_threads:Arc::clone(&self.wait_threads),
             receiver:Arc::clone(&self.receiver),
-            queue:Arc::clone(&self.queue)
+            queue:Arc::clone(&self.queue),
+            on_complete_transaction_handlers:Arc::clone(&self.on_complete_transaction_handlers)
         }
     }
 }

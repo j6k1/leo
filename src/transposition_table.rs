@@ -1,12 +1,12 @@
 use std::mem;
 use std::num::Wrapping;
 use std::ops::{Add, BitXor, Deref, DerefMut, Index, IndexMut, Sub};
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use usiagent::hash::{InitialHash, KyokumenHash};
 use usiagent::rule::AppliedMove;
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, MochigomaKind, Teban};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub trait ToBucketIndex {
     fn to_bucket_index(self) -> usize;
@@ -81,13 +81,13 @@ impl<T> ZobristHash<T>
 }
 #[derive(Debug,Clone)]
 pub struct TTPartialEntry<T> where T: Default {
-    pub depth:u8,
+    pub depth:i8,
     pub score:T
 }
 impl<T> Default for TTPartialEntry<T> where T: Default {
     fn default() -> Self {
         TTPartialEntry {
-            depth:0,
+            depth:-1,
             score:T::default()
         }
     }
@@ -286,17 +286,14 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
         let index = self.bucket_index(zh);
 
         match self.buckets[index].read() {
-            Ok(bucket) => {
+            bucket => {
                 for i in 0..bucket.len() {
-                    if bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
+                    if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
                         return Some(ReadGuard::new(bucket, i));
                     }
                 }
 
                 None
-            },
-            Err(e) => {
-                panic!("{}", e);
             }
         }
     }
@@ -305,17 +302,14 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
         let index = self.bucket_index(zh);
 
         match self.buckets[index].write() {
-            Ok(bucket) => {
+            bucket => {
                 for i in 0..bucket.len() {
-                    if bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
+                    if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
                         return Some(WriteGuard::new(bucket, i));
                     }
                 }
 
                 None
-            },
-            Err(e) => {
-                panic!("{}", e);
             }
         }
     }
@@ -332,9 +326,9 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
         };
 
         match self.buckets[index].write() {
-            Ok(mut bucket) => {
+            mut bucket => {
                 for i in 0..bucket.len() {
-                    if bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
+                    if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
                         let tte = mem::replace(&mut bucket[i],tte);
 
                         return Some(tte.entry);
@@ -342,7 +336,7 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
                 }
 
                 let mut index = 0;
-                let mut priority = u8::MAX;
+                let mut priority = i8::MAX;
 
                 for i in 0..bucket.len() {
                     if !bucket[i].used {
@@ -365,9 +359,6 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
                 } else {
                     None
                 }
-            },
-            Err(e) => {
-                panic!("{}",e);
             }
         }
     }
@@ -376,9 +367,9 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
         let index = self.bucket_index(zh);
 
         match self.buckets[index].write() {
-            Ok(bucket) => {
+            bucket => {
                 for i in 0..bucket.len() {
-                    if bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
+                    if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
                         return Entry::OccupiedTTEntry(
                             OccupiedTTEntry::new(WriteGuard::new(bucket, i))
                         );
@@ -386,7 +377,7 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
                 }
 
                 let mut index = 0;
-                let mut priority = u8::MAX;
+                let mut priority = i8::MAX;
 
                 for i in 0..bucket.len() {
                     if !bucket[i].used {
@@ -410,9 +401,6 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
                         zh.teban
                     )
                 )
-            },
-            Err(e) => {
-                panic!("{}", e);
             }
         }
     }
@@ -421,17 +409,14 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
         let index = self.bucket_index(zh);
 
         match self.buckets[index].read() {
-            Ok(bucket) => {
+            bucket => {
                 for i in 0..bucket.len() {
-                    if bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
+                    if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
                         return true;
                     }
                 }
 
                 return false;
-            },
-            Err(e) => {
-                panic!("{}", e);
             }
         }
     }

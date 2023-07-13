@@ -66,7 +66,7 @@ pub struct Leo {
     kyokumen_map:KyokumenMap<u64,u32>,
     pub history:Vec<(Banmen,MochigomaCollections,u64,u64)>,
     hasher:Arc<KyokumenHash<u64>>,
-    transposition_tabale:Arc<TT<u64,Score,{1<<20},4>>,
+    transposition_table:Arc<TT<u64,Score,{1<<20},4>>,
     base_depth:u32,
     max_depth:u32,
     max_nodes:Option<i64>,
@@ -103,7 +103,7 @@ impl Leo {
             kyokumen_map:KyokumenMap::new(),
             history:Vec::new(),
             hasher:Arc::new(KyokumenHash::new()),
-            transposition_tabale:Arc::new(TT::new()),
+            transposition_table:Arc::new(TT::new()),
             base_depth:BASE_DEPTH,
             max_depth:MAX_DEPTH,
             max_nodes:None,
@@ -278,9 +278,9 @@ impl USIPlayer<ApplicationError> for Leo {
         self.kyokumen = None;
         self.history.clear();
         self.remaining_turns = self.turn_count;
-        match Arc::get_mut(&mut self.transposition_tabale) {
-            Some(transposition_tabale) => {
-                transposition_tabale.clear();
+        match Arc::get_mut(&mut self.transposition_table) {
+            Some(transposition_table) => {
+                transposition_table.clear();
             },
             None => {
                 return Err(ApplicationError::InvalidStateError(String::from(
@@ -297,7 +297,7 @@ impl USIPlayer<ApplicationError> for Leo {
         self.kyokumen_map = KyokumenMap::new();
 
         let kyokumen_map:KyokumenMap<u64,u32> = KyokumenMap::new();
-        let zh = ZobristHash::new(&self.hasher,teban,&banmen,&ms,&mg);
+        let zh = ZobristHash::new(&self.hasher,teban.opposite(),&banmen,&ms,&mg);
 
         let teban = teban;
         let state = State::new(banmen);
@@ -408,7 +408,7 @@ impl USIPlayer<ApplicationError> for Leo {
             self.display_evalute_score,
             self.max_threads,
             self.mate_hash,
-            &self.transposition_tabale
+            &self.transposition_table
         );
 
         let kyokumen_map = self.kyokumen_map.clone();
@@ -450,7 +450,6 @@ impl USIPlayer<ApplicationError> for Leo {
                     state: &Arc::new(state.clone()),
                     alpha: Score::NEGINFINITE,
                     beta: Score::INFINITE,
-                    score: Score::NEGINFINITE,
                     m:None,
                     mc: &Arc::new(mc.clone()),
                     obtained:None,
@@ -458,12 +457,13 @@ impl USIPlayer<ApplicationError> for Leo {
                     oute_kyokumen_map:&oute_kyokumen_map,
                     zh:zh,
                     depth:base_depth,
-                    current_depth:0
+                    current_depth:0,
+                    max_depth:env.max_depth
                 };
 
                 let strategy  = Root::new();
 
-                let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, evalutor);
+                let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, evalutor, None);
 
                 let bestmove = match result {
                     Err(ref e) => {
@@ -475,15 +475,20 @@ impl USIPlayer<ApplicationError> for Leo {
                         self.send_message_immediate(&mut env,"think timeout!")?;
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_)) => {
+                    Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_,_)) => {
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,mvs)) if mvs.len() == 0 => {
+                    Ok(EvaluationResult::Immediate(_,mvs,_)) if mvs.len() == 0 => {
                         self.send_message_immediate(&mut env,"moves is empty!")?;
                         BestMove::Resign
                     },
-                    Ok(EvaluationResult::Immediate(_,mvs)) => {
+                    Ok(EvaluationResult::Immediate(_,mvs,_)) => {
                         BestMove::Move(mvs[0].to_move(),None)
+                    },
+                    Ok(EvaluationResult::Pending) => {
+                        return Err(ApplicationError::InvalidStateError(String::from(
+                            "Unexpected Result Type 'Pending'"
+                        )));
                     }
                 };
 
@@ -546,7 +551,7 @@ impl USIPlayer<ApplicationError> for Leo {
             self.display_evalute_score,
             self.max_threads,
             self.mate_hash,
-            &self.transposition_tabale
+            &self.transposition_table
         );
 
         let ms = GameStateForMate {
