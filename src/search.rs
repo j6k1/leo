@@ -1040,8 +1040,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                         mvs.push_front(m);
 
-                        self.send_info(env, env.base_depth, gs.current_depth, &mvs, &scorevalue)?;
-
                         best_moves = VecDeque::new();
                         best_moves.push_front(m);
                     }
