@@ -17,7 +17,6 @@ use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError};
 use crate::initial_estimation::{attack_priority, defense_priority};
 use crate::nn::Evalutor;
-use crate::search::Score::{INFINITE, NEGINFINITE};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
 use crate::transposition_table::{TT, TTPartialEntry, ZobristHash};
 
@@ -37,7 +36,7 @@ pub const DEFAULT_MATE_HASH:usize = 8;
 pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
-                     evalutor: &Evalutor, sender:Option<Sender<(VecDeque<LegalMove>,Score,ZobristHash<u64>)>>) -> Result<EvaluationResult,ApplicationError>;
+                     evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
 
     fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
         let network_delay = env.network_delay;
@@ -93,8 +92,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 commands.push(UsiInfoSubCommand::Score(UsiScore::Cp(*s as i64)))
             }
         }
+
+        commands.push(UsiInfoSubCommand::Depth(depth));
+
         if depth < seldepth {
-            commands.push(UsiInfoSubCommand::Depth(depth));
             commands.push(UsiInfoSubCommand::SelDepth(seldepth));
         }
 
@@ -215,14 +216,14 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         if let Some(ObtainKind::Ou) = gs.obtained {
-            return Ok(BeforeSearchResult::CompleteForOpposite(INFINITE,VecDeque::new()));
+            return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE,VecDeque::new()));
         }
 
         if let Some(m) = gs.m {
             if Rule::is_mate(gs.teban, &*gs.state) {
                 let mut mvs = VecDeque::new();
                 mvs.push_front(m);
-                return Ok(BeforeSearchResult::CompleteForOpposite(NEGINFINITE,mvs));
+                return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE,mvs));
             }
 
             {
@@ -314,7 +315,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                         r.push_front(m);
 
-                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(INFINITE, r,zh.clone())));
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE, r,zh.clone())));
                     },
                     MaybeMate::MateMoves(mvs) => {
                         let mut r = mvs;
@@ -340,7 +341,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     let mut mvs = VecDeque::new();
                     gs.m.map(|m| mvs.push_front(m));
 
-                    return Ok(BeforeSearchResult::CompleteForOpposite(INFINITE, mvs));
+                    return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
                 } else {
                     mvs
                 }
@@ -374,7 +375,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 let mut mvs = VecDeque::new();
                 gs.m.map(|m| mvs.push_front(m));
 
-                return Ok(BeforeSearchResult::CompleteForOpposite(INFINITE, mvs));
+                return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
             } else {
                 let o = gs.obtained.and_then(|o| MochigomaKind::try_from(o).ok());
 
@@ -428,7 +429,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 #[derive(Debug)]
 pub enum EvaluationResult {
     Immediate(Score, VecDeque<LegalMove>, ZobristHash<u64>),
-    Pending,
     Timeout
 }
 #[derive(Debug)]
@@ -664,8 +664,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                        gs: &mut GameState<'a>,
                        evalutor: &Evalutor,
                        score:Score,
-                       pending_count:i32,
-                       receiver:Receiver<(VecDeque<LegalMove>,Score,ZobristHash<u64>)>,
                        is_timeout:bool,
                        mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
         let mut score = score;
@@ -690,32 +688,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
             if let Err(e) = evalutor.on_end_thread().map_err(|e| ApplicationError::from(e)) {
                 last_error = Some(Err(e));
-            }
-        }
-
-        if pending_count > 0 {
-            for _ in 0..pending_count {
-                match receiver.recv() {
-                    Ok((mvs, s, zh)) => {
-                        {
-                            let mut tte = env.transposition_table.entry(&zh);
-                            let tte = tte.or_default();
-
-                            if tte.depth < gs.depth as i8 - 1 {
-                                tte.depth = gs.depth as i8 - 1;
-                                tte.score = -s;
-                            }
-                        }
-
-                        if -s > score {
-                            score = -s;
-                            best_moves = mvs;
-                        }
-                    },
-                    Err(e) => {
-                        last_error = Some(Err(ApplicationError::from(e)));
-                    }
-                }
             }
         }
 
@@ -817,189 +789,172 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         let mut is_timeout = false;
 
-        let (s,r) = mpsc::channel();
+        loop {
+            if threads == 0 || force_recv {
+                let r = self.receiver.recv();
 
-        let mut pending_count = 0;
+                evalutor.on_end_thread()?;
 
-        {
-            let s = s;
+                if evalutor.active_threads() == 0 {
+                    force_recv = false;
+                }
 
-            loop {
-                if threads == 0 || force_recv {
-                    let r = self.receiver.recv();
+                let r = r?.map_err(|e| ApplicationError::from(e))?;
 
-                    evalutor.on_end_thread()?;
+                threads += 1;
 
-                    if evalutor.active_threads() == 0 {
-                        force_recv = false;
-                    }
+                match r {
+                    EvaluationResult::Immediate(s, mvs,zh) => {
+                        {
+                            let mut tte = env.transposition_table.entry(&zh);
+                            let tte = tte.or_default();
 
-                    let r = r?.map_err(|e| ApplicationError::from(e))?;
-
-                    threads += 1;
-
-                    match r {
-                        EvaluationResult::Immediate(s, mvs,zh) => {
-                            {
-                                let mut tte = env.transposition_table.entry(&zh);
-                                let tte = tte.or_default();
-
-                                if tte.depth < gs.depth as i8 - 1 {
-                                    tte.depth = gs.depth as i8 - 1;
-                                    tte.score = -s;
-                                }
+                            if tte.depth < gs.depth as i8 - 1 {
+                                tte.depth = gs.depth as i8 - 1;
+                                tte.score = -s;
                             }
+                        }
 
-                            if -s > scoreval {
-                                scoreval = -s;
+                        if -s > scoreval {
+                            scoreval = -s;
 
-                                self.send_info(env, env.base_depth, gs.current_depth, &mvs, &scoreval)?;
+                            self.send_info(env, env.base_depth, gs.current_depth, &mvs, &scoreval)?;
 
-                                best_moves = mvs;
+                            best_moves = mvs;
 
-                                if scoreval >= beta {
-                                    break;
-                                }
-
-                                if alpha < scoreval {
-                                    alpha = scoreval;
-                                }
-                            }
-
-                            if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
-                                if best_moves.is_empty() {
-                                    is_timeout = true;
-                                }
+                            if scoreval >= beta {
                                 break;
                             }
-                        },
-                        EvaluationResult::Pending => {
-                            pending_count += 1;
-                        },
-                        EvaluationResult::Timeout if best_moves.is_empty() => {
-                            is_timeout = true;
-                            break;
-                        },
-                        EvaluationResult::Timeout => {
+
+                            if alpha < scoreval {
+                                alpha = scoreval;
+                            }
+                        }
+
+                        if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                            if best_moves.is_empty() {
+                                is_timeout = true;
+                            }
                             break;
                         }
-                    }
-
-                    let event_queue = Arc::clone(&env.event_queue);
-                    event_dispatcher.dispatch_events(self, &*event_queue)?;
-
-                    if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                    },
+                    EvaluationResult::Timeout if best_moves.is_empty() => {
                         is_timeout = true;
                         break;
+                    },
+                    EvaluationResult::Timeout => {
+                        break;
                     }
-                } else if let Some((priority, is_oute, m)) = it.next() {
-                    match self.startup_strategy(env,
-                                                gs,
-                                                m,
-                                                priority,
-                                                is_oute) {
-                        Some((depth, obtained, zh,
-                                 oute_kyokumen_map,
-                                 current_kyokumen_map,
-                                 is_sennichite)) => {
-                            let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
+                }
 
-                            match next {
-                                (state, mc, _) => {
-                                    if is_sennichite {
-                                        let s = if Rule::is_mate(gs.teban.opposite(), &state) {
-                                            Score::NEGINFINITE
-                                        } else {
-                                            Score::Value(0)
-                                        };
-                                        if s > scoreval {
-                                            scoreval = s;
-                                            best_moves = VecDeque::new();
-                                            best_moves.push_front(m);
+                let event_queue = Arc::clone(&env.event_queue);
+                event_dispatcher.dispatch_events(self, &*event_queue)?;
 
-                                            if alpha < scoreval {
-                                                alpha = scoreval;
-                                            }
-
-                                            if scoreval >= beta {
-                                                break;
-                                            }
-                                        }
-                                        continue;
-                                    }
-
-                                    let teban = gs.teban;
-                                    let state = Arc::new(state);
-                                    let mc = Arc::new(mc);
-                                    let alpha = alpha;
-                                    let beta = beta;
-                                    let current_depth = gs.current_depth;
-                                    let max_depth = gs.max_depth;
-
-                                    let mut env = env.clone();
-                                    let evalutor = evalutor.clone();
-
-                                    let sender = sender.clone();
-
-                                    let b = std::thread::Builder::new();
-
-                                    let sender = sender.clone();
-
-                                    evalutor.on_begin_thread();
-
-                                    let s = if depth == 2 || gs.current_depth + 2 == gs.max_depth {
-                                        Some(s.clone())
-                                    } else {
-                                        None
-                                    };
-
-                                    let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
-                                        let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L, S>>(&env.on_error_handler, &env.stop, &env.quited);
-
-                                        let mut gs = GameState {
-                                            teban: teban.opposite(),
-                                            state: &state,
-                                            alpha: -beta,
-                                            beta: -alpha,
-                                            m: Some(m),
-                                            mc: &mc,
-                                            obtained: obtained,
-                                            current_kyokumen_map: &current_kyokumen_map,
-                                            oute_kyokumen_map: &oute_kyokumen_map,
-                                            zh: zh.clone(),
-                                            depth: depth - 1,
-                                            current_depth: current_depth + 1,
-                                            max_depth:max_depth
-                                        };
-
-                                        let strategy = Recursive::new();
-
-                                        let r = strategy.search(&mut env, &mut gs, &mut event_dispatcher, &evalutor, s);
-
-                                        let _ = sender.send(r);
-                                    });
-
-                                    threads -= 1;
-                                }
-                            }
-                        },
-                        None => (),
-                    }
-                } else if evalutor.active_threads() > 0 {
-                    force_recv = true;
-                } else {
+                if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                    is_timeout = true;
                     break;
                 }
+            } else if let Some((priority, is_oute, m)) = it.next() {
+                match self.startup_strategy(env,
+                                            gs,
+                                            m,
+                                            priority,
+                                            is_oute) {
+                    Some((depth, obtained, zh,
+                             oute_kyokumen_map,
+                             current_kyokumen_map,
+                             is_sennichite)) => {
+                        let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
+
+                        match next {
+                            (state, mc, _) => {
+                                if is_sennichite {
+                                    let s = if Rule::is_mate(gs.teban.opposite(), &state) {
+                                        Score::NEGINFINITE
+                                    } else {
+                                        Score::Value(0)
+                                    };
+                                    if s > scoreval {
+                                        scoreval = s;
+                                        best_moves = VecDeque::new();
+                                        best_moves.push_front(m);
+
+                                        if alpha < scoreval {
+                                            alpha = scoreval;
+                                        }
+
+                                        if scoreval >= beta {
+                                            break;
+                                        }
+                                    }
+                                    continue;
+                                }
+
+                                let teban = gs.teban;
+                                let state = Arc::new(state);
+                                let mc = Arc::new(mc);
+                                let alpha = alpha;
+                                let beta = beta;
+                                let current_depth = gs.current_depth;
+                                let max_depth = gs.max_depth;
+
+                                let mut env = env.clone();
+                                let evalutor = evalutor.clone();
+
+                                let sender = sender.clone();
+
+                                let b = std::thread::Builder::new();
+
+                                let sender = sender.clone();
+
+                                evalutor.on_begin_thread();
+
+                                let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
+                                    let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L, S>>(&env.on_error_handler, &env.stop, &env.quited);
+
+                                    let mut gs = GameState {
+                                        teban: teban.opposite(),
+                                        state: &state,
+                                        alpha: -beta,
+                                        beta: -alpha,
+                                        m: Some(m),
+                                        mc: &mc,
+                                        obtained: obtained,
+                                        current_kyokumen_map: &current_kyokumen_map,
+                                        oute_kyokumen_map: &oute_kyokumen_map,
+                                        zh: zh.clone(),
+                                        depth: depth - 1,
+                                        current_depth: current_depth + 1,
+                                        max_depth:max_depth
+                                    };
+
+                                    let strategy = Recursive::new();
+
+                                    let r = strategy.search(&mut env, &mut gs, &mut event_dispatcher, &evalutor);
+
+                                    let _ = sender.send(r);
+                                });
+
+                                threads -= 1;
+                            }
+                        }
+                    },
+                    None => (),
+                }
+            } else if evalutor.active_threads() > 0 {
+                force_recv = true;
+            } else {
+                break;
             }
         }
 
-        self.termination(env, &mut gs,evalutor,scoreval,pending_count, r, is_timeout, best_moves)
+        self.termination(env, &mut gs,evalutor,scoreval,is_timeout, best_moves)
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
-                     evalutor: &Evalutor, _: Option<Sender<(VecDeque<LegalMove>,Score,ZobristHash<u64>)>>) -> Result<EvaluationResult,ApplicationError> {
+                     evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         let base_depth = gs.depth.min(env.max_depth);
         let mut depth = 1;
         let mut best_moves = VecDeque::new();
@@ -1020,11 +975,6 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                 EvaluationResult::Immediate(s,mvs,zh) => {
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
-                },
-                EvaluationResult::Pending => {
-                    return Err(ApplicationError::InvalidStateError(String::from(
-                        "Unexpected Result Type 'Pending'"
-                    )));
                 },
                 EvaluationResult::Timeout if best_moves.is_empty() => {
                     return Ok(EvaluationResult::Timeout)
@@ -1051,7 +1001,7 @@ impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
 impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Recursive<L,S>,ApplicationError,L>,
-                     evalutor: &Evalutor, sender: Option<Sender<(VecDeque<LegalMove>,Score,ZobristHash<u64>)>>) -> Result<EvaluationResult,ApplicationError> {
+                     evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
         let mut gs = gs;
 
         let mvs = match self.before_search(env,&mut gs,event_dispatcher,evalutor)? {
@@ -1072,36 +1022,32 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 return Ok(EvaluationResult::Immediate(-score,mvs,gs.zh.clone()));
             },
             BeforeSearchResult::AsyncMvs(await_mvs) => {
-                let nodes = Arc::clone(&env.nodes);
-                let zh = gs.zh.clone();
+                evalutor.begin_transaction()?;
 
-                evalutor.add_on_complete_transaction_listener(move || {
-                    let mut scorevalue = Score::NEGINFINITE;
-                    let mut best_moves = VecDeque::new();
+                let mut best_moves = VecDeque::new();
+                let mut scorevalue = Score::NEGINFINITE;
 
-                    for r in await_mvs {
-                        let (m, s) = r.0.recv()?;
-                        nodes.fetch_add(1, atomic::Ordering::Release);
+                for r in await_mvs {
+                    let (m, s) = r.0.recv()?;
+                    env.nodes.fetch_add(1, atomic::Ordering::Release);
 
-                        let s = Score::Value(s);
+                    let s = Score::Value(s);
 
-                        if scorevalue < s {
-                            scorevalue = s;
-                            best_moves = VecDeque::new();
-                            best_moves.push_front(m);
-                        }
+                    if scorevalue < s {
+                        scorevalue = s;
+
+                        let mut mvs = VecDeque::new();
+
+                        mvs.push_front(m);
+
+                        self.send_info(env, env.base_depth, gs.current_depth, &mvs, &scorevalue)?;
+
+                        best_moves = VecDeque::new();
+                        best_moves.push_front(m);
                     }
+                }
 
-                    sender.map(|s| {
-                        s.send((best_moves,scorevalue,zh.clone()))
-                    }).ok_or(ApplicationError::InvalidStateError(String::from(
-                        "Sender is not set"
-                    )))??;
-
-                    Ok(())
-                })?;
-
-                return Ok(EvaluationResult::Pending);
+                return Ok(EvaluationResult::Immediate(scorevalue, best_moves,gs.zh.clone()));
             },
             BeforeSearchResult::Mvs(mvs) => {
                 mvs
@@ -1131,148 +1077,109 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         let mut scoreval = Score::NEGINFINITE;
         let mut best_moves = VecDeque::new();
 
-        let (s,r) = mpsc::channel();
+        for &(priority,is_oute,m) in &mvs {
+            match self.startup_strategy(env, gs, m, priority, is_oute) {
+                Some((depth, obtained, zh,
+                         oute_kyokumen_map,
+                         current_kyokumen_map,
+                         is_sennichite)) => {
+                    let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
-        let mut pending_count = 0;
+                    match next {
+                        (state, mc, _) => {
+                            if is_sennichite {
+                                let s = if Rule::is_mate(gs.teban.opposite(), &state) {
+                                    Score::NEGINFINITE
+                                } else {
+                                    Score::Value(0)
+                                };
 
-        {
-            let s = s;
+                                if s > scoreval {
+                                    scoreval = s;
+                                    best_moves = VecDeque::new();
+                                    best_moves.push_front(m);
+                                    best_moves.push_front(prev_move);
 
-            for &(priority,is_oute,m) in &mvs {
-                match self.startup_strategy(env, gs, m, priority, is_oute) {
-                    Some((depth, obtained, zh,
-                             oute_kyokumen_map,
-                             current_kyokumen_map,
-                             is_sennichite)) => {
-                        let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
+                                    if scoreval >= gs.beta {
+                                        return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
+                                    }
+                                }
 
-                        match next {
-                            (state, mc, _) => {
-                                if is_sennichite {
-                                    let s = if Rule::is_mate(gs.teban.opposite(), &state) {
-                                        Score::NEGINFINITE
-                                    } else {
-                                        Score::Value(0)
-                                    };
+                                if alpha < scoreval {
+                                    alpha = scoreval;
+                                }
+                                continue;
+                            }
 
-                                    if s > scoreval {
-                                        scoreval = s;
-                                        best_moves = VecDeque::new();
-                                        best_moves.push_front(m);
+                            let state = Arc::new(state);
+                            let mc = Arc::new(mc);
+
+                            let mut gs = GameState {
+                                teban: gs.teban.opposite(),
+                                state: &state,
+                                alpha: -gs.beta,
+                                beta: -alpha,
+                                m: Some(m),
+                                mc: &mc,
+                                obtained: obtained,
+                                current_kyokumen_map: &current_kyokumen_map,
+                                oute_kyokumen_map: &oute_kyokumen_map,
+                                zh: zh.clone(),
+                                depth: depth - 1,
+                                current_depth: gs.current_depth + 1,
+                                max_depth:gs.max_depth
+                            };
+
+                            let strategy = Recursive::new();
+
+                            match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
+                                EvaluationResult::Timeout if best_moves.is_empty() => {
+                                    return Ok(EvaluationResult::Timeout);
+                                },
+                                EvaluationResult::Timeout => {
+                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves,zh.clone()));
+                                },
+                                EvaluationResult::Immediate(s, mvs, zh) => {
+                                    {
+                                        let mut tte = env.transposition_table.entry(&zh);
+                                        let tte = tte.or_default();
+
+                                        if tte.depth < gs.depth as i8 - 1 {
+                                            tte.depth = gs.depth as i8 - 1;
+                                            tte.score = -s;
+                                        }
+                                    }
+
+                                    if -s > scoreval {
+                                        scoreval = -s;
+
+                                        best_moves = mvs;
                                         best_moves.push_front(prev_move);
 
-                                        if scoreval >= gs.beta {
+                                        if scoreval >= beta {
                                             return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
                                         }
                                     }
 
-                                    if alpha < scoreval {
-                                        alpha = scoreval;
+                                    if alpha < -s {
+                                        alpha = -s;
                                     }
-                                    continue;
                                 }
+                            }
 
-                                let state = Arc::new(state);
-                                let mc = Arc::new(mc);
+                            event_dispatcher.dispatch_events(self, &*env.event_queue)?;
 
-                                let s = if gs.depth == 2 || gs.current_depth + 2 == gs.max_depth {
-                                    Some(s.clone())
+                            if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                                if best_moves.is_empty() {
+                                    return Ok(EvaluationResult::Timeout);
                                 } else {
-                                    None
-                                };
-
-                                let mut gs = GameState {
-                                    teban: gs.teban.opposite(),
-                                    state: &state,
-                                    alpha: -gs.beta,
-                                    beta: -alpha,
-                                    m: Some(m),
-                                    mc: &mc,
-                                    obtained: obtained,
-                                    current_kyokumen_map: &current_kyokumen_map,
-                                    oute_kyokumen_map: &oute_kyokumen_map,
-                                    zh: zh.clone(),
-                                    depth: depth - 1,
-                                    current_depth: gs.current_depth + 1,
-                                    max_depth:gs.max_depth
-                                };
-
-                                let strategy = Recursive::new();
-
-                                match strategy.search(env, &mut gs, event_dispatcher, evalutor, s)? {
-                                    EvaluationResult::Timeout if best_moves.is_empty() => {
-                                        return Ok(EvaluationResult::Timeout);
-                                    },
-                                    EvaluationResult::Timeout => {
-                                        return Ok(EvaluationResult::Immediate(scoreval, best_moves,zh.clone()));
-                                    },
-                                    EvaluationResult::Immediate(s, mvs, zh) => {
-                                        {
-                                            let mut tte = env.transposition_table.entry(&zh);
-                                            let tte = tte.or_default();
-
-                                            if tte.depth < gs.depth as i8 - 1 {
-                                                tte.depth = gs.depth as i8 - 1;
-                                                tte.score = -s;
-                                            }
-                                        }
-
-                                        if -s > scoreval {
-                                            scoreval = -s;
-
-                                            best_moves = mvs;
-                                            best_moves.push_front(prev_move);
-
-                                            if scoreval >= beta {
-                                                return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
-                                            }
-                                        }
-
-                                        if alpha < -s {
-                                            alpha = -s;
-                                        }
-                                    },
-                                    EvaluationResult::Pending => {
-                                        pending_count += 1;
-                                    }
-                                }
-
-                                event_dispatcher.dispatch_events(self, &*env.event_queue)?;
-
-                                if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
-                                    if best_moves.is_empty() {
-                                        return Ok(EvaluationResult::Timeout);
-                                    } else {
-                                        return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
-                                    }
+                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
                                 }
                             }
                         }
                     }
-                    None => (),
                 }
-            }
-        }
-
-        if pending_count > 0 {
-            evalutor.begin_transaction()?;
-
-            for _ in 0..pending_count {
-                let (mvs, s, zh) = r.recv()?;
-                {
-                    let mut tte = env.transposition_table.entry(&zh);
-                    let tte = tte.or_default();
-
-                    if tte.depth < gs.depth as i8 - 1 {
-                        tte.depth = gs.depth as i8 - 1;
-                        tte.score = -s;
-                    }
-                }
-
-                if -s > scoreval {
-                    scoreval = -s;
-                    best_moves = mvs;
-                }
+                None => (),
             }
         }
 

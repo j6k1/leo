@@ -145,7 +145,6 @@ pub struct Evalutor {
     transaction_sender_queue:Arc<ConcurrentQueue<Sender<()>>>,
     receiver:Arc<Mutex<Receiver<Result<Vec<(f32,f32)>,EvaluationThreadError>>>>,
     queue:Arc<ConcurrentQueue<BatchItem>>,
-    on_complete_transaction_handlers:Arc<ConcurrentQueue<OnCompleteTransactionHandler>>,
     active_threads:Arc<AtomicUsize>,
     wait_threads:Arc<AtomicUsize>
 }
@@ -294,8 +293,7 @@ impl Evalutor {
             active_threads:Arc::new(AtomicUsize::new(0)),
             wait_threads:Arc::new(AtomicUsize::new(0)),
             receiver:Arc::new(Mutex::new(r)),
-            queue:Arc::new(ConcurrentQueue::unbounded()),
-            on_complete_transaction_handlers:Arc::new(ConcurrentQueue::unbounded())
+            queue:Arc::new(ConcurrentQueue::unbounded())
         })
     }
 
@@ -326,11 +324,6 @@ impl Evalutor {
         }
 
         Ok(())
-    }
-
-    pub fn add_on_complete_transaction_listener<F>(&self,listener:F) -> Result<(),ApplicationError>
-        where F: FnOnce() -> Result<(),ApplicationError> + Send + 'static {
-        Ok(self.on_complete_transaction_handlers.push(OnCompleteTransactionHandler(Box::new(listener)))?)
     }
 
     pub fn begin_transaction(&self) -> Result<(),ApplicationError> {
@@ -394,24 +387,6 @@ impl Evalutor {
                 }
             }
 
-            let mut listeners = Vec::new();
-
-            while let Ok(listener) = self.on_complete_transaction_handlers.pop() {
-                listeners.push(listener);
-            }
-
-            let h = thread::spawn(move || {
-                for listener in listeners {
-                    listener.invoke()?;
-                }
-
-                Ok::<(),ApplicationError>(())
-            });
-
-            h.join().map_err(|_| ApplicationError::EndTransactionError(String::from(
-                "An error occurred while waiting for the result of the evaluation value notification thread."
-            )))??;
-
             while let Ok(s) = self.transaction_sender_queue.pop() {
                 s.send(())?;
             }
@@ -431,8 +406,7 @@ impl Clone for Evalutor {
             active_threads:Arc::clone(&self.active_threads),
             wait_threads:Arc::clone(&self.wait_threads),
             receiver:Arc::clone(&self.receiver),
-            queue:Arc::clone(&self.queue),
-            on_complete_transaction_handlers:Arc::clone(&self.on_complete_transaction_handlers)
+            queue:Arc::clone(&self.queue)
         }
     }
 }

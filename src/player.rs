@@ -463,7 +463,7 @@ impl USIPlayer<ApplicationError> for Leo {
 
                 let strategy  = Root::new();
 
-                let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, evalutor, None);
+                let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, evalutor);
 
                 let bestmove = match result {
                     Err(ref e) => {
@@ -484,11 +484,6 @@ impl USIPlayer<ApplicationError> for Leo {
                     },
                     Ok(EvaluationResult::Immediate(_,mvs,_)) => {
                         BestMove::Move(mvs[0].to_move(),None)
-                    },
-                    Ok(EvaluationResult::Pending) => {
-                        return Err(ApplicationError::InvalidStateError(String::from(
-                            "Unexpected Result Type 'Pending'"
-                        )));
                     }
                 };
 
