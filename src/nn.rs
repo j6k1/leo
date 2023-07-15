@@ -394,9 +394,23 @@ impl Evalutor {
                 }
             }
 
+            let mut listeners = Vec::new();
+
             while let Ok(listener) = self.on_complete_transaction_handlers.pop() {
-                listener.invoke()?;
+                listeners.push(listener);
             }
+
+            let h = thread::spawn(move || {
+                for listener in listeners {
+                    listener.invoke()?;
+                }
+
+                Ok::<(),ApplicationError>(())
+            });
+
+            h.join().map_err(|_| ApplicationError::EndTransactionError(String::from(
+                "An error occurred while waiting for the result of the evaluation value notification thread."
+            )))??;
 
             while let Ok(s) = self.transaction_sender_queue.pop() {
                 s.send(())?;
