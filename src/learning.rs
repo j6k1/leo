@@ -29,7 +29,7 @@ use rand::prelude::SliceRandom;
 use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 
-use nncombinator::arr::{Arr, VecArr};
+use nncombinator::arr::{Arr, SerializedVec};
 use nncombinator::device::DeviceGpu;
 use nncombinator::layer::{BatchForwardBase, BatchTrain, ForwardAll};
 use nncombinator::persistence::{BinFilePersistence, Linear, Persistence};
@@ -103,12 +103,12 @@ impl<'a,P: AsRef<Path>> CheckPointWriter<P> {
 }
 pub struct Learnener<M>
     where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
-    BatchForwardBase<BatchInput=VecArr<f32,Arr<f32,2517>>,BatchOutput=VecArr<f32,Arr<f32,1>>> +
+    BatchForwardBase<BatchInput=SerializedVec<f32,Arr<f32,2517>>,BatchOutput=SerializedVec<f32,Arr<f32,1>>> +
     BatchTrain<f32,DeviceGpu<f32>> + Persistence<f32,BinFilePersistence<f32>,Linear> {
     nn:PhantomData<M>}
 impl<M> Learnener<M>
     where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
-    BatchForwardBase<BatchInput=VecArr<f32,Arr<f32,2517>>,BatchOutput=VecArr<f32,Arr<f32,1>>> +
+    BatchForwardBase<BatchInput=SerializedVec<f32,Arr<f32,2517>>,BatchOutput=SerializedVec<f32,Arr<f32,1>>> +
     BatchTrain<f32,DeviceGpu<f32>> + Persistence<f32,BinFilePersistence<f32>,Linear>{
     pub fn new() -> Learnener<M> {
         Learnener {

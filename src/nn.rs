@@ -14,10 +14,14 @@ use rand_distr::Normal;
 use rand_xorshift::XorShiftRng;
 use rayon::iter::IntoParallelRefIterator;
 use nncombinator::activation::{ReLu, Tanh};
-use nncombinator::arr::{Arr, VecArr};
+use nncombinator::arr::{Arr, SerializedVec};
 use nncombinator::cuda::mem::{Alloctype, MemoryPool};
 use nncombinator::device::{Device, DeviceGpu};
-use nncombinator::layer::{ActivationLayer, AddLayer, AddLayerTrain, BatchForward, BatchForwardBase, BatchTrain, ForwardAll, InputLayer, LinearLayer, LinearOutputLayer, TryAddLayer};
+use nncombinator::layer::{AddLayer, AddLayerTrain, BatchForward, BatchForwardBase, BatchTrain, ForwardAll, TryAddLayer};
+use nncombinator::layer::input::InputLayer;
+use nncombinator::layer::output::LinearOutputLayer;
+use nncombinator::layer::linear::{LinearLayerBuilder};
+use nncombinator::layer::activation::ActivationLayer;
 use nncombinator::lossfunction::{Mse};
 use nncombinator::ope::UnitValue;
 use nncombinator::optimizer::{SGD};
@@ -115,14 +119,14 @@ pub enum Message {
 }
 
 pub trait BatchNeuralNetwork<U,D,P,PT,I,O>: ForwardAll<Input=I,Output=O> +
-                                 BatchForwardBase<BatchInput=VecArr<U,I>,BatchOutput=VecArr<U,O>> +
+                                 BatchForwardBase<BatchInput=SerializedVec<U,I>,BatchOutput=SerializedVec<U,O>> +
                                  BatchTrain<U,D> + Persistence<U,P,PT>
                                  where U: UnitValue<U>,
                                        D: Device<U>,
                                        PT: PersistenceType {}
 impl<T,U,D,P,PT,I,O> BatchNeuralNetwork<U,D,P,PT,I,O> for T
     where T: ForwardAll<Input=I,Output=O> +
-             BatchForwardBase<BatchInput=VecArr<U,I>,BatchOutput=VecArr<U,O>> +
+             BatchForwardBase<BatchInput=SerializedVec<U,I>,BatchOutput=SerializedVec<U,O>> +
              BatchTrain<U,D> + Persistence<U,P,PT>,
              U: UnitValue<U>,
              D: Device<U>,
@@ -186,17 +190,17 @@ impl Evalutor {
 
                     let mut nna = net.try_add_layer(|l| {
                         let rnd = rnd.clone();
-                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 2517, 256>::new(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                        LinearLayerBuilder::new::<2517, 256>().build(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
                     })?.add_layer(|l| {
                         ActivationLayer::new(l, ReLu::new(&device), &device)
                     }).try_add_layer(|l| {
                         let rnd = rnd.clone();
-                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 256, 32>::new(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                        LinearLayerBuilder::new::<256, 32>().build(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
                     })?.add_layer(|l| {
                         ActivationLayer::new(l, ReLu::new(&device), &device)
                     }).try_add_layer(|l| {
                         let rnd = rnd.clone();
-                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 32, 1>::new(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                        LinearLayerBuilder::new::<32, 1>().build(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
                     })?.add_layer(|l| {
                         ActivationLayer::new(l, Tanh::new(&device), &device)
                     }).add_layer_train(|l| {
@@ -218,17 +222,17 @@ impl Evalutor {
 
                     let mut nnb = net.try_add_layer(|l| {
                         let rnd = rnd.clone();
-                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 2517, 256>::new(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                        LinearLayerBuilder::new::<2517, 256>().build(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
                     })?.add_layer(|l| {
                         ActivationLayer::new(l, ReLu::new(&device), &device)
                     }).try_add_layer(|l| {
                         let rnd = rnd.clone();
-                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 256, 32>::new(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                        LinearLayerBuilder::new::<256, 32>().build(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
                     })?.add_layer(|l| {
                         ActivationLayer::new(l, ReLu::new(&device), &device)
                     }).try_add_layer(|l| {
                         let rnd = rnd.clone();
-                        Ok(LinearLayer::<_, _, _, DeviceGpu<f32>, _, 32, 1>::new(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+                        LinearLayerBuilder::new::<32, 1>().build(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
                     })?.add_layer(|l| {
                         ActivationLayer::new(l, Tanh::new(&device), &device)
                     }).add_layer_train(|l| {
@@ -455,17 +459,17 @@ impl TrainerCreator {
 
         let mut nna = net.try_add_layer(|l| {
             let rnd = rnd.clone();
-            Ok(LinearLayer::<_,_,_,DeviceGpu<f32>,_,2517,256>::new(l,&device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+            LinearLayerBuilder::new::<2517,256>().build(l,&device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
         })?.add_layer(|l| {
             ActivationLayer::new(l,ReLu::new(&device),&device)
         }).try_add_layer(|l| {
             let rnd = rnd.clone();
-            Ok(LinearLayer::<_,_,_,DeviceGpu<f32>,_,256,32>::new(l,&device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+            LinearLayerBuilder::new::<256,32>().build(l,&device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
         })?.add_layer(|l| {
             ActivationLayer::new(l,ReLu::new(&device),&device)
         }).try_add_layer(|l| {
             let rnd = rnd.clone();
-            Ok(LinearLayer::<_,_,_,DeviceGpu<f32>,_,32,1>::new(l,&device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+            LinearLayerBuilder::new::<32,1>().build(l,&device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
         })?.add_layer(|l| {
             ActivationLayer::new(l,Tanh::new(&device),&device)
         }).add_layer_train(|l| {
@@ -487,17 +491,17 @@ impl TrainerCreator {
 
         let mut nnb = net.try_add_layer(|l| {
             let rnd = rnd.clone();
-            Ok(LinearLayer::<_,_,_,DeviceGpu<f32>,_,2517,256>::new(l,&device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+            LinearLayerBuilder::new::<2517,256>().build(l,&device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
         })?.add_layer(|l| {
             ActivationLayer::new(l,ReLu::new(&device),&device)
         }).try_add_layer(|l| {
             let rnd = rnd.clone();
-            Ok(LinearLayer::<_,_,_,DeviceGpu<f32>,_,256,32>::new(l,&device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+            LinearLayerBuilder::new::<256,32>().build(l,&device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
         })?.add_layer(|l| {
             ActivationLayer::new(l,ReLu::new(&device),&device)
         }).try_add_layer(|l| {
             let rnd = rnd.clone();
-            Ok(LinearLayer::<_,_,_,DeviceGpu<f32>,_,32,1>::new(l,&device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)?)
+            LinearLayerBuilder::new::<32,1>().build(l,&device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
         })?.add_layer(|l| {
             ActivationLayer::new(l,Tanh::new(&device),&device)
         }).add_layer_train(|l| {

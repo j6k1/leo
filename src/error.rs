@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, RecvError, RecvTimeoutError, Sender, SendError};
 use std::sync::{MutexGuard, PoisonError};
 use concurrent_queue::{PopError, PushError};
 use csaparser::error::CsaParserError;
-use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, PersistenceError, TrainingError};
+use nncombinator::error::{ConfigReadError, CudaError, DeviceError, EvaluateError, LayerInstantiationError, PersistenceError, TrainingError};
 use packedsfen::error::ReadError;
 use usiagent::error::{EventDispatchError, InfoSendError, PlayerError, SfenStringConvertError, UsiProtocolError};
 use usiagent::event::{EventQueue, SystemEvent, SystemEventKind, UserEvent, UserEventKind};
@@ -35,6 +35,7 @@ pub enum ApplicationError {
     TrainingError(TrainingError),
     EvaluateError(EvaluateError),
     DeviceError(DeviceError),
+    LayerInstantiationError(LayerInstantiationError),
     PersistenceError(PersistenceError),
     CudaError(CudaError),
     RecvError(RecvError),
@@ -76,6 +77,7 @@ impl fmt::Display for ApplicationError {
             ApplicationError::TrainingError(ref e) => write!(f,"{}",e),
             ApplicationError::EvaluateError(ref e) => write!(f,"{}",e),
             ApplicationError::DeviceError(ref e) => write!(f,"{}",e),
+            ApplicationError::LayerInstantiationError(ref e) => write!(f,"{}",e),
             ApplicationError::PersistenceError(ref e) => write!(f,"{}",e),
             ApplicationError::CudaError(ref e) => write!(f, "An error occurred in the process of cuda. ({})",e),
             ApplicationError::RecvError(ref e) => write!(f, "{}",e),
@@ -121,6 +123,7 @@ impl error::Error for ApplicationError {
             ApplicationError::TrainingError(_) => "An error occurred while training the model.",
             ApplicationError::EvaluateError(_) => "An error occurred when running the neural network.",
             ApplicationError::DeviceError(_) => "An error occurred during device initialization.",
+            ApplicationError::LayerInstantiationError(_) => "An unexpected error occurred during layer instantiation.",
             ApplicationError::PersistenceError(_) => "An error occurred when saving model information.",
             ApplicationError::CudaError(_) => "An error occurred in the process of cuda.",
             ApplicationError::RecvError(_) => "An error occurred while receiving the message.",
@@ -164,6 +167,7 @@ impl error::Error for ApplicationError {
             ApplicationError::TrainingError(ref e) => Some(e),
             ApplicationError::EvaluateError(ref e) => Some(e),
             ApplicationError::DeviceError(ref e) => Some(e),
+            ApplicationError::LayerInstantiationError(ref e) => Some(e),
             ApplicationError::PersistenceError(ref e) => Some(e),
             ApplicationError::CudaError(_) => None,
             ApplicationError::RecvError(ref e) => Some(e),
@@ -251,6 +255,11 @@ impl From<EvaluateError> for ApplicationError {
 impl From<DeviceError> for ApplicationError {
     fn from(err: DeviceError) -> ApplicationError {
         ApplicationError::DeviceError(err)
+    }
+}
+impl From<LayerInstantiationError> for ApplicationError {
+    fn from(err: LayerInstantiationError) -> ApplicationError {
+        ApplicationError::LayerInstantiationError(err)
     }
 }
 impl From<PersistenceError> for ApplicationError {
@@ -367,6 +376,7 @@ impl From<ApplicationError> for EvaluationError {
 pub enum EvaluationThreadError {
     CudaError(CudaError),
     DeviceError(DeviceError),
+    LayerInstantiationError(LayerInstantiationError),
     ConfigReadError(ConfigReadError),
     TrainingError(TrainingError),
     InvalidSettingError(String),
@@ -378,6 +388,7 @@ impl fmt::Display for EvaluationThreadError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             EvaluationThreadError::DeviceError(ref e) => write!(f,"{}",e),
+            EvaluationThreadError::LayerInstantiationError(ref e) => write!(f,"{}",e),
             EvaluationThreadError::CudaError(ref e) => write!(f, "An error occurred in the process of cuda. ({})",e),
             EvaluationThreadError::ConfigReadError(ref e) => write!(f,"{}",e),
             EvaluationThreadError::TrainingError(ref e) => write!(f,"{}",e),
@@ -392,6 +403,7 @@ impl error::Error for EvaluationThreadError {
     fn description(&self) -> &str {
         match *self {
             EvaluationThreadError::DeviceError(_) => "An error occurred during device initialization.",
+            EvaluationThreadError::LayerInstantiationError(_) => "An unexpected error occurred during layer instantiation.",
             EvaluationThreadError::CudaError(_) => "An error occurred in the process of cuda.",
             EvaluationThreadError::ConfigReadError(_) => "An error occurred while loading the neural network model.",
             EvaluationThreadError::TrainingError(_) => "An error occurred while training the model.",
@@ -405,6 +417,7 @@ impl error::Error for EvaluationThreadError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match *self {
             EvaluationThreadError::DeviceError(ref e) => Some(e),
+            EvaluationThreadError::LayerInstantiationError(ref e) => Some(e),
             EvaluationThreadError::CudaError(_) => None,
             EvaluationThreadError::ConfigReadError(ref e) => Some(e),
             EvaluationThreadError::TrainingError(ref e) => Some(e),
@@ -418,6 +431,11 @@ impl error::Error for EvaluationThreadError {
 impl From<DeviceError> for EvaluationThreadError {
     fn from(err: DeviceError) -> EvaluationThreadError {
         EvaluationThreadError::DeviceError(err)
+    }
+}
+impl From<LayerInstantiationError> for EvaluationThreadError {
+    fn from(err: LayerInstantiationError) -> EvaluationThreadError {
+        EvaluationThreadError::LayerInstantiationError(err)
     }
 }
 impl From<CudaError> for EvaluationThreadError {
