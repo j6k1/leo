@@ -396,7 +396,7 @@ impl Evalutor {
                         .zip(m.into_par_iter().zip(s.into_par_iter()))
                         .for_each(|(r,(m,s))| {
 
-                        let _ = s.send((m.clone(), ((r.0 + r.1) * (1 << 23) as f32) as i32));
+                        let _ = s.send((m.clone(), ((r.0  * 0.5+ r.1 * 0.5) * (1 << 23) as f32) as i32));
                     });
                 },
                 Err(e) => {
@@ -666,7 +666,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
         let ra = self.nna.forward_all(input.clone() * SCALE)?;
         let rb = self.nnb.forward_all(input * SCALE)?;
 
-        Ok(ra[0] + rb[0])
+        Ok(ra[0] * 0.5 + rb[0] * 0.5)
     }
 
     pub fn learning_by_packed_sfens<'a>(&mut self,
@@ -737,7 +737,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
         let ra = self.nna.forward_all(input.clone() * SCALE)?;
         let rb = self.nnb.forward_all(input * SCALE)?;
 
-        Ok((game_result,ra[0] + rb[0]))
+        Ok((game_result,ra[0] * 0.5 + rb[0] * 0.5))
     }
 
     pub fn learning_by_hcpe<'a>(&mut self,
@@ -834,7 +834,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
             _ => GameEndState::Draw
         };
 
-        Ok((s,ra[0] + rb[0]))
+        Ok((s,ra[0] * 0.5 + rb[0] * 0.5))
     }
 
     pub fn save(&mut self) -> Result<(),ApplicationError> {
