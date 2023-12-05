@@ -560,7 +560,7 @@ impl TrainerCreator {
         Ok(Trainer {
             nna:nna,
             nnb:nnb,
-            optimizer:SGD::new(0.001),
+            optimizer:SGD::new(0.005),
             nna_path: nna_path,
             nnb_path: nnb_path,
             nnsavedir: save_dir,
