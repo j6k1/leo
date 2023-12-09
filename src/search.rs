@@ -356,7 +356,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 let (s,r) = mpsc::channel();
                 let (state,mc,_) = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
-                evalutor.submit(gs.teban.opposite(),state.get_banmen(),&mc,m,s)?;
+                evalutor.submit(gs.teban,state.get_banmen(),&mc,m,s)?;
 
                 await_mvs.push((r,m));
             }
