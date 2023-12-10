@@ -148,7 +148,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut current_kyokumen_map = gs.current_kyokumen_map.clone();
 
         let zh = {
-            let o = gs.obtained.and_then(|o| MochigomaKind::try_from(o).ok());
+            let o = match m {
+                LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                _ => None
+            };
 
             let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
@@ -309,7 +312,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                         let next_move = mvs[0];
                         let mut r = mvs;
 
-                        let o = gs.obtained.and_then(|o| MochigomaKind::try_from(o).ok());
+                        let o = match next_move {
+                            LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                            _ => None
+                        };
 
                         let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,next_move.to_applied_move(),&o);
 
@@ -377,9 +383,12 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                 return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
             } else {
-                let o = gs.obtained.and_then(|o| MochigomaKind::try_from(o).ok());
-
                 let mut mvs = mvs.into_iter().map(|m| {
+                    let o = match m {
+                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                        _ => None
+                    };
+
                     let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
                     {
@@ -402,9 +411,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }
 
             let mvs:Vec<LegalMove> = Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc);
-            let o = gs.obtained.and_then(|o| MochigomaKind::try_from(o).ok());
 
             let mut mvs = mvs.into_iter().map(|m| {
+                let o = match m {
+                    LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                    _ => None
+                };
+
                 let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
                 {
