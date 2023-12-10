@@ -750,6 +750,23 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                     let s = Score::Value(s);
 
+                    let o = match m {
+                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                        _ => None
+                    };
+
+                    let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
+
+                    {
+                        let mut tte = env.transposition_table.entry(&zh);
+                        let tte = tte.or_default();
+
+                        if tte.depth < gs.depth as i8 - 1 {
+                            tte.depth = gs.depth as i8 - 1;
+                            tte.score = s;
+                        }
+                    }
+
                     if scorevalue < s {
                         scorevalue = s;
 
@@ -1045,6 +1062,23 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     env.nodes.fetch_add(1, atomic::Ordering::Release);
 
                     let s = Score::Value(s);
+
+                    let o = match m {
+                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                        _ => None
+                    };
+
+                    let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
+
+                    {
+                        let mut tte = env.transposition_table.entry(&zh);
+                        let tte = tte.or_default();
+
+                        if tte.depth < gs.depth as i8 - 1 {
+                            tte.depth = gs.depth as i8 - 1;
+                            tte.score = s;
+                        }
+                    }
 
                     if scorevalue < s {
                         scorevalue = s;
