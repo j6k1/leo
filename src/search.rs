@@ -216,7 +216,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         if let Some(ObtainKind::Ou) = gs.obtained {
-            return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE,VecDeque::new()));
+            return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE,VecDeque::new()));
         }
 
         if let Some(m) = gs.m {
@@ -242,7 +242,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             let mut mvs = VecDeque::new();
                             mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs))
+                            return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE, mvs))
                         },
                         Score::NEGINFINITE => {
                             if env.display_evalute_score {
@@ -252,7 +252,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             let mut mvs = VecDeque::new();
                             mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE, mvs));
+                            return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
                         },
                         Score::Value(s) if d as u32 >= gs.depth + 1 => {
                             if env.display_evalute_score {
@@ -262,7 +262,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             let mut mvs = VecDeque::new();
                             mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::CompleteForOpposite(Score::Value(s), mvs));
+                            return Ok(BeforeSearchResult::CompleteForOpposite(-Score::Value(s), mvs));
                         },
                         _ => ()
                     }
