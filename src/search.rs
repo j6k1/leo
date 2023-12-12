@@ -219,7 +219,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         if let Some(ObtainKind::Ou) = gs.obtained {
-            return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE,VecDeque::new()));
+            let mut mvs = VecDeque::new();
+            gs.m.map(|m| mvs.push_front(m));
+
+            return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE,mvs));
         }
 
         if let Some(m) = gs.m {
@@ -770,14 +773,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if scorevalue < s {
                         scorevalue = s;
 
-                        let mut mvs = VecDeque::new();
-
-                        mvs.push_front(m);
-
-                        self.send_info(env, env.base_depth, gs.current_depth, &mvs, &scorevalue)?;
-
                         best_moves = VecDeque::new();
                         best_moves.push_front(m);
+
+                        self.send_info(env, env.base_depth, gs.current_depth, &best_moves, &scorevalue)?;
                     }
                 }
 
@@ -848,9 +847,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         if -s > scoreval {
                             scoreval = -s;
 
-                            self.send_info(env, env.base_depth, gs.current_depth, &mvs, &scoreval)?;
-
                             best_moves = mvs;
+
+                            self.send_info(env, env.base_depth, gs.current_depth, &best_moves, &scoreval)?;
 
                             if scoreval >= beta {
                                 break;
@@ -1052,6 +1051,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 return Ok(EvaluationResult::Immediate(-score,mvs,gs.zh.clone()));
             },
             BeforeSearchResult::AsyncMvs(await_mvs) => {
+                let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
+                    "move is not set."
+                )))?;
+
                 evalutor.begin_transaction()?;
 
                 let mut best_moves = VecDeque::new();
@@ -1089,6 +1092,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                         best_moves = VecDeque::new();
                         best_moves.push_front(m);
+                        best_moves.push_front(prev_move);
                     }
                 }
 
@@ -1143,9 +1147,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     scoreval = s;
                                     best_moves = VecDeque::new();
                                     best_moves.push_front(m);
-                                    best_moves.push_front(prev_move);
 
                                     if scoreval >= gs.beta {
+                                        best_moves.push_front(prev_move);
                                         return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
                                     }
                                 }
@@ -1182,6 +1186,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     return Ok(EvaluationResult::Timeout);
                                 },
                                 EvaluationResult::Timeout => {
+                                    best_moves.push_front(prev_move);
                                     return Ok(EvaluationResult::Immediate(scoreval, best_moves,zh.clone()));
                                 },
                                 EvaluationResult::Immediate(s, mvs, zh) => {
@@ -1199,9 +1204,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         scoreval = -s;
 
                                         best_moves = mvs;
-                                        best_moves.push_front(prev_move);
 
                                         if scoreval >= beta {
+                                            best_moves.push_front(prev_move);
                                             return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
                                         }
                                     }
@@ -1218,6 +1223,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 if best_moves.is_empty() {
                                     return Ok(EvaluationResult::Timeout);
                                 } else {
+                                    best_moves.push_front(prev_move);
                                     return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
                                 }
                             }
@@ -1227,6 +1233,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 None => (),
             }
         }
+
+        best_moves.push_front(prev_move);
 
         Ok(EvaluationResult::Immediate(scoreval, best_moves,gs.zh.clone()))
     }
