@@ -4,7 +4,7 @@ use std::ops::{Add, BitXor, Deref, DerefMut, Index, IndexMut, Sub};
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use usiagent::hash::{InitialHash, KyokumenHash};
-use usiagent::rule::AppliedMove;
+use usiagent::rule::{LegalMove,AppliedMove};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, MochigomaKind, Teban};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -82,13 +82,15 @@ impl<T> ZobristHash<T>
 #[derive(Debug,Clone)]
 pub struct TTPartialEntry<T> where T: Default {
     pub depth:i8,
-    pub score:T
+    pub score:T,
+    pub best_move:Option<LegalMove>
 }
 impl<T> Default for TTPartialEntry<T> where T: Default {
     fn default() -> Self {
         TTPartialEntry {
             depth:-1,
-            score:T::default()
+            score:T::default(),
+            best_move: None
         }
     }
 }
