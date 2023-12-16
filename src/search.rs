@@ -1025,7 +1025,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
-        let base_depth = gs.depth.min(env.max_depth);
+        let base_depth = gs.depth;
         let mut depth = 1;
         let mut best_moves = VecDeque::new();
         let mut result = None;
