@@ -211,8 +211,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             )));
         }
 
-        if env.base_depth < gs.current_depth {
-            self.send_seldepth(env,env.base_depth,gs.current_depth)?;
+        if gs.max_depth < gs.current_depth {
+            self.send_seldepth(env,gs.max_depth,gs.current_depth)?;
         }
 
         if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
