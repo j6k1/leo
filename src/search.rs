@@ -713,7 +713,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
-                        if let Err(e) =  self.send_info(env, gs.max_depth,gs.current_depth,&best_moves,&score) {
+                        if let Err(e) =  self.send_info(env, gs.max_depth - (env.max_depth - env.base_depth),gs.current_depth,&best_moves,&score) {
                             last_error = Some(Err(e));
                         }
                     }
@@ -803,7 +803,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         best_moves.push_front(m);
                         gs.m.map(|m| best_moves.push_front(m));
 
-                        self.send_info(env, gs.max_depth, gs.current_depth, &best_moves, &scorevalue)?;
+                        self.send_info(env, gs.max_depth - (env.max_depth - env.base_depth), gs.current_depth, &best_moves, &scorevalue)?;
 
                         self.update_best_move(env,&gs.zh,gs.depth,scorevalue,Some(m));
                     }
@@ -886,7 +886,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                             best_moves = mvs;
 
-                            self.send_info(env, gs.max_depth, gs.current_depth, &best_moves, &scoreval)?;
+                            self.send_info(env, gs.max_depth - (env.max_depth - env.base_depth), gs.current_depth, &best_moves, &scoreval)?;
 
                             self.update_best_move(env,&gs.zh,gs.depth,scoreval,best_moves.front().cloned());
 
