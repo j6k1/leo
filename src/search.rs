@@ -449,6 +449,19 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         Ok(BeforeSearchResult::Mvs(mvs.into_iter().map(|(m,_)| m).collect::<Vec<LegalMove>>()))
     }
 
+    fn update_tt<'a>(&self, env: &mut Environment<L, S>,
+                            zh: &'a ZobristHash<u64>,
+                            depth: u32,
+                            score: Score) {
+        let mut tte = env.transposition_table.entry(&zh);
+        let tte = tte.or_default();
+
+        if tte.depth < depth as i8 - 1 {
+            tte.depth = depth as i8 - 1;
+            tte.score = score;
+        }
+    }
+
     fn update_best_move<'a>(&self, env: &mut Environment<L, S>,
                             zh: &'a ZobristHash<u64>,
                             depth: u32,
@@ -747,16 +760,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         let mut mvs = match self.before_search(env,&mut gs,event_dispatcher,evalutor)? {
             BeforeSearchResult::Complete(EvaluationResult::Immediate(score,mvs,zh)) => {
-                {
-                    let mut tte = env.transposition_table.entry(&zh);
-                    let tte = tte.or_default();
-
-                    if tte.depth < gs.depth as i8 - 1 {
-                        tte.depth = gs.depth as i8 - 1;
-                        tte.score = -score;
-                    }
-                }
-
+                self.update_tt(env, &zh, gs.depth, -score);
                 self.update_best_move(env,&gs.zh,gs.depth,score,mvs.get(1).cloned());
 
                 return Ok(EvaluationResult::Immediate(score,mvs,gs.zh.clone()));
@@ -786,15 +790,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                     let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-                    {
-                        let mut tte = env.transposition_table.entry(&zh);
-                        let tte = tte.or_default();
-
-                        if tte.depth < gs.depth as i8 - 1 {
-                            tte.depth = gs.depth as i8 - 1;
-                            tte.score = s;
-                        }
-                    }
+                    self.update_tt(env,&zh,gs.depth,-s);
 
                     if scorevalue < s {
                         scorevalue = s;
@@ -871,15 +867,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                 match r {
                     EvaluationResult::Immediate(s, mvs,zh) => {
-                        {
-                            let mut tte = env.transposition_table.entry(&zh);
-                            let tte = tte.or_default();
-
-                            if tte.depth < gs.depth as i8 - 1 {
-                                tte.depth = gs.depth as i8 - 1;
-                                tte.score = s;
-                            }
-                        }
+                        self.update_tt(env,&zh,gs.depth,s);
 
                         if -s > scoreval {
                             scoreval = -s;
@@ -1076,15 +1064,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
         let mut mvs = match self.before_search(env,&mut gs,event_dispatcher,evalutor)? {
             BeforeSearchResult::Complete(EvaluationResult::Immediate(score,mvs,zh)) => {
-                {
-                    let mut tte = env.transposition_table.entry(&zh);
-                    let tte = tte.or_default();
-
-                    if tte.depth < gs.depth as i8 - 1 {
-                        tte.depth = gs.depth as i8 - 1;
-                        tte.score = -score;
-                    }
-                }
+                self.update_tt(env,&zh,gs.depth,-score);
                 self.update_best_move(env,&gs.zh,gs.depth,score,mvs.get(1).cloned());
 
                 return Ok(EvaluationResult::Immediate(score,mvs,gs.zh.clone()));
@@ -1118,15 +1098,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-                    {
-                        let mut tte = env.transposition_table.entry(&zh);
-                        let tte = tte.or_default();
-
-                        if tte.depth < gs.depth as i8 - 1 {
-                            tte.depth = gs.depth as i8 - 1;
-                            tte.score = s;
-                        }
-                    }
+                    self.update_tt(env,&zh,gs.depth,-s);
 
                     if scorevalue < s {
                         scorevalue = s;
@@ -1245,15 +1217,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     return Ok(EvaluationResult::Immediate(scoreval, best_moves,zh.clone()));
                                 },
                                 EvaluationResult::Immediate(s, mvs, zh) => {
-                                    {
-                                        let mut tte = env.transposition_table.entry(&zh);
-                                        let tte = tte.or_default();
-
-                                        if tte.depth < gs.depth as i8 - 1 {
-                                            tte.depth = gs.depth as i8 - 1;
-                                            tte.score = s;
-                                        }
-                                    }
+                                    self.update_tt(env,&zh,gs.depth,s);
 
                                     if -s > scoreval {
                                         scoreval = -s;
