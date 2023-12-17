@@ -757,7 +757,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     }
                 }
 
-                self.update_best_move(env,&gs.zh,gs.depth,score,mvs.get(1).cloned());
+                self.update_best_move(env,&gs.zh,gs.depth,-score,mvs.get(1).cloned());
 
                 return Ok(EvaluationResult::Immediate(score,mvs,gs.zh.clone()));
             },
@@ -1085,7 +1085,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                         tte.score = score;
                     }
                 }
-                self.update_best_move(env,&gs.zh,gs.depth,score,mvs.get(1).cloned());
+                self.update_best_move(env,&gs.zh,gs.depth,-score,mvs.get(1).cloned());
 
                 return Ok(EvaluationResult::Immediate(score,mvs,gs.zh.clone()));
             },
