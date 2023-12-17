@@ -424,7 +424,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     let think_start_time = think_start_time.clone();
                     let on_error_handler = env.on_error_handler.clone();
 
-                    periodically_info.start(100,move || {
+                    periodically_info.start(1000,move || {
                         let mut commands = vec![];
                         commands.push(UsiInfoSubCommand::Nodes(nodes.load(Ordering::Acquire)));
 
