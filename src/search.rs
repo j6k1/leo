@@ -820,11 +820,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 }
             }
 
-            if Rule::is_oute_move(gs.state,gs.teban,m) {
-                (200,true,m)
-            } else {
-                (0,false,m)
-            }
+            (0,false,m)
         }).collect::<Vec<(u32,bool,LegalMove)>>();
 
         let mut alpha = gs.alpha;
@@ -1115,11 +1111,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 }
             }
 
-            if Rule::is_oute_move(gs.state,gs.teban,m) {
-                (200,true,m)
-            } else {
-                (0,false,m)
-            }
+            (0,false,m)
         }).collect::<Vec<(u32,bool,LegalMove)>>();
 
         let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
