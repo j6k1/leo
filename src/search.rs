@@ -412,7 +412,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 }).collect::<Vec<(LegalMove,Score)>>();
 
                 mvs.sort_by(|&a,&b| {
-                    b.1.cmp(&a.1).then_with(|| defense_priority(gs.teban,&gs.state,a.0).cmp(&defense_priority(gs.teban,&gs.state,b.0)))
+                    a.1.cmp(&b.1).then_with(|| defense_priority(gs.teban,&gs.state,a.0).cmp(&defense_priority(gs.teban,&gs.state,b.0)))
                 });
                 mvs
             }
@@ -441,7 +441,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }).collect::<Vec<(LegalMove,Score)>>();
 
             mvs.sort_by(|&a,&b| {
-                b.1.cmp(&a.1).then_with(|| attack_priority(gs.teban,&gs.state,a.0).cmp(&attack_priority(gs.teban,&gs.state,b.0)))
+                a.1.cmp(&b.1).then_with(|| attack_priority(gs.teban,&gs.state,a.0).cmp(&attack_priority(gs.teban,&gs.state,b.0)))
             });
             mvs
         };
