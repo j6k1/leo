@@ -753,7 +753,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                     if tte.depth < gs.depth as i8 - 1 {
                         tte.depth = gs.depth as i8 - 1;
-                        tte.score = score;
+                        tte.score = -score;
                     }
                 }
 
@@ -1082,7 +1082,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     if tte.depth < gs.depth as i8 - 1 {
                         tte.depth = gs.depth as i8 - 1;
-                        tte.score = score;
+                        tte.score = -score;
                     }
                 }
                 self.update_best_move(env,&gs.zh,gs.depth,score,mvs.get(1).cloned());
