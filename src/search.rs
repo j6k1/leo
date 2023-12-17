@@ -373,7 +373,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 let (s,r) = mpsc::channel();
                 let (state,mc,_) = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
-                evalutor.submit(gs.teban,state.get_banmen(),&mc,m,s)?;
+                evalutor.submit(gs.teban.opposite(),state.get_banmen(),&mc,m,s)?;
 
                 await_mvs.push((r,m));
             }
@@ -781,7 +781,16 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     let (m, s) = r.0.recv()?;
                     env.nodes.fetch_add(1, atomic::Ordering::Release);
 
-                    let s = Score::Value(s);
+                    let s = Score::Value(-s);
+
+                    let o = match m {
+                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                        _ => None
+                    };
+
+                    let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
+
+                    self.update_tt(env,&zh,gs.depth - 1,s);
 
                     if scorevalue < s {
                         scorevalue = s;
@@ -1076,7 +1085,16 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     let (m, s) = r.0.recv()?;
                     env.nodes.fetch_add(1, atomic::Ordering::Release);
 
-                    let s = Score::Value(s);
+                    let s = Score::Value(-s);
+
+                    let o = match m {
+                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
+                        _ => None
+                    };
+
+                    let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
+
+                    self.update_tt(env,&zh,gs.depth - 1,s);
 
                     if scorevalue < s {
                         scorevalue = s;
