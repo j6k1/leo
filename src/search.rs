@@ -790,7 +790,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                     let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-                    self.update_tt(env,&zh,gs.depth,s);
+                    self.update_tt(env,&zh,gs.depth,-s);
 
                     if scorevalue < s {
                         scorevalue = s;
@@ -1094,7 +1094,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-                    self.update_tt(env,&zh,gs.depth,s);
+                    self.update_tt(env,&zh,gs.depth,-s);
 
                     if scorevalue < s {
                         scorevalue = s;
