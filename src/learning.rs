@@ -816,6 +816,7 @@ impl<M> Learnener<M>
             testdata.shuffle(&mut rng);
 
             let mut successed = 0;
+            let mut win = 0;
             let mut count = 0;
 
             for packed in testdata.into_iter().take(100) {
@@ -823,6 +824,7 @@ impl<M> Learnener<M>
 
                 let success = match s {
                     GameEndState::Win => {
+                        win += 1;
                         score >= 0.0
                     },
                     _ => {
@@ -846,6 +848,8 @@ impl<M> Learnener<M>
                 count += 1;
             }
 
+            println!("勝ち {}%",win as f32 / count as f32 * 100.);
+            println!("負け {}%",(count - win) as f32 / count as f32 * 100.);
             println!("正解率 {}%",successed as f32 / count as f32 * 100.);
         }
 
