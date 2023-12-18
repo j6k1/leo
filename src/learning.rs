@@ -816,11 +816,16 @@ impl<M> Learnener<M>
             testdata.shuffle(&mut rng);
 
             let mut successed = 0;
+            let mut estimated_win = 0;
             let mut win = 0;
             let mut count = 0;
 
             for packed in testdata.into_iter().take(100) {
                 let (s,score) = test_process(&mut evalutor,packed)?;
+
+                if score >= 0.0 {
+                    estimated_win += 1;
+                }
 
                 let success = match s {
                     GameEndState::Win => {
@@ -848,8 +853,8 @@ impl<M> Learnener<M>
                 count += 1;
             }
 
-            println!("勝ち {}%",win as f32 / count as f32 * 100.);
-            println!("負け {}%",(count - win) as f32 / count as f32 * 100.);
+            println!("勝ち {}% (勝ちと評価された局面の割合 {}%)",win as f32 / count as f32 * 100.,estimated_win as f32 / count as f32);
+            println!("負け {}% (負けと評価された局面の割合 {}%)",(count - win) as f32 / count as f32 * 100.,(count - estimated_win) as f32 / count as f32);
             println!("正解率 {}%",successed as f32 / count as f32 * 100.);
         }
 
