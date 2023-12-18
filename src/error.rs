@@ -317,8 +317,10 @@ impl From<PoisonError<MutexGuard<'_, ()>>> for ApplicationError {
         ApplicationError::PoisonError(format!("{}",err))
     }
 }
-impl From<PoisonError<MutexGuard<'_, Receiver<Result<Vec<(f32, f32)>,EvaluationThreadError>>>>> for ApplicationError {
-    fn from(err: PoisonError<MutexGuard<'_, Receiver<Result<Vec<(f32, f32)>,EvaluationThreadError>>>>) -> ApplicationError {
+impl From<PoisonError<MutexGuard<'_, (Receiver<Result<Vec<f32>,EvaluationThreadError>>,Receiver<Result<Vec<f32>,EvaluationThreadError>>)>>>
+    for ApplicationError {
+    fn from(err: PoisonError<MutexGuard<'_, (Receiver<Result<Vec<f32>,EvaluationThreadError>>,Receiver<Result<Vec<f32>,EvaluationThreadError>>)>>)
+    -> ApplicationError {
         ApplicationError::PoisonError(format!("{}",err))
     }
 }
@@ -458,8 +460,8 @@ impl From<RecvError> for EvaluationThreadError {
         EvaluationThreadError::RecvError(err)
     }
 }
-impl From<SendError<Result<Vec<(f32,f32)>,EvaluationThreadError>>> for EvaluationThreadError {
-    fn from(err: SendError<Result<Vec<(f32,f32)>,EvaluationThreadError>>) -> EvaluationThreadError {
+impl From<SendError<Result<Vec<f32>,EvaluationThreadError>>> for EvaluationThreadError {
+    fn from(err: SendError<Result<Vec<f32>,EvaluationThreadError>>) -> EvaluationThreadError {
         EvaluationThreadError::SendError(format!("{}",err))
     }
 }
