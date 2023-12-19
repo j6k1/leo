@@ -506,6 +506,9 @@ impl<M> Learnener<M>
                 let score = evalutor.test_by_csa(*teban, kyokumen)?;
 
                 let success = match s {
+                    GameEndState::Draw => {
+                        true
+                    },
                     GameEndState::Win => {
                         score >= 0.0
                     },
@@ -828,6 +831,9 @@ impl<M> Learnener<M>
                 }
 
                 let success = match s {
+                    GameEndState::Draw => {
+                        true
+                    },
                     GameEndState::Win => {
                         win += 1;
                         score >= 0.0
