@@ -585,7 +585,9 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                                         last_teban:Teban,
                                         history:Vec<(Banmen,MochigomaCollections,u64,u64)>,
                                         s:&GameEndState,
-                                        _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>)
+                                        _:&'a Mutex<EventQueue<UserEvent,UserEventKind>>,
+                                        sente_rate: f32,
+                                        gote_rate: f32)
                                         -> Result<(f32,f32),ApplicationError> {
 
         let lossf = Mse::new();
@@ -603,17 +605,17 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                 1f32
             } else {
                 match s {
-                    GameEndState::Win if teban == last_teban => {
-                        1f32
+                    GameEndState::Win if teban == last_teban  && teban == Teban::Sente => {
+                        sente_rate
                     }
-                    GameEndState::Win => {
-                        -1f32
+                    GameEndState::Win if teban == last_teban => {
+                        gote_rate
                     },
-                    GameEndState::Lose if teban == last_teban => {
-                        -1f32
+                    GameEndState::Lose if teban == Teban::Gote => {
+                        -gote_rate
                     },
                     GameEndState::Lose => {
-                        1f32
+                        -sente_rate
                     },
                     _ => 0f32
                 }
@@ -668,6 +670,31 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
             sfens_with_extended.push((teban,banmen,mc,game_result));
         }
 
+        let (sente_win_count,gote_win_count) = sfens_with_extended.iter()
+            .map(|(teban,_,_,es)| {
+                let (s,g) = match (es,teban) {
+                    (&GameEndState::Draw,_) => {
+                        (0,0)
+                    },
+                    (&GameEndState::Win,&Teban::Sente) | (&GameEndState::Lose,&Teban::Gote) => {
+                        (1,0)
+                    },
+                    _ => {
+                        (0,1)
+                    }
+                };
+
+                (s,g)
+            }).fold((0,0), |acc,(s,g)| {
+                (acc.0 + s, acc.1 + g)
+            });
+
+        let (sente_rate,gote_rate) = if sente_win_count >= gote_win_count {
+            (sente_win_count as f32 / gote_win_count as f32,1.)
+        } else {
+            (1.,gote_win_count as f32 / sente_win_count as f32)
+        };
+
         let batch = sfens_with_extended.iter()
             .map(|(teban,banmen,mc,es)| {
                 let (a,b) = Self::calc_alpha_beta(bias_shake_shake);
@@ -680,11 +707,17 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                     1f32
                 } else {
                     match es {
+                        GameEndState::Win if teban == Teban::Sente => {
+                            sente_rate
+                        },
                         GameEndState::Win => {
-                            1f32
-                        }
+                            gote_rate
+                        },
+                        GameEndState::Lose if teban == Teban::Sente => {
+                            -gote_rate
+                        },
                         GameEndState::Lose => {
-                            -1f32
+                            -sente_rate
                         },
                         _ => 0f32
                     }
@@ -738,6 +771,22 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
             sfens_with_extended.push((teban, banmen, mc, game_result));
         }
 
+        let (sente_win_count,gote_win_count) = sfens_with_extended.iter().map(|(_,_,_,es)| {
+            match es {
+                GameResult::Draw => (0,0),
+                GameResult::SenteWin => (1,0),
+                _ => (0,1)
+            }
+        }).fold((0,0), |acc,(s,g)| {
+            (acc.0 + s, acc.1 + g)
+        });
+
+        let (sente_rate,gote_rate) = if sente_win_count >= gote_win_count {
+            (sente_win_count as f32 / gote_win_count as f32,1.)
+        } else {
+            (1.,gote_win_count as f32 / sente_win_count as f32)
+        };
+
         let batch = sfens_with_extended.iter()
             .map(|(teban,banmen,mc,es)| {
                 let (a,b) = Self::calc_alpha_beta(bias_shake_shake);
@@ -746,15 +795,21 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
 
                 let input = InputCreator::make_input(true,teban, banmen, mc);
 
-                let es = match (es,teban) {
-                    (GameResult::Draw,_) => GameEndState::Draw,
-                    (GameResult::SenteWin,Teban::Sente) |
-                    (GameResult::GoteWin,Teban::Gote) => {
-                        GameEndState::Win
+                let (rate,es) = match (es,teban) {
+                    (GameResult::Draw,_) => {
+                        (1.,GameEndState::Draw)
                     },
-                    (GameResult::SenteWin,Teban::Gote) |
+                    (GameResult::SenteWin,Teban::Sente) => {
+                        (sente_rate,GameEndState::Win)
+                    },
+                    (GameResult::GoteWin,Teban::Gote) => {
+                        (gote_rate,GameEndState::Win)
+                    },
+                    (GameResult::SenteWin,Teban::Gote) => {
+                        (sente_rate,GameEndState::Lose)
+                    },
                     (GameResult::GoteWin,Teban::Sente) => {
-                        GameEndState::Lose
+                        (gote_rate,GameEndState::Lose)
                     }
                 };
 
@@ -763,10 +818,10 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
                 } else {
                     match es {
                         GameEndState::Win => {
-                            1f32
+                            rate
                         }
                         GameEndState::Lose => {
-                            -1f32
+                            -rate
                         },
                         _ => 0f32
                     }

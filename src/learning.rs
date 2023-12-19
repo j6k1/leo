@@ -361,7 +361,7 @@ impl<M> Learnener<M>
                     match evalutor.learning_by_training_csa(
                         teban,
                         history,
-                        &GameEndState::Lose, &*user_event_queue) {
+                        &GameEndState::Lose, &*user_event_queue,1.,1.) {
                         Err(_) => {
                             return Err(ApplicationError::LearningError(String::from(
                                 "An error occurred while learning the neural network."
