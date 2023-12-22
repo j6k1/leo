@@ -652,6 +652,7 @@ pub struct GameState<'a> {
     pub zh:ZobristHash<u64>,
     pub depth:u32,
     pub current_depth:u32,
+    pub base_depth:u32,
     pub max_depth:u32
 }
 pub struct Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -726,7 +727,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
-                        if let Err(e) =  self.send_info(env, gs.max_depth - (env.max_depth - env.base_depth.min(env.max_depth)),gs.current_depth,&best_moves,&score) {
+                        if let Err(e) =  self.send_info(env, gs.base_depth,gs.current_depth,&best_moves,&score) {
                             last_error = Some(Err(e));
                         }
                     }
@@ -799,7 +800,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         best_moves.push_front(m);
                         gs.m.map(|m| best_moves.push_front(m));
 
-                        self.send_info(env, gs.max_depth - (env.max_depth - env.base_depth.min(env.max_depth)), gs.current_depth, &best_moves, &scorevalue)?;
+                        self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scorevalue)?;
 
                         self.update_best_move(env,&gs.zh,gs.depth,scorevalue,Some(m));
                     }
@@ -870,7 +871,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                             best_moves = mvs;
 
-                            self.send_info(env, gs.max_depth - (env.max_depth - env.base_depth.min(env.max_depth)), gs.current_depth, &best_moves, &scoreval)?;
+                            self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
 
                             self.update_best_move(env,&gs.zh,gs.depth,scoreval,best_moves.front().cloned());
 
@@ -950,6 +951,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                 let alpha = alpha;
                                 let beta = beta;
                                 let current_depth = gs.current_depth;
+                                let base_depth = gs.base_depth;
                                 let max_depth = gs.max_depth;
 
                                 let mut env = env.clone();
@@ -979,6 +981,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         zh: zh.clone(),
                                         depth: depth - 1,
                                         current_depth: current_depth + 1,
+                                        base_depth:base_depth,
                                         max_depth:max_depth
                                     };
 
@@ -1009,21 +1012,25 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
-        let base_depth = gs.depth.min(env.max_depth);
+        let max_depth = env.max_depth;
+
+        let mut base_depth = gs.depth.min(env.max_depth);
         let mut depth = 1;
         let mut best_moves = VecDeque::new();
         let mut result = None;
 
         loop {
             gs.depth = depth;
+            gs.base_depth = base_depth;
             gs.max_depth = env.max_depth - (base_depth - depth);
 
             let current_result = self.parallelized(env, gs, event_dispatcher, evalutor, None, best_moves.clone())?;
 
             depth += 1;
+            base_depth += 1;
 
             match current_result {
-                r @ EvaluationResult::Immediate(_,_,_) if depth == base_depth + 1 => {
+                r @ EvaluationResult::Immediate(_,_,_) if base_depth == max_depth + 1 => {
                     return Ok(r);
                 },
                 EvaluationResult::Immediate(s,mvs,zh) => {
@@ -1195,6 +1202,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 zh: zh.clone(),
                                 depth: depth - 1,
                                 current_depth: gs.current_depth + 1,
+                                base_depth: gs.base_depth,
                                 max_depth:gs.max_depth
                             };
 

@@ -458,6 +458,7 @@ impl USIPlayer<ApplicationError> for Leo {
                     zh:zh,
                     depth:base_depth,
                     current_depth:0,
+                    base_depth:base_depth,
                     max_depth:env.max_depth
                 };
 
