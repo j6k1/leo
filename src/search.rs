@@ -274,7 +274,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                             return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
                         },
-                        Score::Value(s) if d as u32 >= gs.depth + 1 => {
+                        Score::Value(s) if d as u32 >= gs.depth => {
                             if env.display_evalute_score {
                                 self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
                             }
