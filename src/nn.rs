@@ -328,7 +328,7 @@ impl Evalutor {
     fn try_start_evaluation(&self) -> Result<(),ApplicationError> {
         if self.wait_threads.compare_exchange(
             self.active_threads.load(Ordering::Acquire),0,
-            Ordering::Release,
+            Ordering::SeqCst,
             Ordering::Acquire
         ).is_ok() {
             let mut queue = Vec::with_capacity(self.queue.len());
