@@ -65,6 +65,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         Ok(env.info_sender.send_immediate(commands)?)
     }
 
+    fn send_depth(&self, env:&mut Environment<L,S>, depth:u32) -> Result<(),ApplicationError> {
+        let mut commands:Vec<UsiInfoSubCommand> = Vec::new();
+        commands.push(UsiInfoSubCommand::Depth(depth));
+
+        Ok(env.info_sender.send(commands)?)
+    }
+
     fn send_seldepth(&self, env:&mut Environment<L,S>,
                             depth:u32, seldepth:u32) -> Result<(),ApplicationError> {
 
@@ -211,8 +218,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             )));
         }
 
-        if gs.max_depth < gs.current_depth {
-            self.send_seldepth(env,gs.max_depth,gs.current_depth)?;
+        if gs.base_depth < gs.current_depth {
+            self.send_seldepth(env,gs.base_depth,gs.current_depth)?;
+        } else {
+            self.send_depth(env,gs.base_depth)?;
         }
 
         if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
