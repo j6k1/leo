@@ -308,9 +308,7 @@ impl Evalutor {
     pub fn on_end_thread(&self) -> Result<(),ApplicationError> {
         self.active_threads.fetch_sub(1,Ordering::Release);
 
-        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) {
-            self.start_evaluation()?;
-        }
+        self.try_start_evaluation()?;
 
         Ok(())
     }
@@ -322,15 +320,17 @@ impl Evalutor {
 
         self.wait_threads.fetch_add(1,Ordering::Release);
 
-        if self.wait_threads.load(Ordering::Acquire) >= self.active_threads.load(Ordering::Acquire) {
-            self.start_evaluation()?;
-        }
+        self.try_start_evaluation()?;
 
         Ok(r.recv()?)
     }
 
-    fn start_evaluation(&self) -> Result<(),ApplicationError> {
-        if self.wait_threads.swap(0,Ordering::Release) >= self.active_threads.load(Ordering::Acquire) {
+    fn try_start_evaluation(&self) -> Result<(),ApplicationError> {
+        if self.wait_threads.compare_exchange(
+            self.active_threads.load(Ordering::Acquire),0,
+            Ordering::Release,
+            Ordering::Acquire
+        ).is_ok() {
             let mut queue = Vec::with_capacity(self.queue.len());
 
             while !self.queue.is_empty() {
