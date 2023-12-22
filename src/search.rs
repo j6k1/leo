@@ -1012,16 +1012,14 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
-        let max_depth = env.max_depth;
-
-        let mut base_depth = gs.depth.min(env.max_depth);
+        let mut base_depth = gs.depth.min(env.base_depth);
         let mut depth = 1;
         let mut best_moves = VecDeque::new();
         let mut result = None;
 
         loop {
             gs.depth = depth;
-            gs.base_depth = base_depth;
+            gs.base_depth = depth;
             gs.max_depth = env.max_depth - (base_depth - depth);
 
             let current_result = self.parallelized(env, gs, event_dispatcher, evalutor, None, best_moves.clone())?;
@@ -1030,7 +1028,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
             base_depth += 1;
 
             match current_result {
-                r @ EvaluationResult::Immediate(_,_,_) if base_depth == max_depth + 1 => {
+                r @ EvaluationResult::Immediate(_,_,_) if  base_depth + 1 == depth => {
                     return Ok(r);
                 },
                 EvaluationResult::Immediate(s,mvs,zh) => {
