@@ -690,9 +690,9 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
             });
 
         let (sente_rate,gote_rate) = if sente_win_count >= gote_win_count {
-            (sente_win_count as f32 / gote_win_count as f32,1.)
+            (gote_win_count as f32 / sente_win_count as f32,1.)
         } else {
-            (1.,gote_win_count as f32 / sente_win_count as f32)
+            (1.,sente_win_count as f32 / gote_win_count as f32)
         };
 
         let batch = sfens_with_extended.iter()
@@ -782,9 +782,9 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
         });
 
         let (sente_rate,gote_rate) = if sente_win_count >= gote_win_count {
-            (sente_win_count as f32 / gote_win_count as f32,1.)
+            (gote_win_count as f32 / sente_win_count as f32,1.)
         } else {
-            (1.,gote_win_count as f32 / sente_win_count as f32)
+            (1.,sente_win_count as f32 / gote_win_count as f32)
         };
 
         let batch = sfens_with_extended.iter()
