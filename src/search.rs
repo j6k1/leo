@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::ops::{Add, Deref, Neg, Sub};
 use std::sync::{Arc, atomic, mpsc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 use usiagent::command::{UsiInfoSubCommand, UsiScore, UsiScoreMate};
@@ -224,22 +224,26 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             self.send_depth(env,gs.base_depth)?;
         }
 
-        if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+        if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
+            self.timelimit_reached(env) || self.timeout_expected(env) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
         if let Some(ObtainKind::Ou) = gs.obtained {
             let mut mvs = VecDeque::new();
+
             gs.m.map(|m| mvs.push_front(m));
 
-            return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE,mvs));
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
         }
 
         if let Some(m) = gs.m {
             if Rule::is_mate(gs.teban, &*gs.state) {
                 let mut mvs = VecDeque::new();
+
                 mvs.push_front(m);
-                return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE,mvs));
+
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
             }
 
             {
@@ -248,7 +252,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 if let Some(TTPartialEntry {
                                 depth: d,
                                 score: s,
-                                best_move
+                                best_move: _
                             }) = r {
 
                     match s {
@@ -258,10 +262,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             }
 
                             let mut mvs = VecDeque::new();
-                            best_move.map(|m| mvs.push_front(m));
+
                             mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE, mvs))
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
                         },
                         Score::NEGINFINITE => {
                             if env.display_evalute_score {
@@ -269,10 +273,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             }
 
                             let mut mvs = VecDeque::new();
-                            best_move.map(|m| mvs.push_front(m));
+
                             mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone())));
                         },
                         Score::Value(s) if d as u32 >= gs.depth => {
                             if env.display_evalute_score {
@@ -280,10 +284,11 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             }
 
                             let mut mvs = VecDeque::new();
-                            best_move.map(|m| mvs.push_front(m));
+
                             mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::CompleteForOpposite(-Score::Value(s), mvs));
+
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
                         },
                         _ => ()
                     }
@@ -335,19 +340,15 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             _ => None
                         };
 
-                        self.update_best_move(env,&gs.zh,gs.depth,Score::INFINITE,Some(next_move));
-
                         let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,next_move.to_applied_move(),&o);
 
+                        self.update_tt(env,&zh,gs.depth,Score::NEGINFINITE);
+
+                        self.update_best_move(env,&gs.zh,gs.depth,Score::INFINITE,Some(next_move));
+
                         r.push_front(m);
 
-                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE, r,zh.clone())));
-                    },
-                    MaybeMate::MateMoves(mvs) => {
-                        let mut r = mvs;
-                        r.push_front(m);
-
-                        return Ok(BeforeSearchResult::CompleteForOpposite(Score::NEGINFINITE,r));
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE, r,gs.zh.clone())));
                     },
                     _ => ()
                 }
@@ -355,7 +356,9 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
         event_dispatcher.dispatch_events(self,&*env.event_queue).map_err(|e| ApplicationError::from(e))?;
 
-        if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+
+        if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
+            self.timelimit_reached(env) || self.timeout_expected(env) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
@@ -367,7 +370,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     let mut mvs = VecDeque::new();
                     gs.m.map(|m| mvs.push_front(m));
 
-                    return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
+                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE, mvs, gs.zh.clone())));
                 } else {
                     mvs
                 }
@@ -391,7 +394,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
-            if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+            if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
+                self.timelimit_reached(env) || self.timeout_expected(env) {
                 return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
             }
 
@@ -401,7 +405,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 let mut mvs = VecDeque::new();
                 gs.m.map(|m| mvs.push_front(m));
 
-                return Ok(BeforeSearchResult::CompleteForOpposite(Score::INFINITE, mvs));
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE, mvs,gs.zh.clone())));
             } else {
                 let mut mvs = mvs.into_iter().map(|m| {
                     let o = match m {
@@ -421,12 +425,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 }).collect::<Vec<(LegalMove,Score)>>();
 
                 mvs.sort_by(|&a,&b| {
-                    a.1.cmp(&b.1).then_with(|| defense_priority(gs.teban,&gs.state,a.0).cmp(&defense_priority(gs.teban,&gs.state,b.0)))
+                    b.1.cmp(&a.1).then_with(|| defense_priority(gs.teban,&gs.state,a.0).cmp(&defense_priority(gs.teban,&gs.state,b.0)))
                 });
                 mvs
             }
         } else {
-            if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+            if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
+                self.timelimit_reached(env) || self.timeout_expected(env) {
                 return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
             }
 
@@ -450,7 +455,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }).collect::<Vec<(LegalMove,Score)>>();
 
             mvs.sort_by(|&a,&b| {
-                a.1.cmp(&b.1).then_with(|| attack_priority(gs.teban,&gs.state,a.0).cmp(&attack_priority(gs.teban,&gs.state,b.0)))
+                b.1.cmp(&a.1).then_with(|| attack_priority(gs.teban,&gs.state,a.0).cmp(&attack_priority(gs.teban,&gs.state,b.0)))
             });
             mvs
         };
@@ -494,7 +499,6 @@ pub enum EvaluationResult {
 #[derive(Debug)]
 pub enum BeforeSearchResult {
     Complete(EvaluationResult),
-    CompleteForOpposite(Score, VecDeque<LegalMove>),
     Mvs(Vec<LegalMove>),
     AsyncMvs(Vec<(Receiver<(LegalMove,i32)>,LegalMove)>),
 }
@@ -563,6 +567,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub mate_hash:usize,
     pub stop:Arc<AtomicBool>,
     pub quited:Arc<AtomicBool>,
+    pub abort:Arc<AtomicBool>,
     pub transposition_table:Arc<TT<u64,Score,{1<<20},4>>,
     pub nodes:Arc<AtomicU64>,
     pub think_start_time:Instant
@@ -590,6 +595,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             mate_hash:self.mate_hash,
             stop:Arc::clone(&self.stop),
             quited:Arc::clone(&self.quited),
+            abort:Arc::clone(&self.abort),
             transposition_table:self.transposition_table.clone(),
             nodes:Arc::clone(&self.nodes),
             think_start_time:self.think_start_time.clone()
@@ -620,6 +626,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
     ) -> Environment<L,S> {
         let stop = Arc::new(AtomicBool::new(false));
         let quited = Arc::new(AtomicBool::new(false));
+        let abort = Arc::new(AtomicBool::new(false));
 
         Environment {
             event_queue:event_queue,
@@ -643,6 +650,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             mate_hash:mate_hash,
             stop:stop,
             quited:quited,
+            abort:abort,
             transposition_table:Arc::clone(transposition_table),
             nodes:Arc::new(AtomicU64::new(0))
         }
@@ -720,66 +728,21 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         event_dispatcher
     }
 
-    pub fn termination<'a,'b>(&self,
-                       env:&mut Environment<L,S>,
-                       gs: &mut GameState<'a>,
-                       evalutor: &Evalutor,
-                       score:Score,
-                       is_timeout:bool,
-                       mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
-        let mut score = score;
-        let mut last_error = None;
-
-        while evalutor.active_threads() > 0 {
-            match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,mvs,_)) => {
-                    if -s > score {
-                        score = -s;
-                        best_moves = mvs;
-                        if let Err(e) =  self.send_info(env, gs.base_depth,gs.current_depth,&best_moves,&score) {
-                            last_error = Some(Err(e));
-                        }
-                    }
-                },
-                e @ Err(_) => {
-                    last_error = Some(e);
-                }
-                _ => ()
-            }
-
-            if let Err(e) = evalutor.on_end_thread().map_err(|e| ApplicationError::from(e)) {
-                last_error = Some(Err(e));
-            }
-        }
-
-        if let Some(e) = last_error {
-            e
-        } else if is_timeout && best_moves.is_empty() {
-            Ok(EvaluationResult::Timeout)
-        } else {
-            Ok(EvaluationResult::Immediate(score, best_moves,gs.zh.clone()))
-        }
-    }
-
     fn parallelized<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                            event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
-                           evalutor: &Evalutor, _: Option<Sender<(VecDeque<LegalMove>,Score,ZobristHash<u64>)>>,
-                           best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError>  {
+                           evalutor: &Evalutor, best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError>  {
         let mut gs = gs;
         let mut best_moves = best_moves;
 
         let mut mvs = match self.before_search(env,&mut gs,event_dispatcher,evalutor)? {
             BeforeSearchResult::Complete(EvaluationResult::Immediate(score,mvs,zh)) => {
-                self.update_tt(env, &zh, gs.depth, -score);
-                self.update_best_move(env,&gs.zh,gs.depth,score,mvs.get(1).cloned());
+                self.update_tt(env, &zh, gs.depth, score);
+                self.update_best_move(env,&gs.zh,gs.depth,-score,mvs.get(1).cloned());
 
-                return Ok(EvaluationResult::Immediate(score,mvs,gs.zh.clone()));
-            },
-            BeforeSearchResult::Complete(r) => {
-                return Ok(r);
-            },
-            BeforeSearchResult::CompleteForOpposite(score,mvs) => {
                 return Ok(EvaluationResult::Immediate(-score,mvs,gs.zh.clone()));
+            },
+            BeforeSearchResult::Complete(EvaluationResult::Timeout) => {
+                return Ok(EvaluationResult::Timeout);
             },
             BeforeSearchResult::AsyncMvs(await_mvs) => {
                 let mut scorevalue = Score::NEGINFINITE;
@@ -848,7 +811,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         let mvs_count = mvs.len() as u64;
 
-        let mut threads = env.max_threads.min(mvs_count as u32);
+        let threads = env.max_threads.min(mvs_count as u32);
+        let mut busy_threads = 0;
         let mut force_recv = false;
 
         let sender = self.sender.clone();
@@ -858,7 +822,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mut is_timeout = false;
 
         loop {
-            if threads == 0 || force_recv {
+            if busy_threads > 0 && (busy_threads == threads || force_recv) {
                 let r = self.receiver.recv();
 
                 evalutor.on_end_thread()?;
@@ -869,7 +833,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                 let r = r?.map_err(|e| ApplicationError::from(e))?;
 
-                threads += 1;
+                busy_threads -= 1;
 
                 match r {
                     EvaluationResult::Immediate(s, mvs,zh) => {
@@ -885,7 +849,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             self.update_best_move(env,&gs.zh,gs.depth,scoreval,best_moves.front().cloned());
 
                             if scoreval >= beta {
-                                break;
+                                env.abort.store(true,Ordering::Release);
+                                continue;
                             }
 
                             if alpha < scoreval {
@@ -894,25 +859,22 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         }
 
                         if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
-                            if best_moves.is_empty() {
-                                is_timeout = true;
-                            }
+                            is_timeout = true;
                             break;
                         }
                     },
-                    EvaluationResult::Timeout if best_moves.is_empty() => {
-                        is_timeout = true;
-                        break;
-                    },
                     EvaluationResult::Timeout => {
-                        break;
+                        if env.stop.load(Ordering::Acquire) ||  self.timelimit_reached(env) || self.timeout_expected(env) {
+                            is_timeout = true;
+                            break;
+                        }
                     }
                 }
 
                 let event_queue = Arc::clone(&env.event_queue);
                 event_dispatcher.dispatch_events(self, &*event_queue)?;
 
-                if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
+                if env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) || self.timeout_expected(env) {
                     is_timeout = true;
                     break;
                 }
@@ -945,7 +907,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                             alpha = scoreval;
                                         }
 
-                                        self.update_best_move(env,&gs.zh,gs.depth,scoreval,Some(m));
+                                        self.update_best_move(env, &gs.zh, gs.depth, scoreval, Some(m));
 
                                         if scoreval >= beta {
                                             break;
@@ -990,8 +952,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         zh: zh.clone(),
                                         depth: depth - 1,
                                         current_depth: current_depth + 1,
-                                        base_depth:base_depth,
-                                        max_depth:max_depth
+                                        base_depth: base_depth,
+                                        max_depth: max_depth
                                     };
 
                                     let strategy = Recursive::new();
@@ -1001,20 +963,28 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                     let _ = sender.send(r);
                                 });
 
-                                threads -= 1;
+                                busy_threads += 1;
                             }
                         }
                     },
                     None => (),
                 }
-            } else if evalutor.active_threads() > 0 {
-                force_recv = true;
-            } else {
+            } else if busy_threads == 0 {
                 break;
+            } else {
+                force_recv = true;
             }
         }
 
-        self.termination(env, &mut gs,evalutor,scoreval,is_timeout, best_moves)
+        if scoreval == Score::NEGINFINITE && !is_timeout {
+            self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
+        }
+
+        if is_timeout && gs.depth > 1 {
+            Ok(EvaluationResult::Timeout)
+        } else {
+            Ok(EvaluationResult::Immediate(scoreval, best_moves,gs.zh.clone()))
+        }
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -1027,28 +997,28 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         let mut result = None;
 
         loop {
+            env.abort.store(false,Ordering::Release);
+
             gs.depth = depth;
             gs.base_depth = depth;
             gs.max_depth = env.max_depth - (base_depth - depth);
 
-            let current_result = self.parallelized(env, gs, event_dispatcher, evalutor, None, best_moves.clone())?;
+            let current_result = self.parallelized(env, gs, event_dispatcher, evalutor, best_moves.clone())?;
 
             depth += 1;
 
             match current_result {
-                r @ EvaluationResult::Immediate(_,_,_) if  base_depth + 1 == depth => {
-                    return Ok(r);
+                EvaluationResult::Immediate(s,mvs,zh) if base_depth + 1 == depth => {
+                    return Ok(EvaluationResult::Immediate(s,mvs,zh));
                 },
                 EvaluationResult::Immediate(s,mvs,zh) => {
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                EvaluationResult::Timeout if best_moves.is_empty() => {
-                    return Ok(EvaluationResult::Timeout)
-                },
-                EvaluationResult::Timeout => {
+                EvaluationResult::Timeout if base_depth + 1 == depth => {
                     return Ok(result.unwrap_or(EvaluationResult::Timeout));
-                }
+                },
+                _ => ()
             }
         }
     }
@@ -1073,16 +1043,13 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
         let mut mvs = match self.before_search(env,&mut gs,event_dispatcher,evalutor)? {
             BeforeSearchResult::Complete(EvaluationResult::Immediate(score,mvs,zh)) => {
-                self.update_tt(env,&zh,gs.depth,-score);
-                self.update_best_move(env,&gs.zh,gs.depth,score,mvs.get(1).cloned());
+                self.update_tt(env,&zh,gs.depth,score);
+                self.update_best_move(env,&gs.zh,gs.depth,-score,mvs.get(1).cloned());
 
-                return Ok(EvaluationResult::Immediate(score,mvs,gs.zh.clone()));
-            },
-            BeforeSearchResult::Complete(r) => {
-                return Ok(r);
-            },
-            BeforeSearchResult::CompleteForOpposite(score,mvs) => {
                 return Ok(EvaluationResult::Immediate(-score,mvs,gs.zh.clone()));
+            },
+            BeforeSearchResult::Complete(EvaluationResult::Timeout) => {
+                return Ok(EvaluationResult::Timeout);
             },
             BeforeSearchResult::AsyncMvs(await_mvs) => {
                 let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
@@ -1215,12 +1182,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             let strategy = Recursive::new();
 
                             match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
-                                EvaluationResult::Timeout if best_moves.is_empty() => {
-                                    return Ok(EvaluationResult::Timeout);
-                                },
                                 EvaluationResult::Timeout => {
-                                    best_moves.push_front(prev_move);
-                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves,zh.clone()));
+                                    return Ok(EvaluationResult::Timeout);
                                 },
                                 EvaluationResult::Immediate(s, mvs, zh) => {
                                     self.update_tt(env,&zh,gs.depth,s);
@@ -1230,7 +1193,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                         best_moves = mvs;
 
-                                        self.update_best_move(env,&prev_zh,d,scoreval,Some(m));
+                                        self.update_best_move(env,&prev_zh,depth,scoreval,Some(m));
 
                                         if scoreval >= beta {
                                             best_moves.push_front(prev_move);
@@ -1246,13 +1209,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             event_dispatcher.dispatch_events(self, &*env.event_queue)?;
 
-                            if self.timelimit_reached(env) || self.timeout_expected(env) || env.stop.load(atomic::Ordering::Acquire) {
-                                if best_moves.is_empty() {
-                                    return Ok(EvaluationResult::Timeout);
-                                } else {
-                                    best_moves.push_front(prev_move);
-                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
-                                }
+                            if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
+                                self.timelimit_reached(env) || self.timeout_expected(env) {
+                                return Ok(EvaluationResult::Timeout);
                             }
                         }
                     }
