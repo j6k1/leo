@@ -863,9 +863,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     EvaluationResult::Timeout => {
                         if env.stop.load(Ordering::Acquire) ||  self.timelimit_reached(env) || self.timeout_expected(env) {
                             is_timeout = true;
-                            env.abort.store(true,Ordering::Release);
-                            continue;
                         }
+                        env.abort.store(true,Ordering::Release);
+                        continue;
                     }
                 }
 
