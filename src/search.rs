@@ -416,7 +416,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                     {
                         if let Some(TTPartialEntry { depth: _, score, best_move: _ }) = env.transposition_table.get(&zh).map(|g| g.deref().clone()) {
-                            (m, score)
+                            (m, -score)
                         } else {
                             (m, Score::Value(0))
                         }
@@ -446,7 +446,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                 {
                     if let Some(TTPartialEntry { depth: _, score, best_move: _ }) = env.transposition_table.get(&zh).map(|g| g.deref().clone()) {
-                        (m, score)
+                        (m, -score)
                     } else {
                         (m, Score::Value(0))
                     }
