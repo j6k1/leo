@@ -5,6 +5,8 @@ use std::ops::{Add, AddAssign, Sub, SubAssign, Div, DivAssign, Mul, MulAssign};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
+use nncombinator::arr::Arr;
+use nncombinator::layer::{ForwardAll, PreTrain};
 use usiagent::error::InfoSendError;
 
 use usiagent::event::{EventQueue, UserEvent, UserEventKind};
@@ -309,7 +311,7 @@ impl Solver {
         }
     }
 
-    pub fn checkmate<L,S>(&self,
+    pub fn checkmate<L,S,M>(&self,
                      strict_moves:bool,
                      enable_send_seldepth:bool,
                      is_tsume_shogi:bool,
@@ -327,7 +329,10 @@ impl Solver {
                      quited:Arc<AtomicBool>,
                      on_complete:Option<Box<dyn FnOnce(u64) -> Result<(),InfoSendError>>>,
                      ms: GameStateForMate) -> Result<MaybeMate,ApplicationError>
-        where L: Logger + Send + 'static, S: InfoSender {
+        where L: Logger + Send + 'static, S: InfoSender,
+              M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+                 PreTrain<f32> + Send + Sync + 'static,
+              <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
         let mut strategy = CheckmateStrategy::<S>::new(hasher,
                                                   strict_moves,
                                                   enable_send_seldepth,
@@ -342,7 +347,7 @@ impl Solver {
                                                   Arc::clone(&nodes),
                                                   ms.base_depth,
                                                   ms.current_depth);
-        let mut event_dispatcher = Root::<L,S>::create_event_dispatcher::<CheckmateStrategy<S>>(on_error_handler,&stop,&quited);
+        let mut event_dispatcher = Root::<L,S,M>::create_event_dispatcher::<CheckmateStrategy<S>>(on_error_handler,&stop,&quited);
 
         let mut uniq_id = UniqID::new();
 

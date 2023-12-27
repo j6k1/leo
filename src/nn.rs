@@ -2,22 +2,17 @@ use std::cell::RefCell;
 use std::ops::DerefMut;
 use std::path::{Path};
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, atomic, mpsc, Mutex};
-use std::{fs, thread};
-use std::fmt::{Debug, Formatter};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use concurrent_queue::ConcurrentQueue;
+use std::sync::{Arc, Mutex};
+use std::{fs};
 use rand::{prelude, Rng, SeedableRng};
 use rand::prelude::{Distribution};
 use rand_distr::Normal;
 use rand_xorshift::XorShiftRng;
-use rayon::iter::IntoParallelRefIterator;
 use nncombinator::activation::{ReLu, Tanh};
 use nncombinator::arr::{Arr, SerializedVec};
 use nncombinator::cuda::mem::{Alloctype, MemoryPool};
-use nncombinator::device::{Device, DeviceGpu};
-use nncombinator::layer::{AddLayer, AddLayerTrain, BatchForward, BatchForwardBase, BatchTrain, ForwardAll, TryAddLayer};
+use nncombinator::device::{Device, DeviceCpu, DeviceGpu};
+use nncombinator::layer::{AddLayer, AddLayerTrain, BatchForwardBase, BatchTrain, ForwardAll, PreTrain, TryAddLayer};
 use nncombinator::layer::input::InputLayer;
 use nncombinator::layer::output::LinearOutputLayer;
 use nncombinator::layer::linear::{LinearLayerBuilder};
@@ -32,11 +27,9 @@ use packedsfen::traits::Reader;
 use packedsfen::{hcpe, yaneuraou};
 use packedsfen::hcpe::haffman_code::GameResult;
 use packedsfen::yaneuraou::reader::PackedSfenReader;
-use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use usiagent::event::{EventQueue, GameEndState, UserEvent, UserEventKind};
-use usiagent::rule::{LegalMove};
 use usiagent::shogi::{Banmen, KomaKind, Mochigoma, MOCHIGOMA_KINDS, MochigomaCollections, Teban};
-use crate::error::{ApplicationError, EvaluationThreadError};
+use crate::error::{ApplicationError};
 
 const BANMEN_SIZE:usize = 81;
 
@@ -107,18 +100,6 @@ const OPPONENT_INDEX_MAP:[usize; 7] = [
     OPPONENT_MOCHIGOMA_HISHA_INDEX
 ];
 const SCALE:f32 = 1.;
-#[derive(Debug)]
-pub struct BatchItem {
-    m:LegalMove,
-    input:Arr<f32,2517>,
-    sender:Sender<(LegalMove,i32)>
-}
-#[derive(Debug)]
-pub enum Message {
-    Eval(Vec<Arr<f32,2517>>),
-    Quit
-}
-
 pub trait BatchNeuralNetwork<U,D,P,PT,I,O>: ForwardAll<Input=I,Output=O> +
                                  BatchForwardBase<BatchInput=SerializedVec<U,I>,BatchOutput=SerializedVec<U,O>> +
                                  BatchTrain<U,D> + Persistence<U,P,PT>
@@ -132,282 +113,153 @@ impl<T,U,D,P,PT,I,O> BatchNeuralNetwork<U,D,P,PT,I,O> for T
              U: UnitValue<U>,
              D: Device<U>,
              PT: PersistenceType {}
-pub struct OnCompleteTransactionHandler(pub Box<dyn FnOnce() -> Result<(),ApplicationError> + Send + 'static>);
-
-impl Debug for OnCompleteTransactionHandler {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,"OnCompleteTransactionHandler")
-    }
+pub struct EvalutorCreator {
 }
-impl OnCompleteTransactionHandler {
-    pub fn invoke(self) -> Result<(),ApplicationError> {
-        (self.0)()
-    }
-}
-pub struct Evalutor {
-    ref_count: Arc<AtomicUsize>,
-    sender:(Sender<Message>,Sender<Message>),
-    transaction_sender_queue:Arc<ConcurrentQueue<Sender<()>>>,
-    receiver:Arc<Mutex<(Receiver<Result<Vec<f32>,EvaluationThreadError>>,Receiver<Result<Vec<f32>,EvaluationThreadError>>)>>,
-    queue:Arc<ConcurrentQueue<BatchItem>>,
-    active_threads:Arc<AtomicUsize>,
-    wait_threads:Arc<AtomicUsize>
-}
-impl Evalutor {
-    pub fn new(savedir: String,nna_path:String,nnb_path:String) -> Result<Evalutor,ApplicationError> {
-        let (ts,ra) = mpsc::channel();
-        let (sa,tr) = mpsc::channel();
+impl EvalutorCreator {
+    pub fn create(save_dir:String, nna_path:String, nnb_path:String,enable_shake_shake:bool)
+        -> Result<Evalutor<impl ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+                         PreTrain<f32,OutStack = impl Send + Sync + 'static>>,ApplicationError> {
 
-        let (ready_sender,ready_receiver_a) = mpsc::channel();
+        let mut rnd = prelude::thread_rng();
+        let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
 
-        {
-            let s = ts.clone();
-            let ready_error_sender = ready_sender.clone();
+        let n1 = Normal::<f32>::new(0.0, (2f32/2517f32).sqrt()).unwrap();
+        let n2 = Normal::<f32>::new(0.0, (2f32/256f32).sqrt()).unwrap();
+        let n3 = Normal::<f32>::new(0.0, 1f32/32f32.sqrt()).unwrap();
 
-            Self::start_worker(savedir.clone(),nna_path.clone(),tr,ts,s,ready_sender,ready_error_sender)?;
-        }
+        let device = DeviceCpu::new()?;
 
-        let (ts,rb) = mpsc::channel();
-        let (sb,tr) = mpsc::channel();
+        let net:InputLayer<f32,Arr<f32,2517>,_> = InputLayer::new();
 
-        let (ready_sender,ready_receiver_b) = mpsc::channel();
+        let rnd = rnd_base.clone();
 
-        {
-            let s = ts.clone();
-            let ready_error_sender = ready_sender.clone();
-
-            Self::start_worker(savedir.clone(),nnb_path.clone(),tr,ts,s,ready_sender,ready_error_sender)?;
-        }
-
-        ready_receiver_a.recv().map_err(|e| ApplicationError::from(e))??;
-        ready_receiver_b.recv().map_err(|e| ApplicationError::from(e))??;
-
-        Ok(Evalutor {
-            ref_count: Arc::new(AtomicUsize::new(1)),
-            sender:(sa,sb),
-            transaction_sender_queue:Arc::new(ConcurrentQueue::unbounded()),
-            active_threads:Arc::new(AtomicUsize::new(0)),
-            wait_threads:Arc::new(AtomicUsize::new(0)),
-            receiver:Arc::new(Mutex::new((ra,rb))),
-            queue:Arc::new(ConcurrentQueue::unbounded())
-        })
-    }
-
-    fn start_worker<P>(save_dir:P,nn_path:P,
-                    tr:Receiver<Message>,
-                    ts:Sender<Result<Vec<f32>,EvaluationThreadError>>,
-                    s:Sender<Result<Vec<f32>,EvaluationThreadError>>,
-                    ready_sender:Sender<Result<(),EvaluationThreadError>>,
-                    ready_error_sender:Sender<Result<(),EvaluationThreadError>>)
-        -> Result<(),ApplicationError> where P: AsRef<Path> + Send + 'static {
-        let b = thread::Builder::new();
-
-        let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
-            let is_ready = Arc::new(AtomicBool::new(false));
-            let ir = Arc::clone(&is_ready);
-
-            let runner = move || {
-                let mut rnd = prelude::thread_rng();
-                let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
-
-                let n1 = Normal::<f32>::new(0.0, (2f32 / 2517f32).sqrt()).unwrap();
-                let n2 = Normal::<f32>::new(0.0, (2f32 / 256f32).sqrt()).unwrap();
-                let n3 = Normal::<f32>::new(0.0, 1f32 / 32f32.sqrt()).unwrap();
-
-                let memory_pool = Arc::new(Mutex::new(MemoryPool::new(Alloctype::Device)?));
-
-                let device = DeviceGpu::new(&memory_pool)?;
-
-                let net: InputLayer<f32, Arr<f32, 2517>, _> = InputLayer::new();
-
-                let rnd = rnd_base.clone();
-
-                let mut nn = net.try_add_layer(|l| {
-                    let rnd = rnd.clone();
-                    LinearLayerBuilder::<2517, 256>::new().build(l, &device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
-                })?.try_add_layer(|l| {
-                    BatchNormalizationLayerBuilder::new().build(l,&device)
-                })?.add_layer(|l| {
-                    ActivationLayer::new(l, ReLu::new(&device), &device)
-                }).try_add_layer(|l| {
-                    let rnd = rnd.clone();
-                    LinearLayerBuilder::<256, 32>::new().build(l, &device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
-                })?.try_add_layer(|l| {
-                    BatchNormalizationLayerBuilder::new().build(l,&device)
-                })?.add_layer(|l| {
-                    ActivationLayer::new(l, ReLu::new(&device), &device)
-                }).try_add_layer(|l| {
-                    let rnd = rnd.clone();
-                    LinearLayerBuilder::<32, 1>::new().build(l, &device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
-                })?.try_add_layer(|l| {
-                    BatchNormalizationLayerBuilder::new().build(l,&device)
-                })?.add_layer(|l| {
-                    ActivationLayer::new(l, Tanh::new(&device), &device)
-                }).add_layer_train(|l| {
-                    LinearOutputLayer::new(l, &device)
-                });
-
-                if save_dir.as_ref().join(&nn_path).exists() {
-                    let mut p = BinFilePersistence::new(save_dir.as_ref().join(&nn_path))?;
-
-                    nn.load(&mut p)?;
-                }
-
-                ir.store(true,atomic::Ordering::Release);
-
-                ready_sender.send(Ok(()))?;
-
-                loop {
-                    match tr.recv()? {
-                        Message::Eval(batch) => {
-                            let r = nn.batch_forward(batch.clone().into())?;
-
-                            let r = r.par_iter().map(|r| r[0]).collect::<Vec<f32>>();
-
-                            ts.send(Ok(r))?;
-                        },
-                        Message::Quit => {
-                            break;
-                        }
-                    }
-                }
-                Ok(())
-            };
-
-            if let Err(e) = runner() {
-                if is_ready.load(atomic::Ordering::Acquire) {
-                    let _ = s.send(Err(e));
-                } else {
-                    let _ = ready_error_sender.send(Err(e));
-                }
-            }
+        let mut nna = net.try_add_layer(|l| {
+            let rnd = rnd.clone();
+            LinearLayerBuilder::<2517,256>::new().build(l,&device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
+        })?.try_add_layer(|l| {
+            BatchNormalizationLayerBuilder::new().build(l,&device)
+        })?.add_layer(|l| {
+            ActivationLayer::new(l,ReLu::new(&device),&device)
+        }).try_add_layer(|l| {
+            let rnd = rnd.clone();
+            LinearLayerBuilder::<256,32>::new().build(l,&device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
+        })?.try_add_layer(|l| {
+            BatchNormalizationLayerBuilder::new().build(l,&device)
+        })?.add_layer(|l| {
+            ActivationLayer::new(l,ReLu::new(&device),&device)
+        }).try_add_layer(|l| {
+            let rnd = rnd.clone();
+            LinearLayerBuilder::<32,1>::new().build(l,&device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
+        })?.try_add_layer(|l| {
+            BatchNormalizationLayerBuilder::new().build(l,&device)
+        })?.add_layer(|l| {
+            ActivationLayer::new(l,Tanh::new(&device),&device)
+        }).add_layer_train(|l| {
+            LinearOutputLayer::new(l,&device)
         });
 
-        Ok(())
-    }
+        let mut rnd = prelude::thread_rng();
+        let rnd_base = Rc::new(RefCell::new(XorShiftRng::from_seed(rnd.gen())));
 
-    pub fn submit(&self, t:Teban, b:&Banmen, mc:&MochigomaCollections,m:LegalMove,sender:Sender<(LegalMove,i32)>)
-        -> Result<(),ApplicationError> {
-        let input = InputCreator::make_input(true,t,b,mc);
+        let n1 = Normal::<f32>::new(0.0, (2f32/2517f32).sqrt()).unwrap();
+        let n2 = Normal::<f32>::new(0.0, (2f32/256f32).sqrt()).unwrap();
+        let n3 = Normal::<f32>::new(0.0, 1f32/32f32.sqrt()).unwrap();
 
-        Ok(self.queue.push(BatchItem {
-            m:m,
-            input:input,
-            sender:sender
-        })?)
-    }
+        let device = DeviceCpu::new()?;
 
-    pub fn active_threads(&self) -> usize {
-        self.active_threads.load(atomic::Ordering::Acquire)
-    }
+        let net:InputLayer<f32,Arr<f32,2517>,_> = InputLayer::new();
 
-    pub fn on_begin_thread(&self) {
-        self.active_threads.fetch_add(1,Ordering::Release);
-    }
+        let rnd = rnd_base.clone();
 
-    pub fn on_end_thread(&self) -> Result<(),ApplicationError> {
-        self.active_threads.fetch_sub(1,Ordering::Release);
+        let mut nnb = net.try_add_layer(|l| {
+            let rnd = rnd.clone();
+            LinearLayerBuilder::<2517,256>::new().build(l,&device, move || n1.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
+        })?.try_add_layer(|l| {
+            BatchNormalizationLayerBuilder::new().build(l,&device)
+        })?.add_layer(|l| {
+            ActivationLayer::new(l,ReLu::new(&device),&device)
+        }).try_add_layer(|l| {
+            let rnd = rnd.clone();
+            LinearLayerBuilder::<256,32>::new().build(l,&device, move || n2.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
+        })?.try_add_layer(|l| {
+            BatchNormalizationLayerBuilder::new().build(l,&device)
+        })?.add_layer(|l| {
+            ActivationLayer::new(l,ReLu::new(&device),&device)
+        }).try_add_layer(|l| {
+            let rnd = rnd.clone();
+            LinearLayerBuilder::<32,1>::new().build(l,&device, move || n3.sample(&mut rnd.borrow_mut().deref_mut()), || 0.)
+        })?.try_add_layer(|l| {
+            BatchNormalizationLayerBuilder::new().build(l,&device)
+        })?.add_layer(|l| {
+            ActivationLayer::new(l,Tanh::new(&device),&device)
+        }).add_layer_train(|l| {
+            LinearOutputLayer::new(l,&device)
+        });
 
-        self.try_start_evaluation()?;
+        {
+            let save_dir = Path::new(&save_dir);
 
-        Ok(())
-    }
+            let nna_path = Path::new(&nna_path);
 
-    pub fn begin_transaction(&self) -> Result<(),ApplicationError> {
-        let (s,r) = mpsc::channel();
+            if save_dir.join(nna_path).exists() {
+                let mut pa = BinFilePersistence::new(save_dir
+                    .join(nna_path)
+                )?;
 
-        self.transaction_sender_queue.push(s)?;
-
-        self.wait_threads.fetch_add(1,Ordering::Release);
-
-        self.try_start_evaluation()?;
-
-        Ok(r.recv()?)
-    }
-
-    fn try_start_evaluation(&self) -> Result<(),ApplicationError> {
-        if self.wait_threads.compare_exchange(
-            self.active_threads.load(Ordering::Acquire),0,
-            Ordering::SeqCst,
-            Ordering::Acquire
-        ).is_ok() {
-            let mut queue = Vec::with_capacity(self.queue.len());
-
-            while !self.queue.is_empty() {
-                queue.push(self.queue.pop()?);
+                nna.load(&mut pa)?;
             }
 
-            if queue.is_empty() {
-                while !self.transaction_sender_queue.is_empty() {
-                    let s = self.transaction_sender_queue.pop()?;
+            let nnb_path = Path::new(&nnb_path);
 
-                    s.send(())?;
-                }
+            if save_dir.join(nnb_path).exists() {
+                let mut pb = BinFilePersistence::new(save_dir
+                    .join(nnb_path)
+                )?;
 
-                return Ok(());
-            }
-
-            let (m, input, s) = queue.into_par_iter().fold(|| (vec![], vec![], vec![]), |mut acc, item| {
-                acc.0.push(item.m);
-                acc.1.push(item.input);
-                acc.2.push(item.sender);
-
-                acc
-            }).reduce(|| (vec![],vec![],vec![]), |mut acc, (m,input,sender)| {
-                acc.0.extend_from_slice(&m);
-                acc.1.extend_from_slice(&input);
-                acc.2.extend_from_slice(&sender);
-                acc
-            });
-
-            self.sender.0.send(Message::Eval(input.clone()))?;
-            self.sender.1.send(Message::Eval(input))?;
-
-            match self.receiver.lock() {
-                Ok(receiver) => {
-                    receiver.0.recv().map_err(|e| EvaluationThreadError::from(e))??
-                        .into_par_iter().zip(receiver.1.recv().map_err(|e| EvaluationThreadError::from(e))??.into_par_iter())
-                        .zip(m.into_par_iter().zip(s.into_par_iter()))
-                        .for_each(|(r,(m,s))| {
-
-                        let _ = s.send((m.clone(), ((r.0  * 0.5 + r.1 * 0.5) * (1 << 23) as f32) as i32));
-                    });
-                },
-                Err(e) => {
-                    return Err(ApplicationError::from(e));
-                }
-            }
-
-            while let Ok(s) = self.transaction_sender_queue.pop() {
-                s.send(())?;
+                nnb.load(&mut pb)?;
             }
         }
 
-        Ok(())
+        Ok(Evalutor {
+            nna:Arc::new(nna),
+            nnb:Arc::new(nnb),
+            enable_shake_shake:enable_shake_shake
+        })
     }
 }
-impl Clone for Evalutor {
+pub struct Evalutor<M>
+    where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+             PreTrain<f32> + Send + Sync + 'static,
+          <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
+    nna:Arc<M>,
+    nnb:Arc<M>,
+    enable_shake_shake:bool
+}
+impl<M> Evalutor<M>
+    where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+             PreTrain<f32> + Send + Sync + 'static,
+          <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
+
+    pub fn evaluation(&self,teban:Teban,banmen:&Banmen,mc:&MochigomaCollections) -> Result<i32,ApplicationError> {
+        let input = InputCreator::make_input(true, teban, &banmen, &mc);
+
+        let ra = self.nna.forward_all(input.clone())?;
+        let rb = self.nnb.forward_all(input)?;
+
+        let (a,b) = calc_alpha_beta(self.enable_shake_shake);
+
+        return Ok((ra[0] * a + rb[0] * b * (1 << 23) as f32) as i32)
+    }
+}
+impl<M> Clone for Evalutor<M>
+    where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+             PreTrain<f32> + Send + Sync + 'static,
+          <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
     fn clone(&self) -> Self {
-        self.ref_count.fetch_add(1,atomic::Ordering::Release);
-
         Evalutor {
-            ref_count: Arc::clone(&self.ref_count),
-            sender:self.sender.clone(),
-            transaction_sender_queue:Arc::clone(&self.transaction_sender_queue),
-            active_threads:Arc::clone(&self.active_threads),
-            wait_threads:Arc::clone(&self.wait_threads),
-            receiver:Arc::clone(&self.receiver),
-            queue:Arc::clone(&self.queue)
-        }
-    }
-}
-impl Drop for Evalutor {
-    fn drop(&mut self) {
-        if self.ref_count.fetch_sub(1,atomic::Ordering::Release) == 1 {
-            let ra =self.sender.0.send(Message::Quit);
-            let rb = self.sender.1.send(Message::Quit);
-
-            ra.and(rb).expect("An error occurred during the termination process of Evalutor's calculation thread.")
+            nna:Arc::clone(&self.nna),
+            nnb:Arc::clone(&self.nnb),
+            enable_shake_shake:self.enable_shake_shake
         }
     }
 }
@@ -548,20 +400,20 @@ impl TrainerCreator {
         })
     }
 }
-impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
-    pub fn calc_alpha_beta(bias_shake_shake:bool) -> (f32,f32) {
-        if bias_shake_shake {
-            let mut rnd = rand::thread_rng();
-            let mut rnd = XorShiftRng::from_seed(rnd.gen());
+pub fn calc_alpha_beta(bias_shake_shake:bool) -> (f32,f32) {
+    if bias_shake_shake {
+        let mut rnd = rand::thread_rng();
+        let mut rnd = XorShiftRng::from_seed(rnd.gen());
 
-            let a = rnd.gen();
-            let b = 1f32 - a ;
+        let a = rnd.gen();
+        let b = 1f32 - a ;
 
-            (a,b)
-        } else {
-            (0.5f32,0.5f32)
-        }
+        (a,b)
+    } else {
+        (0.5f32,0.5f32)
     }
+}
+impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersistence<f32>,Linear,Arr<f32,2517>,Arr<f32,1>> {
 
     pub fn make_learn_input(mut acc:((Vec<Arr<f32,1>>,Vec<Arr<f32,2517>>),(Vec<Arr<f32,1>>,Vec<Arr<f32,2517>>)),
                             (t,input,a,b):(f32,Arr<f32,2517>,f32,f32))
@@ -597,7 +449,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
         let similar = self.similar;
 
         let batch = history.iter().rev().map(move |(banmen,mc,_,_)| {
-            let (a, b) = Self::calc_alpha_beta(bias_shake_shake);
+            let (a, b) = calc_alpha_beta(bias_shake_shake);
 
             let input = InputCreator::make_input(true, teban, banmen, mc);
 
@@ -697,7 +549,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
 
         let batch = sfens_with_extended.iter()
             .map(|(teban,banmen,mc,es)| {
-                let (a,b) = Self::calc_alpha_beta(bias_shake_shake);
+                let (a,b) = calc_alpha_beta(bias_shake_shake);
 
                 let teban = *teban;
 
@@ -789,7 +641,7 @@ impl<M> Trainer<M> where M: BatchNeuralNetwork<f32,DeviceGpu<f32>,BinFilePersist
 
         let batch = sfens_with_extended.iter()
             .map(|(teban,banmen,mc,es)| {
-                let (a,b) = Self::calc_alpha_beta(bias_shake_shake);
+                let (a,b) = calc_alpha_beta(bias_shake_shake);
 
                 let teban = *teban;
 

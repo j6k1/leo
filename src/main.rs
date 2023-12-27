@@ -29,7 +29,7 @@ use usiagent::output::USIStdErrorWriter;
 use usiagent::{OnErrorHandler, UsiAgent};
 use crate::error::ApplicationError;
 use crate::learning::Learnener;
-use crate::nn::TrainerCreator;
+use crate::nn::{EvalutorCreator, TrainerCreator};
 use crate::player::Leo;
 
 pub mod error;
@@ -170,7 +170,10 @@ fn run() -> Result<(),ApplicationError> {
         let agent = UsiAgent::new(Leo::new(
             String::from("data"),
             String::from("nn.a.bin"),
-            String::from("nn.b.bin")
+            String::from("nn.b.bin"),
+            Box::new(|savedir,nna_path,nnb_path,enable_shake_shake| {
+                EvalutorCreator::create(savedir,nna_path,nnb_path,enable_shake_shake)
+            })
         ));
 
         let r = agent.start_default(|on_error_handler,e| {

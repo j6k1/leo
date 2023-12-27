@@ -3,6 +3,8 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{Ordering};
 use std::time::{Duration, Instant};
+use nncombinator::arr::Arr;
+use nncombinator::layer::{ForwardAll, PreTrain};
 use usiagent::command::{BestMove, CheckMate, UsiInfoSubCommand, UsiOptType};
 use usiagent::error::{PlayerError, UsiProtocolError};
 use usiagent::event::{GameEndState, SysEventOption, SysEventOptionKind, UserEvent, UserEventQueue, UsiGoMateTimeLimit, UsiGoTimeLimit};
@@ -54,11 +56,14 @@ impl FromOption for bool {
         }
     }
 }
-pub struct Leo {
+pub struct Leo<M> where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+                           PreTrain<f32> + Send + Sync + 'static,
+                        <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
     savedir: String,
     nna_path:String,
     nnb_path:String,
-    evalutor: Option<Evalutor>,
+    evalutor: Option<Evalutor<M>>,
+    evalutor_creator: Box<dyn Fn(String,String,String,bool) -> Result<Evalutor<M>,ApplicationError> + Send + 'static>,
     kyokumen:Option<Kyokumen>,
     remaining_turns:u32,
     zh:Option<ZobristHash<u64>>,
@@ -82,20 +87,28 @@ pub struct Leo {
     strict_mate:bool,
     mate_hash:usize
 }
-impl fmt::Debug for Leo {
+impl<M> fmt::Debug for Leo<M> where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+                                       PreTrain<f32> + Send + Sync + 'static,
+                                    <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Leo")
     }
 }
-impl Leo {
-    pub fn new(savedir: String,
-               nna_path:String,
-               nnb_path:String) -> Leo {
+impl<M> Leo<M> where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+                        PreTrain<f32> + Send + Sync + 'static,
+                     <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
+    pub fn new<C: Fn(String,String,String,bool) -> Result<Evalutor<M>,ApplicationError> + Send + Sync + 'static>(
+        savedir:String,
+        nna_path:String,
+        nnb_path:String,
+        evalutor_creator:C
+    ) -> Leo<M> {
         Leo {
             savedir:savedir,
             nna_path:nna_path,
             nnb_path:nnb_path,
             evalutor:None,
+            evalutor_creator:Box::new(evalutor_creator),
             kyokumen:None,
             remaining_turns:0,
             zh:None,
@@ -131,7 +144,9 @@ impl Leo {
         Ok(env.info_sender.send_immediate(commands)?)
     }
 }
-impl USIPlayer<ApplicationError> for Leo {
+impl<M> USIPlayer<ApplicationError> for Leo<M> where M: ForwardAll<Input=Arr<f32,2517>,Output=Arr<f32,1>> +
+                                                        PreTrain<f32> + Send + Sync + 'static,
+                                                     <M as PreTrain<f32>>::OutStack: Send + Sync + 'static {
     const ID: &'static str = "leo";
     const AUTHOR: &'static str = "j6k1";
     fn get_option_kinds(&mut self) -> Result<BTreeMap<String,SysEventOptionKind>,ApplicationError> {
@@ -180,9 +195,7 @@ impl USIPlayer<ApplicationError> for Leo {
         match self.evalutor {
             Some(_) => (),
             None => {
-                self.evalutor = Some(Evalutor::new(self.savedir.clone(),
-                                              self.nna_path.clone(),
-                                              self.nnb_path.clone())?);
+                self.evalutor = Some((self.evalutor_creator)(self.savedir.clone(),self.nna_path.clone(),self.nnb_path.clone(),false)?);
             }
         }
         Ok(())
@@ -417,7 +430,7 @@ impl USIPlayer<ApplicationError> for Leo {
 
         match self.evalutor {
             Some(ref evalutor) => {
-                let mut event_dispatcher = Root::<L,S>::create_event_dispatcher(&on_error_handler,&env.stop,&env.quited);
+                let mut event_dispatcher = Root::<L,S,M>::create_event_dispatcher(&on_error_handler,&env.stop,&env.quited);
 
                 let _pinfo_sender = {
                     let nodes = env.nodes.clone();
@@ -587,7 +600,7 @@ impl USIPlayer<ApplicationError> for Leo {
             }, &on_error_handler)
         };
 
-        match solver.checkmate::<L,S>(
+        match solver.checkmate::<L,S,M>(
             self.strict_mate,
             true,
             true,
