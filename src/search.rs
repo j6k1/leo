@@ -376,15 +376,15 @@ pub trait Search<L,S,M>: Sized
 
                     return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE, mvs, gs.zh.clone())));
                 }
-            } else {
-                let s = evalutor.evaluation(gs.teban,gs.state.get_banmen(),&gs.mc)?;
-
-                let mut mvs = VecDeque::new();
-
-                gs.m.map(|m| mvs.push_front(m));
-
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
             }
+
+            let s = evalutor.evaluation(gs.teban,gs.state.get_banmen(),&gs.mc)?;
+
+            let mut mvs = VecDeque::new();
+
+            gs.m.map(|m| mvs.push_front(m));
+
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
         }
 
         let mvs = if is_mate_opponent {
