@@ -1,6 +1,6 @@
 use std::mem;
 use std::num::Wrapping;
-use std::ops::{Add, BitXor, Deref, DerefMut, Index, IndexMut, Sub};
+use std::ops::{Add, BitXor, Deref, DerefMut, Index, IndexMut, Neg, Sub};
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use usiagent::hash::{InitialHash, KyokumenHash};
@@ -80,29 +80,33 @@ impl<T> ZobristHash<T>
     }
 }
 #[derive(Debug,Clone)]
-pub struct TTPartialEntry<T> where T: Default {
+pub struct TTPartialEntry<T> where T: Default + Neg<Output = T> {
     pub depth:i8,
     pub score:T,
+    pub beta:T,
+    pub alpha:T,
     pub best_move:Option<LegalMove>
 }
-impl<T> Default for TTPartialEntry<T> where T: Default {
+impl<T> Default for TTPartialEntry<T> where T: Default + Neg<Output = T> {
     fn default() -> Self {
         TTPartialEntry {
             depth:-1,
             score:T::default(),
+            beta:-T::default(),
+            alpha:T::default(),
             best_move: None
         }
     }
 }
 #[derive(Debug,Clone)]
-pub struct TTEntry<T,K> where K: Eq, T: Default {
+pub struct TTEntry<T,K> where K: Eq, T: Default + Neg<Output = T> {
     used:bool,
     mhash:K,
     shash:K,
     teban:Teban,
     entry:TTPartialEntry<T>
 }
-impl<T,K> Default for TTEntry<T,K> where K: Eq + Default, T: Default {
+impl<T,K> Default for TTEntry<T,K> where K: Eq + Default, T: Default + Neg<Output = T> {
     fn default() -> Self {
         TTEntry {
             used:false,
@@ -113,11 +117,11 @@ impl<T,K> Default for TTEntry<T,K> where K: Eq + Default, T: Default {
         }
     }
 }
-pub struct ReadGuard<'a,T,K,const N:usize> where K: Eq, T: Default {
+pub struct ReadGuard<'a,T,K,const N:usize> where K: Eq, T: Default + Neg<Output = T> {
     locked_bucket:RwLockReadGuard<'a, [TTEntry<T,K>;N]>,
     index:usize
 }
-impl<'a,T,K,const N:usize> ReadGuard<'a,T,K,N> where K: Eq, T: Default {
+impl<'a,T,K,const N:usize> ReadGuard<'a,T,K,N> where K: Eq, T: Default + Neg<Output = T> {
     fn new(locked_bucket:RwLockReadGuard<'a,[TTEntry<T,K>;N]>,index:usize) -> ReadGuard<'a,T,K,N> {
         ReadGuard {
             locked_bucket:locked_bucket,
@@ -125,18 +129,18 @@ impl<'a,T,K,const N:usize> ReadGuard<'a,T,K,N> where K: Eq, T: Default {
         }
     }
 }
-impl<'a,T,K,const N:usize> Deref for ReadGuard<'a,T,K,N> where K: Eq, T: Default {
+impl<'a,T,K,const N:usize> Deref for ReadGuard<'a,T,K,N> where K: Eq, T: Default + Neg<Output = T> {
     type Target = TTPartialEntry<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.locked_bucket.deref().index(self.index).entry
     }
 }
-pub struct WriteGuard<'a,T,K,const N:usize> where K: Eq, T: Default {
+pub struct WriteGuard<'a,T,K,const N:usize> where K: Eq, T: Default + Neg<Output = T> {
     locked_bucket:RwLockWriteGuard<'a, [TTEntry<T,K>;N]>,
     index:usize
 }
-impl<'a,T,K,const N:usize> WriteGuard<'a,T,K,N> where K: Eq, T: Default {
+impl<'a,T,K,const N:usize> WriteGuard<'a,T,K,N> where K: Eq, T: Default + Neg<Output = T> {
     fn new(locked_bucket:RwLockWriteGuard<'a,[TTEntry<T,K>;N]>,index:usize) -> WriteGuard<'a,T,K,N> {
         WriteGuard {
             locked_bucket:locked_bucket,
@@ -158,7 +162,7 @@ impl<'a,T,K,const N:usize> WriteGuard<'a,T,K,N> where K: Eq, T: Default {
         *e = entry
     }
 }
-impl<'a,T,K,const N:usize> Deref for WriteGuard<'a,T,K,N> where K: Eq, T: Default {
+impl<'a,T,K,const N:usize> Deref for WriteGuard<'a,T,K,N> where K: Eq, T: Default + Neg<Output = T> {
     type Target = TTPartialEntry<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -166,15 +170,15 @@ impl<'a,T,K,const N:usize> Deref for WriteGuard<'a,T,K,N> where K: Eq, T: Defaul
     }
 }
 
-impl<'a,T,K,const N:usize> DerefMut for WriteGuard<'a,T,K,N> where K: Eq, T: Default {
+impl<'a,T,K,const N:usize> DerefMut for WriteGuard<'a,T,K,N> where K: Eq, T: Default + Neg<Output = T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.locked_bucket.deref_mut().index_mut(self.index).entry
     }
 }
-pub struct OccupiedTTEntry<'a,T,K,const N:usize> where K: Eq, T: Default {
+pub struct OccupiedTTEntry<'a,T,K,const N:usize> where K: Eq, T: Default + Neg<Output = T> {
     write_guard:WriteGuard<'a,T,K,N>
 }
-impl<'a,T,K,const N:usize> OccupiedTTEntry<'a,T,K,N> where K: Eq, T: Default {
+impl<'a,T,K,const N:usize> OccupiedTTEntry<'a,T,K,N> where K: Eq, T: Default + Neg<Output = T> {
     fn new(write_guard:WriteGuard<'a,T,K,N>) -> OccupiedTTEntry<'a,T,K,N> {
         OccupiedTTEntry {
             write_guard:write_guard
@@ -198,13 +202,13 @@ impl<'a,T,K,const N:usize> OccupiedTTEntry<'a,T,K,N> where K: Eq, T: Default {
         self.write_guard.deref_mut()
     }
 }
-pub struct VacantTTEntry<'a,T,K,const N:usize> where K: Eq + Copy, T: Default {
+pub struct VacantTTEntry<'a,T,K,const N:usize> where K: Eq + Copy, T: Default + Neg<Output = T> {
     mhash:K,
     shash:K,
     teban:Teban,
     write_guard:WriteGuard<'a,T,K,N>
 }
-impl<'a,T,K,const N:usize> VacantTTEntry<'a,T,K,N> where K: Eq + Copy, T: Default {
+impl<'a,T,K,const N:usize> VacantTTEntry<'a,T,K,N> where K: Eq + Copy, T: Default + Neg<Output = T> {
     fn new(write_guard:WriteGuard<'a,T,K,N>,mhash:K,shash:K,teban:Teban) -> VacantTTEntry<'a,T,K,N> {
         VacantTTEntry {
             mhash:mhash,
@@ -226,11 +230,11 @@ impl<'a,T,K,const N:usize> VacantTTEntry<'a,T,K,N> where K: Eq + Copy, T: Defaul
         self.write_guard.deref_mut()
     }
 }
-pub enum Entry<'a,T,K,const N:usize> where K: Eq + Copy, T: Default {
+pub enum Entry<'a,T,K,const N:usize> where K: Eq + Copy, T: Default + Neg<Output = T> {
     OccupiedTTEntry(OccupiedTTEntry<'a,T,K,N>),
     VacantTTEntry(VacantTTEntry<'a,T,K,N>)
 }
-impl<'a,T,K,const N:usize> Entry<'a,T,K,N> where K: Eq + Copy, T: Default {
+impl<'a,T,K,const N:usize> Entry<'a,T,K,N> where K: Eq + Copy, T: Default + Neg<Output = T> {
     pub fn or_insert(&mut self,entry:TTPartialEntry<T>) -> &mut TTPartialEntry<T> where K: Copy {
         match self {
             Entry::OccupiedTTEntry(ref mut e) => {
@@ -254,7 +258,7 @@ pub struct TT<K,T,const S:usize,const N:usize>
              Wrapping<K>: Add<Output = Wrapping<K>> + Sub<Output = Wrapping<K>> + BitXor<Output = Wrapping<K>> + Copy,
              Standard: Distribution<K>,
              [TTEntry<T,K>;N]: Default,
-             T: Default {
+             T: Default + Neg<Output = T> {
     buckets:Vec<RwLock<[TTEntry<T,K>;N]>>
 }
 impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
@@ -262,7 +266,7 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
              Wrapping<K>: Add<Output = Wrapping<K>> + Sub<Output = Wrapping<K>> + BitXor<Output = Wrapping<K>> + Copy,
              Standard: Distribution<K>,
              [TTEntry<T,K>;N]: Default,
-             T: Default {
+             T: Default + Neg<Output = T> {
     pub fn new() -> TT<K,T,S,N> {
         let mut buckets = Vec::with_capacity(S);
         buckets.resize_with(S,RwLock::default);
