@@ -218,6 +218,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             )));
         }
 
+        env.nodes.fetch_add(1,Ordering::Release);
+
         if gs.base_depth < gs.current_depth {
             self.send_seldepth(env,gs.base_depth,gs.current_depth)?;
         } else {
