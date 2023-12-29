@@ -861,7 +861,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                             self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
 
-                            self.update_best_move(env,&gs.zh,gs.depth,scoreval,beta,alpha,best_moves.front().cloned());
+                            self.update_best_move(env,&gs.zh,gs.depth,scoreval,beta,gs.alpha,best_moves.front().cloned());
 
                             if scoreval >= beta {
                                 env.abort.store(true,Ordering::Release);
@@ -926,7 +926,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                             alpha = scoreval;
                                         }
 
-                                        self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta,alpha, Some(m));
+                                        self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta,gs.alpha, Some(m));
 
                                         if scoreval >= beta {
                                             env.abort.store(true,Ordering::Release);
@@ -1138,6 +1138,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             "move is not set."
         )))?;
 
+        let start_alpha = gs.alpha;
         let mut alpha = gs.alpha;
         let beta = gs.beta;
         let mut scoreval = Score::NEGINFINITE;
@@ -1215,7 +1216,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                         best_moves = mvs;
 
-                                        self.update_best_move(env,&prev_zh,depth,scoreval,beta,alpha,Some(m));
+                                        self.update_best_move(env,&prev_zh,depth,scoreval,beta,start_alpha,Some(m));
 
                                         if scoreval >= beta {
                                             best_moves.push_front(prev_move);
