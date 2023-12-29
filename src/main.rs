@@ -40,7 +40,7 @@ pub mod solver;
 pub mod learning;
 pub mod initial_estimation;
 pub mod transposition_table;
-
+pub mod evalutor;
 const LEAN_SFEN_READ_SIZE:usize = 1000 * 1000 * 10;
 const LEAN_BATCH_SIZE:usize = 1000 * 100;
 
@@ -167,11 +167,7 @@ fn run() -> Result<(),ApplicationError> {
 
         r
     } else {
-        let agent = UsiAgent::new(Leo::new(
-            String::from("data"),
-            String::from("nn.a.bin"),
-            String::from("nn.b.bin")
-        ));
+        let agent = UsiAgent::new(Leo::new());
 
         let r = agent.start_default(|on_error_handler,e| {
             match on_error_handler {

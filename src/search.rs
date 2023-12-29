@@ -16,7 +16,7 @@ use usiagent::rule::{LegalMove, Rule, State};
 use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError};
 use crate::initial_estimation::{attack_priority, defense_priority};
-use crate::nn::Evalutor;
+use crate::evalutor::Evalutor;
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
 use crate::transposition_table::{TT, TTPartialEntry, ZobristHash};
 
@@ -212,12 +212,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                          event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
                          evalutor: &Evalutor)
         -> Result<BeforeSearchResult, ApplicationError> {
-        if gs.depth == 0 || gs.current_depth >= gs.max_depth {
-            return Err(ApplicationError::InvalidStateError(String::from(
-                "Invalid search depth (before_search was called with 0 remaining search depth)"
-            )));
-        }
-
         env.nodes.fetch_add(1,Ordering::Release);
 
         if gs.base_depth < gs.current_depth {
@@ -303,7 +297,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 }
             }
 
-            if (gs.depth == 1 || gs.current_depth + 1 == gs.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+            if (gs.depth == 0 || gs.current_depth == gs.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
                 let (mhash,shash) = gs.zh.keys();
 
                 let ms = GameStateForMate {
@@ -364,14 +358,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
         event_dispatcher.dispatch_events(self,&*env.event_queue).map_err(|e| ApplicationError::from(e))?;
 
-
         if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
             self.timelimit_reached(env) || self.timeout_expected(env) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
-        if gs.depth == 1 || gs.current_depth + 1 == gs.max_depth {
-            let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
+        if gs.depth == 0 || gs.current_depth == gs.max_depth {
+            if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
                 let mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
 
                 if mvs.len() == 0 {
@@ -380,25 +373,17 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                     return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE, mvs, gs.zh.clone())));
                 } else {
-                    mvs
+                    return Ok(BeforeSearchResult::Mvs(mvs));
                 }
             } else {
-                let mvs:Vec<LegalMove> = Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc);
-                mvs
-            };
+                let s = evalutor.evalute(gs.teban,gs.state.get_banmen(),&gs.mc);
 
-            let mut await_mvs = Vec::with_capacity(mvs.len());
+                let mut mvs = VecDeque::new();
 
-            for m in mvs {
-                let (s,r) = mpsc::channel();
-                let (state,mc,_) = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
+                gs.m.map(|m| mvs.push_front(m));
 
-                evalutor.submit(gs.teban.opposite(),state.get_banmen(),&mc,m,s)?;
-
-                await_mvs.push((r,m));
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
             }
-
-            return Ok(BeforeSearchResult::AsyncMvs(await_mvs));
         }
 
         let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
@@ -515,8 +500,7 @@ pub enum EvaluationResult {
 #[derive(Debug)]
 pub enum BeforeSearchResult {
     Complete(EvaluationResult),
-    Mvs(Vec<LegalMove>),
-    AsyncMvs(Vec<(Receiver<(LegalMove,i32)>,LegalMove)>),
+    Mvs(Vec<LegalMove>)
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Score {
@@ -760,44 +744,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             BeforeSearchResult::Complete(EvaluationResult::Timeout) => {
                 return Ok(EvaluationResult::Timeout);
             },
-            BeforeSearchResult::AsyncMvs(await_mvs) => {
-                let mut scorevalue = Score::NEGINFINITE;
-
-                evalutor.on_begin_thread();
-                evalutor.begin_transaction()?;
-
-                for r in await_mvs {
-                    let (m, s) = r.0.recv()?;
-                    env.nodes.fetch_add(1, atomic::Ordering::Release);
-
-                    let s = Score::Value(s);
-
-                    let o = match m {
-                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
-                        _ => None
-                    };
-
-                    let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
-
-                    self.update_tt(env,&zh,gs.depth,s,-gs.alpha,-gs.beta);
-
-                    if scorevalue < -s {
-                        scorevalue = -s;
-
-                        best_moves = VecDeque::new();
-                        best_moves.push_front(m);
-                        gs.m.map(|m| best_moves.push_front(m));
-
-                        self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scorevalue)?;
-
-                        self.update_best_move(env,&gs.zh,gs.depth,scorevalue,gs.beta,gs.alpha,Some(m));
-                    }
-                }
-
-                evalutor.on_end_thread()?;
-
-                return Ok(EvaluationResult::Immediate(scorevalue, best_moves,gs.zh.clone()));
-            },
             BeforeSearchResult::Mvs(mvs) => {
                 mvs
             }
@@ -843,8 +789,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         loop {
             if busy_threads > 0 && (busy_threads == threads || force_recv) {
                 let r = self.receiver.recv();
-
-                evalutor.on_end_thread()?;
 
                 let r = r?.map_err(|e| ApplicationError::from(e))?;
 
@@ -952,8 +896,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                 let b = std::thread::Builder::new();
 
                                 let sender = sender.clone();
-
-                                evalutor.on_begin_thread();
 
                                 let _ = b.stack_size(1024 * 1024 * 200).spawn(move || {
                                     let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L, S>>(&env.on_error_handler, &env.stop, &env.quited);
@@ -1070,44 +1012,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             },
             BeforeSearchResult::Complete(EvaluationResult::Timeout) => {
                 return Ok(EvaluationResult::Timeout);
-            },
-            BeforeSearchResult::AsyncMvs(await_mvs) => {
-                let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
-                    "move is not set."
-                )))?;
-
-                evalutor.begin_transaction()?;
-
-                let mut best_moves = VecDeque::new();
-                let mut scorevalue = Score::NEGINFINITE;
-
-                for r in await_mvs {
-                    let (m, s) = r.0.recv()?;
-                    env.nodes.fetch_add(1, atomic::Ordering::Release);
-
-                    let s = Score::Value(s);
-
-                    let o = match m {
-                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
-                        _ => None
-                    };
-
-                    let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
-
-                    self.update_tt(env,&zh,gs.depth,s,-gs.alpha,-gs.beta);
-
-                    if scorevalue < -s {
-                        scorevalue = -s;
-
-                        self.update_best_move(env,&gs.zh,gs.depth,scorevalue,gs.beta,gs.alpha,Some(m));
-
-                        best_moves = VecDeque::new();
-                        best_moves.push_front(m);
-                        best_moves.push_front(prev_move);
-                    }
-                }
-
-                return Ok(EvaluationResult::Immediate(scorevalue, best_moves,prev_zh.clone()));
             },
             BeforeSearchResult::Mvs(mvs) => {
                 mvs

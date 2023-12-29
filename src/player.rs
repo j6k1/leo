@@ -14,7 +14,7 @@ use usiagent::player::{InfoSender, OnKeepAlive, PeriodicallyInfo, USIPlayer};
 use usiagent::rule::{AppliedMove, Kyokumen, Rule, State};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, Move, Teban};
 use crate::error::{ApplicationError};
-use crate::nn::Evalutor;
+use crate::evalutor::Evalutor;
 use crate::search::{BASE_DEPTH, DEFALUT_DISPLAY_EVALUTE_SCORE, DEFAULT_MATE_HASH, DEFAULT_STRICT_MATE, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_PLY, MAX_PLY_TIMELIMIT, MAX_THREADS, MIN_TURN_COUNT, NETWORK_DELAY, Root, Score, Search, TURN_COUNT};
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
 use crate::transposition_table::{TT, ZobristHash};
@@ -55,10 +55,7 @@ impl FromOption for bool {
     }
 }
 pub struct Leo {
-    savedir: String,
-    nna_path:String,
-    nnb_path:String,
-    evalutor: Option<Evalutor>,
+    evalutor: Evalutor,
     kyokumen:Option<Kyokumen>,
     remaining_turns:u32,
     zh:Option<ZobristHash<u64>>,
@@ -88,14 +85,9 @@ impl fmt::Debug for Leo {
     }
 }
 impl Leo {
-    pub fn new(savedir: String,
-               nna_path:String,
-               nnb_path:String) -> Leo {
+    pub fn new() -> Leo {
         Leo {
-            savedir:savedir,
-            nna_path:nna_path,
-            nnb_path:nnb_path,
-            evalutor:None,
+            evalutor:Evalutor::new(),
             kyokumen:None,
             remaining_turns:0,
             zh:None,
@@ -177,14 +169,6 @@ impl USIPlayer<ApplicationError> for Leo {
     fn take_ready<W,L>(&mut self, _:OnKeepAlive<W,L>)
                        -> Result<(),ApplicationError> where W: USIOutputWriter + Send + 'static,
                                                        L: Logger + Send + 'static {
-        match self.evalutor {
-            Some(_) => (),
-            None => {
-                self.evalutor = Some(Evalutor::new(self.savedir.clone(),
-                                              self.nna_path.clone(),
-                                              self.nnb_path.clone())?);
-            }
-        }
         Ok(())
     }
     fn set_option(&mut self,name:String,value:SysEventOption) -> Result<(),ApplicationError> {
@@ -415,89 +399,84 @@ impl USIPlayer<ApplicationError> for Leo {
         let oute_kyokumen_map = self.oute_kyokumen_map.clone();
         let base_depth = env.base_depth;
 
-        match self.evalutor {
-            Some(ref evalutor) => {
-                let mut event_dispatcher = Root::<L,S>::create_event_dispatcher(&on_error_handler,&env.stop,&env.quited);
+        let mut event_dispatcher = Root::<L,S>::create_event_dispatcher(&on_error_handler,&env.stop,&env.quited);
 
-                let _pinfo_sender = {
-                    let nodes = env.nodes.clone();
-                    let think_start_time = think_start_time.clone();
-                    let on_error_handler = env.on_error_handler.clone();
+        let _pinfo_sender = {
+            let nodes = env.nodes.clone();
+            let think_start_time = think_start_time.clone();
+            let on_error_handler = env.on_error_handler.clone();
 
-                    periodically_info.start(1000,move || {
-                        let mut commands = vec![];
-                        commands.push(UsiInfoSubCommand::Nodes(nodes.load(Ordering::Acquire)));
+            periodically_info.start(1000,move || {
+                let mut commands = vec![];
+                commands.push(UsiInfoSubCommand::Nodes(nodes.load(Ordering::Acquire)));
 
-                        let sec = (Instant::now() - think_start_time).as_secs();
+                let sec = (Instant::now() - think_start_time).as_secs();
 
-                        if sec > 0 {
-                            commands.push(UsiInfoSubCommand::Nps(nodes.load(Ordering::Acquire) / sec));
-                        }
-
-                        commands
-                    }, &on_error_handler)
-                };
-
-                let zh = match self.zh.as_ref() {
-                    Some(zh) => zh.clone(),
-                    None => {
-                        return Err(ApplicationError::InvalidStateError(format!("ZobristHash is not initialized!")))
-                    }
-                };
-
-                let mut gs = GameState {
-                    teban: teban,
-                    state: &Arc::new(state.clone()),
-                    alpha: Score::NEGINFINITE,
-                    beta: Score::INFINITE,
-                    m:None,
-                    mc: &Arc::new(mc.clone()),
-                    obtained:None,
-                    current_kyokumen_map:&kyokumen_map,
-                    oute_kyokumen_map:&oute_kyokumen_map,
-                    zh:zh,
-                    depth:base_depth,
-                    current_depth:0,
-                    base_depth:base_depth,
-                    max_depth:env.max_depth
-                };
-
-                let strategy  = Root::new();
-
-                let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, evalutor);
-
-                let bestmove = match result {
-                    Err(ref e) => {
-                        let _ = env.on_error_handler.lock().map(|h| h.call(e));
-                        strategy.send_message(&mut env,format!("{}",e).as_str())?;
-                        BestMove::Resign
-                    },
-                    Ok(EvaluationResult::Timeout) => {
-                        self.send_message_immediate(&mut env,"think timeout!")?;
-                        BestMove::Resign
-                    },
-                    Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_,_)) => {
-                        BestMove::Resign
-                    },
-                    Ok(EvaluationResult::Immediate(_,mvs,_)) if mvs.len() == 0 => {
-                        self.send_message_immediate(&mut env,"moves is empty!")?;
-                        BestMove::Resign
-                    },
-                    Ok(EvaluationResult::Immediate(_,mvs,_)) => {
-                        BestMove::Move(mvs[0].to_move(),None)
-                    }
-                };
-
-                if self.remaining_turns > env.min_turn_count {
-                    self.remaining_turns -= 1;
+                if sec > 0 {
+                    commands.push(UsiInfoSubCommand::Nps(nodes.load(Ordering::Acquire) / sec));
                 }
 
-                Ok(bestmove)
-            },
-            None =>  {
-                Err(ApplicationError::InvalidStateError(format!("evalutor is not initialized!")))
+                commands
+            }, &on_error_handler)
+        };
+
+        let zh = match self.zh.as_ref() {
+            Some(zh) => zh.clone(),
+            None => {
+                return Err(ApplicationError::InvalidStateError(format!("ZobristHash is not initialized!")))
             }
+        };
+
+        let mut gs = GameState {
+            teban: teban,
+            state: &Arc::new(state.clone()),
+            alpha: Score::NEGINFINITE,
+            beta: Score::INFINITE,
+            m:None,
+            mc: &Arc::new(mc.clone()),
+            obtained:None,
+            current_kyokumen_map:&kyokumen_map,
+            oute_kyokumen_map:&oute_kyokumen_map,
+            zh:zh,
+            depth:base_depth,
+            current_depth:0,
+            base_depth:base_depth,
+            max_depth:env.max_depth
+        };
+
+        let evalutor = self.evalutor.clone();
+
+        let strategy  = Root::new();
+
+        let result = strategy.search(&mut env,&mut gs, &mut event_dispatcher, &evalutor);
+
+        let bestmove = match result {
+            Err(ref e) => {
+                let _ = env.on_error_handler.lock().map(|h| h.call(e));
+                strategy.send_message(&mut env,format!("{}",e).as_str())?;
+                BestMove::Resign
+            },
+            Ok(EvaluationResult::Timeout) => {
+                self.send_message_immediate(&mut env,"think timeout!")?;
+                BestMove::Resign
+            },
+            Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_,_)) => {
+                BestMove::Resign
+            },
+            Ok(EvaluationResult::Immediate(_,mvs,_)) if mvs.len() == 0 => {
+                self.send_message_immediate(&mut env,"moves is empty!")?;
+                BestMove::Resign
+            },
+            Ok(EvaluationResult::Immediate(_,mvs,_)) => {
+                BestMove::Move(mvs[0].to_move(),None)
+            }
+        };
+
+        if self.remaining_turns > env.min_turn_count {
+            self.remaining_turns -= 1;
         }
+
+        Ok(bestmove)
     }
     fn think_ponder<L,S,P>(&mut self,_:&UsiGoTimeLimit,_:Arc<Mutex<UserEventQueue>>,
                            _:S,_:P,_:Arc<Mutex<OnErrorHandler<L>>>)
