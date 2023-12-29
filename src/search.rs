@@ -469,7 +469,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut tte = env.transposition_table.entry(&zh);
         let tte = tte.or_default();
 
-        if tte.depth < depth as i8 - 1 {
+        if tte.depth < depth as i8 - 1 || (tte.depth == depth as i8 - 1 && tte.score < score) {
             tte.depth = depth as i8 - 1;
             tte.score = score;
         }
