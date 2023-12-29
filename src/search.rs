@@ -231,6 +231,11 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
         }
 
+        if env.max_nodes.map(|nodes| env.nodes.load(Ordering::Acquire) >= nodes as u64).unwrap_or(false)
+        {
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
+        }
+
         if let Some(ObtainKind::Ou) = gs.obtained {
             let mut mvs = VecDeque::new();
 
@@ -478,6 +483,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         if (tte.beta <= beta && tte.alpha >= alpha) && (tte.depth < depth as i8 - 1 || (tte.depth == depth as i8 - 1 && tte.score < score)) {
             tte.depth = depth as i8 - 1;
             tte.score = score;
+            tte.beta = beta;
+            tte.alpha = alpha;
         }
     }
 
@@ -494,6 +501,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         if (tte.beta <= beta && tte.alpha >= alpha) && (tte.depth < depth as i8 || (tte.depth == depth as i8 && tte.score < score)) {
             tte.depth = depth as i8;
             tte.score = score;
+            tte.beta = beta;
+            tte.alpha = alpha;
             tte.best_move = m;
         }
     }
