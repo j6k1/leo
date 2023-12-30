@@ -295,7 +295,13 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
             bucket => {
                 for i in 0..bucket.len() {
                     if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
-                        return Some(ReadGuard::new(bucket, i));
+                        let valid = bucket[i].entry.depth >= 0;
+
+                        if valid {
+                            return Some(ReadGuard::new(bucket, i));
+                        } else {
+                            return None;
+                        }
                     }
                 }
 
@@ -311,7 +317,13 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
             bucket => {
                 for i in 0..bucket.len() {
                     if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
-                        return Some(WriteGuard::new(bucket, i));
+                        let valid = bucket[i].entry.depth >= 0;
+
+                        if valid {
+                            return Some(WriteGuard::new(bucket, i));
+                        } else {
+                            return None;
+                        }
                     }
                 }
 
@@ -417,7 +429,8 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
         match self.buckets[index].read() {
             bucket => {
                 for i in 0..bucket.len() {
-                    if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash && bucket[i].teban == zh.teban {
+                    if bucket[i].used && bucket[i].mhash == zh.mhash && bucket[i].shash == zh.shash &&
+                        bucket[i].teban == zh.teban && bucket[i].entry.depth >= 0 {
                         return true;
                     }
                 }

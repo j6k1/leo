@@ -5,7 +5,7 @@ use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
-use usiagent::command::{UsiInfoSubCommand, UsiScore, UsiScoreMate};
+use usiagent::command::{UsiInfoSubCommand,  UsiScore, UsiScoreMate};
 use usiagent::error::EventHandlerError;
 use usiagent::event::{EventDispatcher, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, UserEventQueue, USIEventDispatcher};
 use usiagent::hash::{KyokumenHash, KyokumenMap};
@@ -185,7 +185,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             oute_kyokumen_map.clear(gs.teban);
         }
 
-        let depth = if priority > 1 {
+        let depth = if priority > 1 && gs.current_depth + 1 < gs.max_depth {
             gs.depth + 1
         } else {
             gs.depth
@@ -213,6 +213,66 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                          evalutor: &Evalutor)
         -> Result<BeforeSearchResult, ApplicationError> {
         env.nodes.fetch_add(1,Ordering::Release);
+
+        if let Some(m) = gs.m {
+            if Rule::is_mate(gs.teban, &*gs.state) {
+                let mut mvs = VecDeque::new();
+
+                mvs.push_front(m);
+
+                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
+            }
+
+            {
+                let r = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone());
+
+                if let Some(TTPartialEntry {
+                                depth: d,
+                                score: s,
+                                beta,
+                                alpha,
+                                best_move: _
+                            }) = r {
+
+                    match s {
+                        Score::INFINITE => {
+                            if env.display_evalute_score {
+                                self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
+                            }
+
+                            let mut mvs = VecDeque::new();
+
+                            mvs.push_front(m);
+
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
+                        },
+                        Score::NEGINFINITE => {
+                            if env.display_evalute_score {
+                                self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
+                            }
+
+                            let mut mvs = VecDeque::new();
+
+                            mvs.push_front(m);
+
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone())));
+                        },
+                        Score::Value(s) if d as u32 >= gs.depth && beta >= gs.beta && alpha <= gs.alpha => {
+                            if env.display_evalute_score {
+                                self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
+                            }
+
+                            let mut mvs = VecDeque::new();
+
+                            mvs.push_front(m);
+
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
+                        },
+                        _ => ()
+                    }
+                }
+            }
+        }
 
         if gs.depth == 0 || gs.current_depth == gs.max_depth {
             if let Some(m) = gs.m {
@@ -271,12 +331,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
         }
 
-        if gs.base_depth < gs.current_depth {
-            self.send_seldepth(env,gs.base_depth,gs.current_depth)?;
-        } else {
-            self.send_depth(env,gs.base_depth)?;
-        }
-
         if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
             self.timelimit_reached(env) || self.timeout_expected(env) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
@@ -295,65 +349,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
         }
 
-        if let Some(m) = gs.m {
-            if Rule::is_mate(gs.teban, &*gs.state) {
-                let mut mvs = VecDeque::new();
-
-                mvs.push_front(m);
-
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
-            }
-
-            {
-                let r = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone());
-
-                if let Some(TTPartialEntry {
-                                depth: d,
-                                score: s,
-                                beta,
-                                alpha,
-                                best_move: _
-                            }) = r {
-
-                    match s {
-                        Score::INFINITE if d >= 0 => {
-                            if env.display_evalute_score {
-                                self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
-                            }
-
-                            let mut mvs = VecDeque::new();
-
-                            mvs.push_front(m);
-
-                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
-                        },
-                        Score::NEGINFINITE if d >= 0 => {
-                            if env.display_evalute_score {
-                                self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
-                            }
-
-                            let mut mvs = VecDeque::new();
-
-                            mvs.push_front(m);
-
-                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone())));
-                        },
-                        Score::Value(s) if d as u32 >= gs.depth && beta >= gs.beta && alpha <= gs.alpha => {
-                            if env.display_evalute_score {
-                                self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
-                            }
-
-                            let mut mvs = VecDeque::new();
-
-                            mvs.push_front(m);
-
-                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
-                        },
-                        _ => ()
-                    }
-                }
-            }
-        }
         event_dispatcher.dispatch_events(self,&*env.event_queue).map_err(|e| ApplicationError::from(e))?;
 
         if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
@@ -830,11 +825,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         match next {
                             (state, mc, _) => {
                                 if is_sennichite {
-                                    let s = if Rule::is_mate(gs.teban.opposite(), &state) {
-                                        Score::NEGINFINITE
-                                    } else {
-                                        Score::Value(0)
-                                    };
+                                    let s = Score::Value(0);
 
                                     if s > scoreval {
                                         scoreval = s;
@@ -844,6 +835,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         if alpha < scoreval {
                                             alpha = scoreval;
                                         }
+
+                                        self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
 
                                         self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta,gs.alpha, Some(m));
 
@@ -896,7 +889,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                                     let r = strategy.search(&mut env, &mut gs, &mut event_dispatcher, &evalutor);
 
-                                    let _ = sender.send(r);
+                                    if let Err(e) = sender.send(r) {
+                                        let _ = strategy.send_message(&mut env,format!("{:?}",e).as_str());
+                                    }
                                 });
 
                                 busy_threads += 1;
@@ -1035,11 +1030,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     match next {
                         (state, mc, _) => {
                             if is_sennichite {
-                                let s = if Rule::is_mate(gs.teban.opposite(), &state) {
-                                    Score::NEGINFINITE
-                                } else {
-                                    Score::Value(0)
-                                };
+                                let s = Score::Value(0);
 
                                 if s > scoreval {
                                     scoreval = s;
