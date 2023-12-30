@@ -395,8 +395,8 @@ impl USIPlayer<ApplicationError> for Leo {
             &self.transposition_table
         );
 
-        let kyokumen_map = self.kyokumen_map.clone();
-        let oute_kyokumen_map = self.oute_kyokumen_map.clone();
+        let mut kyokumen_map = self.kyokumen_map.clone();
+        let mut oute_kyokumen_map = self.oute_kyokumen_map.clone();
         let base_depth = env.base_depth;
 
         let mut event_dispatcher = Root::<L,S>::create_event_dispatcher(&on_error_handler,&env.stop,&env.quited);
@@ -435,8 +435,8 @@ impl USIPlayer<ApplicationError> for Leo {
             m:None,
             mc: &Arc::new(mc.clone()),
             obtained:None,
-            current_kyokumen_map:&kyokumen_map,
-            oute_kyokumen_map:&oute_kyokumen_map,
+            current_kyokumen_map:&mut kyokumen_map,
+            oute_kyokumen_map:&mut oute_kyokumen_map,
             zh:zh,
             depth:base_depth,
             current_depth:0,

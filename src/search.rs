@@ -15,7 +15,6 @@ use usiagent::player::InfoSender;
 use usiagent::rule::{LegalMove, Rule, State};
 use usiagent::shogi::{MochigomaCollections, MochigomaKind, ObtainKind, Teban};
 use crate::error::{ApplicationError};
-use crate::initial_estimation::{attack_priority, defense_priority};
 use crate::evalutor::Evalutor;
 use crate::solver::{GameStateForMate, MaybeMate, Solver};
 use crate::transposition_table::{TT, TTPartialEntry, ZobristHash};
@@ -37,6 +36,39 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
+
+    fn inter_process<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
+                            event_dispatcher:&mut UserEventDispatcher<'b,Recursive<L,S>,ApplicationError,L>,
+                            evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError> {
+        let (mhash,shash) = gs.zh.keys();
+
+        let c = gs.current_kyokumen_map.get(gs.teban.opposite(),&mhash,&shash).map(|&c| c + 1).unwrap_or(1);
+
+        gs.current_kyokumen_map.insert(gs.teban.opposite(),mhash,shash,c);
+
+        if Rule::is_mate(gs.teban.opposite(),&gs.state) {
+            gs.oute_kyokumen_map.insert(gs.teban.opposite(),mhash,shash,());
+        }
+
+        let strategy = Recursive::new();
+
+        let r = strategy.search(env,gs,event_dispatcher,evalutor);
+
+        let c = match gs.current_kyokumen_map.get(gs.teban.opposite(),&mhash,&shash) {
+            Some(&c) if c > 0 => c - 1,
+            _ => 0
+        };
+
+        if c > 0 {
+            gs.current_kyokumen_map.insert(gs.teban.opposite(), mhash, shash, c);
+        } else {
+            gs.current_kyokumen_map.remove(gs.teban.opposite(),&mhash,&shash);
+        }
+
+        gs.oute_kyokumen_map.remove(gs.teban.opposite(),&mhash,&shash);
+
+        r
+    }
 
     fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
         let network_delay = env.network_delay;
@@ -144,46 +176,25 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
     fn startup_strategy<'a>(&self,env:&mut Environment<L,S>,
                             gs: &mut GameState<'a>,
-                            m:LegalMove, priority:u32,is_oute:bool)
-                            -> Option<(u32,Option<ObtainKind>,ZobristHash<u64>,KyokumenMap<u64,()>,KyokumenMap<u64,u32>,bool)> {
+                            m:LegalMove) -> Option<(u32,Option<ObtainKind>,ZobristHash<u64>,bool)> {
+        let priority = match m {
+            LegalMove::To(ref m) =>  {
+                match m.obtained() {
+                    Some(ObtainKind::Ou) => 1000,
+                    _ => 1
+                }
+            },
+            _ => 5
+        };
 
         let obtained = match m {
             LegalMove::To(ref m) => m.obtained(),
             _ => None,
         };
 
-        let mut oute_kyokumen_map = gs.oute_kyokumen_map.clone();
-        let mut current_kyokumen_map = gs.current_kyokumen_map.clone();
+        let o = obtained.and_then(|o| MochigomaKind::try_from(o).ok());
 
-        let zh = {
-            let o = match m {
-                LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
-                _ => None
-            };
-
-            let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
-
-            let (mhash,shash) = zh.keys();
-
-            if is_oute {
-                match oute_kyokumen_map.get(gs.teban,&mhash,&shash) {
-                    Some(_) => {
-                        return None;
-                    },
-                    None => {
-                        oute_kyokumen_map.insert(gs.teban,mhash,shash,());
-                    },
-                }
-            }
-
-            zh
-        };
-
-        let (mhash,shash) = zh.keys();
-
-        if !is_oute {
-            oute_kyokumen_map.clear(gs.teban);
-        }
+        let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
         let depth = if priority > 1 && gs.current_depth + 1 < gs.max_depth {
             gs.depth + 1
@@ -191,19 +202,16 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             gs.depth
         };
 
-        let is_sennichite = match current_kyokumen_map.get(gs.teban,&mhash,&shash).unwrap_or(&0) {
+        let (mhash,shash) = zh.keys();
+
+        let is_sennichite = match gs.current_kyokumen_map.get(gs.teban,&mhash,&shash).unwrap_or(&0) {
             &c if c >= 3 => {
                 return None;
-            },
-            &c if c > 0 => {
-                current_kyokumen_map.insert(gs.teban,mhash,shash,c+1);
-
-                true
             },
             _ => false,
         };
 
-        Some((depth,obtained,zh,oute_kyokumen_map,current_kyokumen_map,is_sennichite))
+        Some((depth,obtained,zh,is_sennichite))
     }
 
     fn before_search<'a,'b>(&self,
@@ -357,11 +365,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
-            if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
-                self.timelimit_reached(env) || self.timeout_expected(env) {
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
-            }
-
             let mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
 
             if mvs.len() == 0 {
@@ -370,26 +373,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                 return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE, mvs,gs.zh.clone())));
             } else {
-                let mut mvs = mvs.into_iter().map(|m| {
-                    let o = match m {
-                        LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
-                        _ => None
-                    };
-
-                    let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
-
-                    {
-                        if let Some(TTPartialEntry { depth: _, score, beta: _, alpha: _, best_move: _ }) = env.transposition_table.get(&zh).map(|g| g.deref().clone()) {
-                            (m, -score)
-                        } else {
-                            (m, Score::Value(0))
-                        }
-                    }
-                }).collect::<Vec<(LegalMove,Score)>>();
-
-                mvs.sort_by(|&a,&b| {
-                    b.1.cmp(&a.1).then_with(|| defense_priority(gs.teban,&gs.state,a.0).cmp(&defense_priority(gs.teban,&gs.state,b.0)))
-                });
                 mvs
             }
         } else {
@@ -398,32 +381,10 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
             }
 
-            let mvs:Vec<LegalMove> = Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc);
-
-            let mut mvs = mvs.into_iter().map(|m| {
-                let o = match m {
-                    LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
-                    _ => None
-                };
-
-                let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
-
-                {
-                    if let Some(TTPartialEntry { depth: _, score, beta: _, alpha: _, best_move: _ }) = env.transposition_table.get(&zh).map(|g| g.deref().clone()) {
-                        (m, -score)
-                    } else {
-                        (m, Score::Value(0))
-                    }
-                }
-            }).collect::<Vec<(LegalMove,Score)>>();
-
-            mvs.sort_by(|&a,&b| {
-                b.1.cmp(&a.1).then_with(|| attack_priority(gs.teban,&gs.state,a.0).cmp(&attack_priority(gs.teban,&gs.state,b.0)))
-            });
-            mvs
+            Rule::legal_moves_all(gs.teban, &*gs.state, &*gs.mc)
         };
 
-        Ok(BeforeSearchResult::Mvs(mvs.into_iter().map(|(m,_)| m).collect::<Vec<LegalMove>>()))
+        Ok(BeforeSearchResult::Mvs(mvs))
     }
 
     fn update_tt<'a>(&self, env: &mut Environment<L, S>,
@@ -634,8 +595,8 @@ pub struct GameState<'a> {
     pub m:Option<LegalMove>,
     pub mc:&'a Arc<MochigomaCollections>,
     pub obtained:Option<ObtainKind>,
-    pub current_kyokumen_map:&'a KyokumenMap<u64,u32>,
-    pub oute_kyokumen_map:&'a KyokumenMap<u64,()>,
+    pub current_kyokumen_map:&'a mut KyokumenMap<u64,u32>,
+    pub oute_kyokumen_map:&'a mut KyokumenMap<u64,()>,
     pub zh:ZobristHash<u64>,
     pub depth:u32,
     pub current_depth:u32,
@@ -729,16 +690,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             m.map(|m| mvs.insert(0,m));
         }
 
-        let mvs = mvs.into_iter().map(|m| {
-            if let LegalMove::To(ref mv) = m {
-                if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
-                    return (1000,false,m);
-                }
-            }
-
-            (0,false,m)
-        }).collect::<Vec<(u32,bool,LegalMove)>>();
-
         let mut alpha = gs.alpha;
         let beta = gs.beta;
         let mut scoreval = Score::NEGINFINITE;
@@ -810,16 +761,11 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     env.abort.store(true,Ordering::Release);
                     continue;
                 }
-            } else if let Some((priority, is_oute, m)) = it.next() {
+            } else if let Some(m) = it.next() {
                 match self.startup_strategy(env,
                                             gs,
-                                            m,
-                                            priority,
-                                            is_oute) {
-                    Some((depth, obtained, zh,
-                             oute_kyokumen_map,
-                             current_kyokumen_map,
-                             is_sennichite)) => {
+                                            m) {
+                    Some((depth, obtained, zh, is_sennichite)) => {
                         let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
                         match next {
@@ -876,8 +822,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         m: Some(m),
                                         mc: &mc,
                                         obtained: obtained,
-                                        current_kyokumen_map: &current_kyokumen_map,
-                                        oute_kyokumen_map: &oute_kyokumen_map,
+                                        current_kyokumen_map: &mut KyokumenMap::new(),
+                                        oute_kyokumen_map: &mut KyokumenMap::new(),
                                         zh: zh.clone(),
                                         depth: depth - 1,
                                         current_depth: current_depth + 1,
@@ -887,7 +833,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                                     let strategy = Recursive::new();
 
-                                    let r = strategy.search(&mut env, &mut gs, &mut event_dispatcher, &evalutor);
+                                    let r = strategy.inter_process(&mut env, &mut gs, &mut event_dispatcher, &evalutor);
 
                                     if let Err(e) = sender.send(r) {
                                         let _ = strategy.send_message(&mut env,format!("{:?}",e).as_str());
@@ -998,16 +944,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             m.map(|m| mvs.insert(0,m));
         }
 
-        let mvs = mvs.into_iter().map(|m| {
-            if let LegalMove::To(ref mv) = m {
-                if let Some(&ObtainKind::Ou) = mv.obtained().as_ref() {
-                    return (1000,false,m);
-                }
-            }
-
-            (0,false,m)
-        }).collect::<Vec<(u32,bool,LegalMove)>>();
-
         let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
             "move is not set."
         )))?;
@@ -1019,12 +955,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         let mut best_moves = VecDeque::new();
         let d = gs.depth;
 
-        for &(priority,is_oute,m) in &mvs {
-            match self.startup_strategy(env, gs, m, priority, is_oute) {
-                Some((depth, obtained, zh,
-                         oute_kyokumen_map,
-                         current_kyokumen_map,
-                         is_sennichite)) => {
+        for m in mvs {
+            match self.startup_strategy(env, gs, m) {
+                Some((depth, obtained, zh, is_sennichite)) => {
                     let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
                     match next {
@@ -1055,6 +988,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             let mc = Arc::new(mc);
                             let prev_zh = gs.zh.clone();
 
+                            let mut current_kyokumen_map = &mut gs.current_kyokumen_map;
+                            let mut oute_kyokumen_map = &mut gs.oute_kyokumen_map;
+
                             let mut gs = GameState {
                                 teban: gs.teban.opposite(),
                                 state: &state,
@@ -1063,8 +999,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 m: Some(m),
                                 mc: &mc,
                                 obtained: obtained,
-                                current_kyokumen_map: &current_kyokumen_map,
-                                oute_kyokumen_map: &oute_kyokumen_map,
+                                current_kyokumen_map: &mut current_kyokumen_map,
+                                oute_kyokumen_map: &mut oute_kyokumen_map,
                                 zh: zh.clone(),
                                 depth: depth - 1,
                                 current_depth: gs.current_depth + 1,
@@ -1074,7 +1010,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             let strategy = Recursive::new();
 
-                            match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
+                            match strategy.inter_process(env, &mut gs, event_dispatcher, evalutor)? {
                                 EvaluationResult::Timeout => {
                                     return Ok(EvaluationResult::Timeout);
                                 },
