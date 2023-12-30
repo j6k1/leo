@@ -212,8 +212,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 return None;
             },
             &c if c > 0 => {
-                gs.current_kyokumen_map.insert(gs.teban,mhash,shash,c+1);
-
                 true
             },
             _ => false,
