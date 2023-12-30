@@ -185,7 +185,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             oute_kyokumen_map.clear(gs.teban);
         }
 
-        let depth = if priority > 1 {
+        let depth = if priority > 1 && gs.current_depth + 1 < gs.max_depth{
             gs.depth + 1
         } else {
             gs.depth
@@ -219,12 +219,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         }
 
         env.nodes.fetch_add(1,Ordering::Release);
-
-        if gs.base_depth < gs.current_depth {
-            self.send_seldepth(env,gs.base_depth,gs.current_depth)?;
-        } else {
-            self.send_depth(env,gs.base_depth)?;
-        }
 
         if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
             self.timelimit_reached(env) || self.timeout_expected(env) {
@@ -911,11 +905,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         match next {
                             (state, mc, _) => {
                                 if is_sennichite {
-                                    let s = if Rule::is_mate(gs.teban.opposite(), &state) {
-                                        Score::NEGINFINITE
-                                    } else {
-                                        Score::Value(0)
-                                    };
+                                    let s = Score::Value(0);
 
                                     if s > scoreval {
                                         scoreval = s;
@@ -925,6 +915,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                         if alpha < scoreval {
                                             alpha = scoreval;
                                         }
+
+                                        self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
 
                                         self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta,gs.alpha, Some(m));
 
@@ -979,7 +971,9 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                                     let r = strategy.search(&mut env, &mut gs, &mut event_dispatcher, &evalutor);
 
-                                    let _ = sender.send(r);
+                                    if let Err(e) = sender.send(r) {
+                                        let _ = strategy.send_message(&mut env,format!("{}",e).as_str());
+                                    }
                                 });
 
                                 busy_threads += 1;
@@ -1156,11 +1150,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     match next {
                         (state, mc, _) => {
                             if is_sennichite {
-                                let s = if Rule::is_mate(gs.teban.opposite(), &state) {
-                                    Score::NEGINFINITE
-                                } else {
-                                    Score::Value(0)
-                                };
+                                let s = Score::Value(0);
 
                                 if s > scoreval {
                                     scoreval = s;
