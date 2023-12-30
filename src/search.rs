@@ -36,6 +36,52 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
+    fn qsearch(&self,teban:Teban,state:&State,mc:&MochigomaCollections,
+               mut alpha:Score,beta:Score,evalutor: &Evalutor) -> Score {
+        let mut score = Score::Value(evalutor.evalute(teban,state.get_banmen(),mc));
+
+        if score >= beta {
+            return score;
+        }
+
+        if score > alpha {
+            alpha = score;
+        }
+
+        let mvs = Rule::legal_moves_from_banmen(teban,state).into_iter().filter(|&m| {
+            match m {
+                LegalMove::To(m) => m.obtained().is_some(),
+                _ => false
+            }
+        }).collect::<Vec<LegalMove>>();
+
+        if mvs.len() == 0 {
+            return alpha;
+        }
+
+        for m in mvs {
+            if let Some(ObtainKind::Ou) = match m {
+                LegalMove::To(m) => m.obtained(),
+                _ => None
+            } {
+                return Score::INFINITE;
+            }
+
+            let (next,nmc,_) = Rule::apply_move_none_check(state,teban,mc,m.to_applied_move());
+
+            score = -self.qsearch(teban.opposite(),&next,&nmc,-beta,-alpha,evalutor);
+
+            if score >= beta {
+                return score;
+            }
+
+            if score > alpha {
+                alpha = score;
+            }
+        }
+
+        alpha
+    }
 
     fn inter_process<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                             event_dispatcher:&mut UserEventDispatcher<'b,Recursive<L,S>,ApplicationError,L>,
@@ -330,13 +376,13 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 }
             }
 
-            let s = evalutor.evalute(gs.teban,gs.state.get_banmen(),&gs.mc);
+            let s = self.qsearch(gs.teban,&gs.state,&gs.mc,gs.alpha,gs.beta,evalutor);
 
             let mut mvs = VecDeque::new();
 
             gs.m.map(|m| mvs.push_front(m));
 
-            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(s,mvs,gs.zh.clone())));
         }
 
         if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
