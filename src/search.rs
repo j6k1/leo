@@ -36,6 +36,61 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
                      evalutor: &Evalutor) -> Result<EvaluationResult,ApplicationError>;
+    fn qsearch(&self,teban:Teban,state:&State,mc:&MochigomaCollections,
+               mut alpha:Score,beta:Score,evalutor: &crate::evalutor::Evalutor) -> (Score,Teban,State,MochigomaCollections) {
+        let mut score = Score::Value(evalutor.evalute(teban,state.get_banmen(),mc));
+
+        if score >= beta {
+            return (score,teban,state.clone(),mc.clone());
+        }
+
+        if score > alpha {
+            alpha = score;
+        }
+
+        let mvs = Rule::legal_moves_from_banmen(teban,state).into_iter().filter(|&m| {
+            match m {
+                LegalMove::To(m) => m.obtained().is_some(),
+                _ => false
+            }
+        }).collect::<Vec<LegalMove>>();
+
+        if mvs.len() == 0 {
+            return (alpha,teban,state.clone(),mc.clone());
+        }
+
+        let mut st = teban;
+        let mut ss = state.clone();
+        let mut smc = mc.clone();
+
+        for m in mvs {
+            if let Some(ObtainKind::Ou) = match m {
+                LegalMove::To(m) => m.obtained(),
+                _ => None
+            } {
+                return (Score::INFINITE,teban,state.clone(),mc.clone());
+            }
+
+            let (next,nmc,_) = Rule::apply_move_none_check(state,teban,mc,m.to_applied_move());
+
+            let (nsc,nst,nss,nsmc) = self.qsearch(teban.opposite(),&next,&nmc,-beta,-alpha,evalutor);
+
+            score = -nsc;
+
+            if score >= beta {
+                return (score,nst,nss,nsmc);
+            }
+
+            if score > alpha {
+                alpha = score;
+                st = nst;
+                ss = nss;
+                smc = nsmc;
+            }
+        }
+
+        (alpha,st,ss,smc)
+    }
 
     fn inter_process<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                             event_dispatcher:&mut UserEventDispatcher<'b,Recursive<L,S>,ApplicationError,L>,
@@ -201,7 +256,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
         let (mhash,shash) = zh.keys();
 
-        let depth = if priority > 1 && gs.current_depth + 1 < gs.max_depth{
+        let depth = if priority > 1 && gs.current_depth + 1 < gs.max_depth {
             gs.depth + 1
         } else {
             gs.depth
@@ -401,9 +456,11 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 let (s,r) = mpsc::channel();
                 let (state,mc,_) = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
-                evalutor.submit(gs.teban.opposite(),state.get_banmen(),&mc,m,s)?;
+                let (_,t,st,mc) = self.qsearch(gs.teban.opposite(),&state,&mc,Score::NEGINFINITE,Score::INFINITE,&env.evalutor);
 
-                await_mvs.push((r,m));
+                evalutor.submit(t,st.get_banmen(),&mc,m,s)?;
+
+                await_mvs.push((r,m,t));
             }
 
             return Ok(BeforeSearchResult::AsyncMvs(await_mvs));
@@ -482,7 +539,7 @@ pub enum EvaluationResult {
 pub enum BeforeSearchResult {
     Complete(EvaluationResult),
     Mvs(Vec<LegalMove>),
-    AsyncMvs(Vec<(Receiver<(LegalMove,i32)>,LegalMove)>),
+    AsyncMvs(Vec<(Receiver<(LegalMove,i32)>,LegalMove,Teban)>),
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Score {
@@ -533,6 +590,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub info_sender:S,
     pub on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
     pub hasher:Arc<KyokumenHash<u64>>,
+    pub evalutor:crate::evalutor::Evalutor,
     pub limit:Option<Instant>,
     pub current_limit:Option<Instant>,
     pub turn_count:u32,
@@ -561,6 +619,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:self.info_sender.clone(),
             on_error_handler:Arc::clone(&self.on_error_handler),
             hasher:Arc::clone(&self.hasher),
+            evalutor:self.evalutor.clone(),
             limit:self.limit.clone(),
             current_limit:self.current_limit.clone(),
             turn_count:self.turn_count,
@@ -615,6 +674,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:info_sender,
             on_error_handler:on_error_handler,
             hasher:hasher,
+            evalutor:crate::evalutor::Evalutor::new(),
             think_start_time:think_start_time,
             limit:limit,
             current_limit:current_limit,
@@ -736,7 +796,11 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     let (m, s) = r.0.recv()?;
                     env.nodes.fetch_add(1, atomic::Ordering::Release);
 
-                    let s = Score::Value(s);
+                    let s = if r.2 == gs.teban {
+                        Score::Value(s)
+                    } else {
+                        Score::Value(-s)
+                    };
 
                     let o = match m {
                         LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
@@ -745,10 +809,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                     let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-                    self.update_tt(env,&zh,gs.depth,s,-gs.alpha,-gs.beta);
+                    self.update_tt(env,&zh,gs.depth,-s,-gs.alpha,-gs.beta);
 
-                    if scorevalue < -s {
-                        scorevalue = -s;
+                    if scorevalue < s {
+                        scorevalue = s;
 
                         best_moves = VecDeque::new();
                         best_moves.push_front(m);
@@ -1046,7 +1110,11 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     let (m, s) = r.0.recv()?;
                     env.nodes.fetch_add(1, atomic::Ordering::Release);
 
-                    let s = Score::Value(s);
+                    let s = if r.2 == gs.teban {
+                        Score::Value(s)
+                    } else {
+                        Score::Value(-s)
+                    };
 
                     let o = match m {
                         LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
@@ -1055,10 +1123,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,m.to_applied_move(),&o);
 
-                    self.update_tt(env,&zh,gs.depth,s,-gs.alpha,-gs.beta);
+                    self.update_tt(env,&zh,gs.depth,-s,-gs.alpha,-gs.beta);
 
-                    if scorevalue < -s {
-                        scorevalue = -s;
+                    if scorevalue < s {
+                        scorevalue = s;
 
                         self.update_best_move(env,&gs.zh,gs.depth,scorevalue,gs.beta,gs.alpha,Some(m));
 

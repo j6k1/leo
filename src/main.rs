@@ -40,6 +40,7 @@ pub mod solver;
 pub mod learning;
 pub mod initial_estimation;
 pub mod transposition_table;
+pub mod evalutor;
 
 const LEAN_SFEN_READ_SIZE:usize = 1000 * 1000 * 10;
 const LEAN_BATCH_SIZE:usize = 1000 * 100;

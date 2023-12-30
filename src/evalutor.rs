@@ -35,6 +35,7 @@ const PIECE_SCORE_MAP:[i32; 29] = [
 const HAND_SCORE_MAP: [i32; 7] = [
     90,315,405,405,540,855,990
 ];
+#[derive(Clone)]
 pub struct Evalutor {
 
 }
