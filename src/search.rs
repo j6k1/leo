@@ -214,6 +214,63 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         -> Result<BeforeSearchResult, ApplicationError> {
         env.nodes.fetch_add(1,Ordering::Release);
 
+        if gs.depth == 0 || gs.current_depth == gs.max_depth {
+            if let Some(m) = gs.m {
+                if !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
+                    let (mhash, shash) = gs.zh.keys();
+
+                    let ms = GameStateForMate {
+                        base_depth: env.base_depth,
+                        current_depth: gs.current_depth,
+                        mhash: mhash,
+                        shash: shash,
+                        current_kyokumen_map: gs.current_kyokumen_map,
+                        event_queue: env.event_queue.clone(),
+                        teban: gs.teban,
+                        state: gs.state,
+                        mc: gs.mc
+                    };
+
+                    let solver = Solver::new();
+
+                    match solver.checkmate(
+                        false,
+                        false,
+                        false,
+                        env.mate_hash,
+                        env.limit.clone(),
+                        env.max_ply_timelimit.map(|l| Instant::now() + l),
+                        env.network_delay,
+                        env.max_ply.clone(),
+                        env.max_nodes.clone(),
+                        env.info_sender.clone(),
+                        &env.on_error_handler,
+                        Arc::clone(&env.hasher),
+                        Arc::clone(&env.stop),
+                        Arc::clone(&env.nodes),
+                        Arc::clone(&env.quited),
+                        None,
+                        ms
+                    )? {
+                        MaybeMate::MateMoves(mut mvs) if mvs.len() > 0 => {
+                            mvs.push_front(m);
+
+                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE, mvs, gs.zh.clone())));
+                        },
+                        _ => ()
+                    }
+                }
+            }
+
+            let s = evalutor.evalute(gs.teban,gs.state.get_banmen(),&gs.mc);
+
+            let mut mvs = VecDeque::new();
+
+            gs.m.map(|m| mvs.push_front(m));
+
+            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
+        }
+
         if gs.base_depth < gs.current_depth {
             self.send_seldepth(env,gs.base_depth,gs.current_depth)?;
         } else {
@@ -259,7 +316,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             }) = r {
 
                     match s {
-                        Score::INFINITE => {
+                        Score::INFINITE if d >= 0 => {
                             if env.display_evalute_score {
                                 self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
                             }
@@ -270,7 +327,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
                             return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
                         },
-                        Score::NEGINFINITE => {
+                        Score::NEGINFINITE if d >= 0 => {
                             if env.display_evalute_score {
                                 self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
                             }
@@ -296,94 +353,12 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                     }
                 }
             }
-
-            if (gs.depth == 0 || gs.current_depth == gs.max_depth) && !Rule::is_mate(gs.teban.opposite(), &*gs.state) {
-                let (mhash,shash) = gs.zh.keys();
-
-                let ms = GameStateForMate {
-                    base_depth: env.base_depth,
-                    current_depth: gs.current_depth,
-                    mhash: mhash,
-                    shash: shash,
-                    current_kyokumen_map: gs.current_kyokumen_map,
-                    event_queue: env.event_queue.clone(),
-                    teban: gs.teban,
-                    state: gs.state,
-                    mc: gs.mc
-                };
-
-                let solver = Solver::new();
-
-                match solver.checkmate(
-                    false,
-                    false,
-                    false,
-                    env.mate_hash,
-                    env.limit.clone(),
-                    env.max_ply_timelimit.map(|l| Instant::now() + l),
-                    env.network_delay,
-                    env.max_ply.clone(),
-                    env.max_nodes.clone(),
-                    env.info_sender.clone(),
-                    &env.on_error_handler,
-                    Arc::clone(&env.hasher),
-                    Arc::clone(&env.stop),
-                    Arc::clone(&env.nodes),
-                    Arc::clone(&env.quited),
-                    None,
-                    ms
-                )? {
-                    MaybeMate::MateMoves(mvs) if mvs.len() > 0 => {
-                        let next_move = mvs[0];
-                        let mut r = mvs;
-
-                        let o = match next_move {
-                            LegalMove::To(m) => m.obtained().and_then(|o| MochigomaKind::try_from(o).ok()),
-                            _ => None
-                        };
-
-                        let zh = gs.zh.updated(&env.hasher,gs.teban,gs.state.get_banmen(),gs.mc,next_move.to_applied_move(),&o);
-
-                        self.update_tt(env,&zh,gs.depth,Score::NEGINFINITE,-gs.alpha,-gs.beta);
-
-                        self.update_best_move(env,&gs.zh,gs.depth,Score::INFINITE,gs.beta,gs.alpha,Some(next_move));
-
-                        r.push_front(m);
-
-                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE, r,gs.zh.clone())));
-                    },
-                    _ => ()
-                }
-            }
         }
         event_dispatcher.dispatch_events(self,&*env.event_queue).map_err(|e| ApplicationError::from(e))?;
 
         if env.stop.load(atomic::Ordering::Acquire) || env.abort.load(atomic::Ordering::Acquire) ||
             self.timelimit_reached(env) || self.timeout_expected(env) {
             return Ok(BeforeSearchResult::Complete(EvaluationResult::Timeout));
-        }
-
-        if gs.depth == 0 || gs.current_depth == gs.max_depth {
-            if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
-                let mvs = Rule::respond_oute_only_moves_all(gs.teban, &*gs.state, &*gs.mc);
-
-                if mvs.len() == 0 {
-                    let mut mvs = VecDeque::new();
-                    gs.m.map(|m| mvs.push_front(m));
-
-                    return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE, mvs, gs.zh.clone())));
-                } else {
-                    return Ok(BeforeSearchResult::Mvs(mvs));
-                }
-            } else {
-                let s = evalutor.evalute(gs.teban,gs.state.get_banmen(),&gs.mc);
-
-                let mut mvs = VecDeque::new();
-
-                gs.m.map(|m| mvs.push_front(m));
-
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
-            }
         }
 
         let mvs = if Rule::is_mate(gs.teban.opposite(),&*gs.state) {
