@@ -793,6 +793,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                                     continue;
                                 }
 
+                                {
+                                    let (mhash,shash) = zh.keys();
+
+                                    if Rule::is_mate(gs.teban, &state) && gs.oute_kyokumen_map.get(gs.teban, &mhash, &shash).is_some() {
+                                        continue;
+                                    }
+                                }
+
                                 let teban = gs.teban;
                                 let state = Arc::new(state);
                                 let mc = Arc::new(mc);
@@ -982,6 +990,14 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                     alpha = scoreval;
                                 }
                                 continue;
+                            }
+
+                            {
+                                let (mhash,shash) = zh.keys();
+
+                                if Rule::is_mate(gs.teban, &state) && gs.oute_kyokumen_map.get(gs.teban, &mhash, &shash).is_some() {
+                                    continue;
+                                }
                             }
 
                             let state = Arc::new(state);
