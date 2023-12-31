@@ -275,61 +275,51 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         env.nodes.fetch_add(1,Ordering::Release);
 
         if let Some(m) = gs.m {
-            if Rule::is_mate(gs.teban, &*gs.state) {
-                let mut mvs = VecDeque::new();
+            let r = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone());
 
-                mvs.push_front(m);
+            if let Some(TTPartialEntry {
+                            depth: d,
+                            score: s,
+                            beta,
+                            alpha,
+                            best_move: _
+                        }) = r {
 
-                return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
-            }
+                match s {
+                    Score::INFINITE => {
+                        if env.display_evalute_score {
+                            self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
+                        }
 
-            {
-                let r = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone());
+                        let mut mvs = VecDeque::new();
 
-                if let Some(TTPartialEntry {
-                                depth: d,
-                                score: s,
-                                beta,
-                                alpha,
-                                best_move: _
-                            }) = r {
+                        mvs.push_front(m);
 
-                    match s {
-                        Score::INFINITE => {
-                            if env.display_evalute_score {
-                                self.send_message(env, "score corresponding to the hash was found in the map. value is infinite.")?;
-                            }
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
+                    },
+                    Score::NEGINFINITE => {
+                        if env.display_evalute_score {
+                            self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
+                        }
 
-                            let mut mvs = VecDeque::new();
+                        let mut mvs = VecDeque::new();
 
-                            mvs.push_front(m);
+                        mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone())));
-                        },
-                        Score::NEGINFINITE => {
-                            if env.display_evalute_score {
-                                self.send_message(env, "score corresponding to the hash was found in the map. value is neginfinite.")?;
-                            }
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone())));
+                    },
+                    Score::Value(s) if d as u32 >= gs.depth && beta >= gs.beta && alpha <= gs.alpha => {
+                        if env.display_evalute_score {
+                            self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
+                        }
 
-                            let mut mvs = VecDeque::new();
+                        let mut mvs = VecDeque::new();
 
-                            mvs.push_front(m);
+                        mvs.push_front(m);
 
-                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone())));
-                        },
-                        Score::Value(s) if d as u32 >= gs.depth && beta >= gs.beta && alpha <= gs.alpha => {
-                            if env.display_evalute_score {
-                                self.send_message(env, &format!("score corresponding to the hash was found in the map. value is {}.", s))?;
-                            }
-
-                            let mut mvs = VecDeque::new();
-
-                            mvs.push_front(m);
-
-                            return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
-                        },
-                        _ => ()
-                    }
+                        return Ok(BeforeSearchResult::Complete(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone())));
+                    },
+                    _ => ()
                 }
             }
         }
