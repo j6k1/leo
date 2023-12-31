@@ -55,6 +55,12 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }
         }).collect::<Vec<LegalMove>>();
 
+        if mvs.len() == 0 {
+            return alpha;
+        }
+
+        let mut bestscore = Score::NEGINFINITE;
+
         for m in mvs {
             if let Some(ObtainKind::Ou) = match m {
                 LegalMove::To(m) => m.obtained(),
@@ -71,12 +77,16 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 return score;
             }
 
+            if score > bestscore {
+                bestscore = score;
+            }
+
             if score > alpha {
                 alpha = score;
             }
         }
 
-        alpha
+        bestscore
     }
 
     fn inter_process<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
