@@ -55,10 +55,6 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             }
         }).collect::<Vec<LegalMove>>();
 
-        if mvs.len() == 0 {
-            return alpha;
-        }
-
         for m in mvs {
             if let Some(ObtainKind::Ou) = match m {
                 LegalMove::To(m) => m.obtained(),
